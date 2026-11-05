@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { DayFixture } from './fixture-types.js';
+import type { DayFixture, MockCalendar } from './fixture-types.js';
 
-export type { DayFixture, PlaceFixture, ScheduleFixture } from './fixture-types.js';
+export type { DayFixture, MockCalendar, PlaceFixture, ScheduleFixture } from './fixture-types.js';
 
 /** 저장소 루트 fixtures/schedules/gwangju-day.json. 이 파일 기준 상대 경로로 푼다(src와 dist 모두 server/ 아래). */
 export const DEFAULT_FIXTURE_URL = new URL('../../fixtures/schedules/gwangju-day.json', import.meta.url);
@@ -19,14 +19,51 @@ export function resolveFixtureLocation(fixturePath: string | undefined): URL | s
   return isAbsolute(fixturePath) ? fixturePath : fileURLToPath(new URL(fixturePath, REPO_ROOT_URL));
 }
 
-export function loadDayFixture(location: URL | string = DEFAULT_FIXTURE_URL): DayFixture {
+/** 저장소 루트 fixtures/calendars/mock-device.json. 폰 앱의 목 캘린더 목록과 같은 파일이다. */
+export const MOCK_CALENDARS_URL = new URL('../../fixtures/calendars/mock-device.json', import.meta.url);
+
+export function parseMockCalendars(value: unknown): MockCalendar[] {
+  const list = (value as { calendars?: unknown } | null)?.calendars;
+  if (!Array.isArray(list) || list.length === 0) {
+    throw new Error('목 캘린더 형식이 올바르지 않습니다: calendars 배열이 필요합니다');
+  }
+  const ids = new Set<string>();
+  for (const c of list) {
+    const ok =
+      typeof c?.id === 'string' &&
+      c.id !== '' &&
+      typeof c.name === 'string' &&
+      typeof c.account === 'string' &&
+      typeof c.color === 'string' &&
+      typeof c.defaultSelected === 'boolean';
+    if (!ok) throw new Error(`목 캘린더 항목 형식이 올바르지 않습니다: ${JSON.stringify(c)}`);
+    if (ids.has(c.id)) throw new Error(`목 캘린더 id가 중복되었습니다: ${JSON.stringify(c.id)}`);
+    ids.add(c.id);
+  }
+  return list as MockCalendar[];
+}
+
+export function loadMockCalendars(location: URL | string = MOCK_CALENDARS_URL): MockCalendar[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(location, 'utf8'));
+  } catch (e) {
+    throw new Error(`목 캘린더를 읽을 수 없습니다(${String(location)}): ${(e as Error).message}`);
+  }
+  return parseMockCalendars(parsed);
+}
+
+export function loadDayFixture(
+  location: URL | string = DEFAULT_FIXTURE_URL,
+  calendars: MockCalendar[] = loadMockCalendars(),
+): DayFixture {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(location, 'utf8'));
   } catch (e) {
     throw new Error(`픽스처를 읽을 수 없습니다(${String(location)}): ${(e as Error).message}`);
   }
-  return parseDayFixture(parsed);
+  return parseDayFixture(parsed, calendars);
 }
 
 /** 시작·종료 오프셋(분)의 허용 범위. ±7일 */
@@ -46,15 +83,17 @@ function isPlace(v: unknown): boolean {
   );
 }
 
-export function parseDayFixture(value: unknown): DayFixture {
+export function parseDayFixture(value: unknown, calendars: MockCalendar[] = loadMockCalendars()): DayFixture {
   const root = value as Partial<DayFixture> | null;
   if (!root || typeof root.id !== 'string' || typeof root.name !== 'string' || !Array.isArray(root.schedules)) {
     throw new Error('픽스처 형식이 올바르지 않습니다: id, name, schedules가 필요합니다');
   }
   const ids = new Set<string>();
+  const calendarIds = new Set(calendars.map((c) => c.id));
   for (const s of root.schedules) {
     const ok =
       typeof s?.id === 'string' &&
+      typeof s.calendarId === 'string' &&
       typeof s.title === 'string' &&
       Number.isFinite(s.startOffsetMinutes) &&
       Number.isFinite(s.endOffsetMinutes) &&
@@ -73,6 +112,9 @@ export function parseDayFixture(value: unknown): DayFixture {
       throw new Error(`픽스처 일정 id는 비어 있지 않고 서로 달라야 합니다: ${JSON.stringify(s.id)}`);
     }
     ids.add(s.id);
+    if (!calendarIds.has(s.calendarId)) {
+      throw new Error(`픽스처 일정 calendarId가 목 캘린더 id에 없습니다: ${JSON.stringify(s.calendarId)}`);
+    }
     const inRange = (m: number) => Number.isInteger(m) && Math.abs(m) <= MAX_OFFSET_MINUTES;
     if (!inRange(s.startOffsetMinutes) || !inRange(s.endOffsetMinutes) || s.endOffsetMinutes < s.startOffsetMinutes) {
       throw new Error(

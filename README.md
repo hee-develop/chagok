@@ -23,18 +23,40 @@ pnpm install           # 루트에서 실행
 ## 서버
 
 ```bash
-pnpm server:dev        # http://localhost:8787 , GET /health → {"ok":true}
+pnpm server:dev        # http://127.0.0.1:8787 , GET /health → {"ok":true}
 pnpm server:test
 pnpm typecheck         # 서버와 폰 앱 타입체크
 ```
 
+서버는 기본으로 `127.0.0.1`에만 바인딩합니다. 같은 네트워크의 다른 기기에서 접근해야 할 때만 `HOST=0.0.0.0`으로 엽니다. Android 에뮬레이터의 `10.0.2.2`는 호스트 루프백으로 연결되므로 기본값으로 접근됩니다.
+
+- 목 캘린더 6개는 `fixtures/calendars/mock-device.json` 한 파일이 단일 출처이고, 폰 앱과 서버가 같은 파일을 읽습니다.
+- `PUT /calendars/selection`은 `{ selectedIds, revision }`을 받아 저장하고(`GET`으로 조회), `GET /schedules/today`는 저장된 선택(없으면 `defaultSelected`) 캘린더의 일정만 내려줍니다. 일정의 `calendarId`는 `fixtures/schedules/gwangju-day.json`에 있습니다.
+- `revision`은 폰이 보내는 단조 증가 정수이고, 서버는 저장된 값보다 작은 요청을 저장하지 않고 현재 저장값을 200으로 돌려줍니다. 저장 중 '나중에 할게요'로 취소한 요청도 서버에는 이미 반영됐을 수 있습니다.
+
 ## 폰 앱
+
+검증(단위 테스트 외 E2E·스크린샷)은 Android 기준입니다. iOS는 검증하지 않습니다.
 
 ```bash
 pnpm phone:start       # Expo Go 앱으로 QR 스캔
+pnpm phone:test        # jest-expo + @testing-library/react-native 단위 테스트
+pnpm typecheck         # 서버와 폰 앱 타입체크
+pnpm e2e:phone         # Android E2E (아래)
 ```
 
-서버 주소는 `EXPO_PUBLIC_API_URL`로 바꿀 수 있고, 없으면 `http://localhost:8787`을 씁니다.
+서버 주소는 `EXPO_PUBLIC_API_URL`로 바꿀 수 있고, 없으면 `http://localhost:8787`을 씁니다. Android 에뮬레이터에서는 호스트가 `10.0.2.2`입니다.
+
+라우트는 `phone/src/app/`(Expo Router)에 있고, 첫 설정 1단계는 `src/features/calendar-select/`입니다. 캘린더 데이터는 `CalendarSource` 인터페이스의 목 구현이며, 고른 결과는 서버에 저장하고 화면을 다시 열면 서버에서 복원합니다. 폰 앱은 Android·iOS 네이티브만 대상으로 하며 웹 타깃은 없습니다(`.pnpmfile.cjs`가 `react-dom` peer를 제거합니다).
+
+### E2E (Android)
+
+`pnpm e2e:phone`은 AVD `Pixel_10_Pro_XL`을 `-port 5556`(`emulator-5556`)으로 띄우고(이미 떠 있으면 그대로 사용), Expo Go를 설치한 뒤 서버(기본 8788)와 Metro(기본 8082)를 띄워 `e2e/maestro/phone/calendar-select.yaml`을 실행합니다. 끝나면 서버·Metro와 스크립트가 띄운 에뮬레이터를 정리합니다. `emulator-5554`(Pleos 차량 에뮬레이터)는 건드리지 않습니다.
+
+- 스크린샷: `.e2e-shots/phone/` (`E2E_SHOT_DIR`로 변경. 저장소 루트 아래만 허용)
+- flow는 KIA 선택 저장 전후로 `GET /schedules/today`에 `KIA vs 두산`이 없다가 생기는지도 확인합니다
+- Maestro는 `~/.maestro/bin/maestro`를 씁니다(`MAESTRO`로 변경)
+- 포트·AVD 등은 `scripts/e2e-phone.sh` 상단 주석 참고
 
 ## 차량 앱
 

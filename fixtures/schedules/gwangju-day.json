@@ -4,6 +4,7 @@
   "schedules": [
     {
       "id": "gwangju-allday",
+      "calendarId": "mock-my",
       "title": "광주 직관",
       "startOffsetMinutes": 0,
       "endOffsetMinutes": 1440,
@@ -15,6 +16,7 @@
     },
     {
       "id": "gwangju-lunch",
+      "calendarId": "mock-family",
       "title": "육전집 점심",
       "startOffsetMinutes": 220,
       "endOffsetMinutes": 280,
@@ -26,6 +28,7 @@
     },
     {
       "id": "gwangju-kia",
+      "calendarId": "mock-my",
       "title": "KIA 직관",
       "startOffsetMinutes": 460,
       "endOffsetMinutes": 640,
@@ -37,12 +40,25 @@
     },
     {
       "id": "gwangju-kongmul",
+      "calendarId": "mock-work",
       "title": "콩물 픽업",
       "startOffsetMinutes": 700,
       "endOffsetMinutes": 760,
       "allDay": false,
       "locationText": "단골 콩물집",
       "place": { "name": "단골 콩물집", "lat": 35.146, "lng": 126.922 },
+      "memo": null,
+      "attendees": []
+    },
+    {
+      "id": "gwangju-kia-doosan",
+      "calendarId": "mock-kia",
+      "title": "KIA vs 두산",
+      "startOffsetMinutes": 550,
+      "endOffsetMinutes": 690,
+      "allDay": false,
+      "locationText": "광주-기아 챔피언스필드",
+      "place": { "name": "광주-기아 챔피언스필드", "lat": 35.1681, "lng": 126.8888 },
       "memo": null,
       "attendees": []
     }

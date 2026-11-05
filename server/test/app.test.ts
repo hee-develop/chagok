@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
-import { loadDayFixture } from '../src/fixtures.js';
+import { loadDayFixture, loadMockCalendars } from '../src/fixtures.js';
 
-const fixture = loadDayFixture();
-const app = createApp(fixture);
+const calendars = loadMockCalendars();
+const fixture = loadDayFixture(undefined, calendars);
+const app = createApp(fixture, calendars);
 
 describe('GET /health', () => {
   it('200과 { ok: true }를 돌려준다', async () => {
@@ -24,7 +25,7 @@ describe('GET /schedules/today', () => {
       schedules: { id: string; title: string; start: string; end: string; allDay: boolean; place: unknown; memo: string | null }[];
     };
     expect(body.anchor).toBe('2026-11-06T00:20:00.000Z');
-    expect(body.schedules).toHaveLength(fixture.schedules.length);
+    expect(body.schedules.map((x) => x.id)).toEqual(['gwangju-allday', 'gwangju-lunch', 'gwangju-kia', 'gwangju-kongmul']);
 
     const lunch = body.schedules.find((s) => s.id === 'gwangju-lunch');
     expect(lunch).toMatchObject({
@@ -80,5 +81,54 @@ describe('GET /schedules/today at 경계값', () => {
   it.each(['2028-02-29T09:20:00Z', '2026-11-06T23:59:59+09:00', '2026-11-06T00:00Z', '0000-02-29T00:00:00Z', '0096-02-29T00:00:00Z'])('유효한 at(%s)은 200', async (ok) => {
     const res = await app.request(`/schedules/today?at=${encodeURIComponent(ok)}`);
     expect(res.status).toBe(200);
+  });
+});
+
+describe('GET /schedules/today 캘린더 선택 반영', () => {
+  const at = encodeURIComponent('2026-11-06T09:20:00+09:00');
+  const ids = async (a: ReturnType<typeof createApp>) => {
+    const res = await a.request(`/schedules/today?at=${at}`);
+    return ((await res.json()) as { schedules: { id: string }[] }).schedules.map((x) => x.id);
+  };
+  const select = (a: ReturnType<typeof createApp>, selectedIds: string[]) =>
+    a.request('/calendars/selection', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ selectedIds, revision: 1 }),
+    });
+
+  it('저장 전에는 기본 선택 캘린더의 일정만 내려준다(KIA 구독 일정 제외)', async () => {
+    expect(await ids(createApp(fixture, calendars))).toEqual(['gwangju-allday', 'gwangju-lunch', 'gwangju-kia', 'gwangju-kongmul']);
+  });
+
+  it('KIA 캘린더를 더해 저장하면 KIA vs 두산이 포함된다', async () => {
+    const a = createApp(fixture, calendars);
+    expect((await select(a, ['mock-my', 'mock-work', 'mock-family', 'mock-kia'])).status).toBe(200);
+    const list = await ids(a);
+    expect(list).toContain('gwangju-kia-doosan');
+    expect(list).toHaveLength(5);
+    const res = await a.request(`/schedules/today?at=${at}`);
+    const doosan = ((await res.json()) as { schedules: { id: string; title: string; start: string; locationText: string }[] }).schedules.find(
+      (x) => x.id === 'gwangju-kia-doosan',
+    );
+    expect(doosan).toMatchObject({ title: 'KIA vs 두산', start: '2026-11-06T09:30:00.000Z', locationText: '광주-기아 챔피언스필드' });
+  });
+
+  it('저장한 캘린더의 일정만 내려준다', async () => {
+    const a = createApp(fixture, calendars);
+    await select(a, ['mock-kia']);
+    expect(await ids(a)).toEqual(['gwangju-kia-doosan']);
+  });
+
+  it('일정이 없는 캘린더만 고르면 빈 목록이다', async () => {
+    const a = createApp(fixture, calendars);
+    await select(a, ['mock-holidays']);
+    expect(await ids(a)).toEqual([]);
+  });
+
+  it('앱 인스턴스마다 선택을 따로 가진다', async () => {
+    const a = createApp(fixture, calendars);
+    await select(a, ['mock-kia']);
+    expect(await ids(createApp(fixture, calendars))).toHaveLength(4);
   });
 });

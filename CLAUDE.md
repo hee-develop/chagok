@@ -12,6 +12,15 @@ Pleos Connect(현대차그룹 AAOS 기반 인포테인먼트) 차량 앱 사이�
 - `e2e/`: Maestro flow(`e2e/maestro/car/`). 산출물은 `e2e/output/`(git 제외)
 - JS 쪽(`phone/`, `server/`)은 pnpm 워크스페이스로 묶여 있습니다. 설치는 루트에서 `pnpm install`로 하고, 폰 앱은 서버의 라우트 타입(`AppType`)을 Hono RPC 클라이언트로 가져다 씁니다.
 
+## 폰 앱·서버(JS)
+
+- 설치는 루트에서 `pnpm install`. Expo 패키지는 `pnpm exec expo install`로 추가하고, 라우트는 `phone/src/app/`(Expo Router)에 둡니다.
+- 확인: `pnpm typecheck`, `pnpm server:test`, `pnpm phone:test`. E2E는 `pnpm e2e:phone`(Maestro, Expo Go).
+- 검증은 Android 기준입니다. Android 에뮬레이터는 `Pixel_10_Pro_XL`을 `-port 5556`으로 쓰고, `emulator-5554`(Pleos 차량 에뮬레이터)는 건드리지 않습니다. adb는 항상 `-s`로 기기를 지정합니다.
+- 웹 타깃을 다시 넣을 때는 `.pnpmfile.cjs` 훅을 지우고 다시 설치한다(react-dom이 자동 설치되는 버전이 SDK 58의 react와 맞지 않아 훅으로 제거해 두었다).
+- 목 캘린더는 `fixtures/calendars/mock-device.json`이 단일 출처입니다(폰 앱·서버 공용). 일정 픽스처를 바꾸면 차량 테스트 도우미(`FixtureResponses`)가 같은 기본 선택 규칙을 따릅니다.
+- 서버 라우트는 `server/src/routes/`에 파일별로 두고 `app.ts`에서 `.route()`로 체이닝 연결해 RPC 타입 추론을 유지합니다.
+
 ## Pleos 설계 가이드 점검
 
 차량 앱(`car/`) 코드는 [Pleos Connect 앱 설계 가이드](https://document.pleos.ai/docs/pleos-only/vehicle-app-planning-guide/intro)와 [앱 개발 가이드](https://document.pleos.ai/docs/pleos-only/vehicle-app-developer-guide/intro)를 따라야 합니다. 준수 여부는 `pleos-guide-checker` 에이전트로 점검합니다.

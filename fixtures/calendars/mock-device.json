@@ -1,0 +1,10 @@
+{
+  "calendars": [
+    { "id": "mock-my", "name": "내 캘린더", "account": "삼성 계정", "color": "#3367d6", "defaultSelected": true },
+    { "id": "mock-work", "name": "회사", "account": "구글 · 회사 계정", "color": "#2f8a4e", "defaultSelected": true },
+    { "id": "mock-family", "name": "우리 가족", "account": "공유 캘린더", "color": "#c2662d", "defaultSelected": true },
+    { "id": "mock-holidays", "name": "대한민국 공휴일", "account": "구독", "color": "#7d7d7d", "defaultSelected": false },
+    { "id": "mock-birthdays", "name": "생일", "account": "연락처", "color": "#7d7d7d", "defaultSelected": false },
+    { "id": "mock-kia", "name": "KIA 타이거즈 경기", "account": "구독", "color": "#c8102e", "defaultSelected": false }
+  ]
+}
