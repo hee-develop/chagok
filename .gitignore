@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Android (car/)
+car/.gradle/
+car/.kotlin/
+car/build/
+car/app/build/
+car/local.properties
+car/.idea/
+*.iml
+captures/
+
+# phone/ 은 phone/.gitignore 를 따른다
+
+# JS 워크스페이스 (루트/server)
+node_modules/
+server/dist/
+.env
+.env.*
+!.env.example

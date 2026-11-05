@@ -1,0 +1,14 @@
+{
+  "name": "chagok",
+  "private": true,
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "server:dev": "pnpm --filter @chagok/server dev",
+    "server:test": "pnpm --filter @chagok/server test",
+    "phone:start": "pnpm --filter @chagok/phone start",
+    "typecheck": "pnpm -r --workspace-concurrency=1 exec tsc --noEmit"
+  }
+}
