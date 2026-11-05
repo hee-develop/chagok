@@ -8,6 +8,8 @@ Pleos Connect(현대차그룹 AAOS 기반 인포테인먼트) 차량 앱 사이�
 - `phone/`: 휴대폰 앱. React Native(Expo). 패키지는 `@chagok/phone`
 - `server/`: 서버. TypeScript + Hono, Node 런타임. 패키지는 `@chagok/server`
 - `docs/`: 기획·설계 문서
+- `fixtures/`: 서버와 차량 앱 테스트가 함께 쓰는 목 데이터(`fixtures/schedules/gwangju-day.json`)
+- `e2e/`: Maestro flow(`e2e/maestro/car/`). 산출물은 `e2e/output/`(git 제외)
 - JS 쪽(`phone/`, `server/`)은 pnpm 워크스페이스로 묶여 있습니다. 설치는 루트에서 `pnpm install`로 하고, 폰 앱은 서버의 라우트 타입(`AppType`)을 Hono RPC 클라이언트로 가져다 씁니다.
 
 ## Pleos 설계 가이드 점검
@@ -27,3 +29,15 @@ Pleos Connect(현대차그룹 AAOS 기반 인포테인먼트) 차량 앱 사이�
   - FAQ: 앱이 `product.sw.target_region`으로 지역별 UX 정책을 직접 적용해야 한다.
   - 주행 규제 개발 가이드: 플랫폼이 지역에 맞는 `ActiveRestrictions`를 내려주므로 앱은 그것만 반영하면 된다.
   - 그래서 지역 코드로 분기하는 코드는 위반으로 보지 않고 "확인 필요"로 다룹니다.
+
+## 테스트와 E2E
+
+- 서버: `pnpm server:test`, 전체 타입체크: `pnpm typecheck`
+- 차량 앱 단위: `cd car && ./gradlew :app:testDebugUnitTest`
+- 차량 앱 계측 E2E(에뮬레이터 필요, 서버 불필요): `cd car && ANDROID_SERIAL=emulator-5554 ./gradlew :app:connectedDebugAndroidTest`
+- 차량 앱 Maestro E2E: `pnpm e2e:car` (debug 앱 설치, 서버 기동·종료까지 스크립트 `scripts/e2e-car.sh`가 한다. 서버는 watch 없이 `tsx src/index.ts`로 띄우고 프로세스 그룹째 종료한다). `E2E_FRESH_INSTALL=1 pnpm e2e:car`는 앱을 지우고 설치한 상태로 돈다. Maestro가 PATH에 없으면 `~/.maestro/bin/maestro`를 쓴다
+- Maestro가 통과해도 원하는 화면이 떴는지는 이번 실행 폴더의 `e2e/output/car/<실행 시각>/shots/*.png`를 열어 눈으로 확인한다. 실행마다 폴더가 새로 생기므로 과거 실행분과 섞이지 않는다
+- 신호 주입(`chagok-debug://signal?...`, `SignalInjectActivity`)과 평문 HTTP 허용(network security config)은 `car/app/src/debug`에만 둔다. release 빌드에 들어가면 안 된다. 신호 주입 Activity는 호출자가 `android.permission.DUMP`를 가져야 해서 adb shell(Maestro `openLink` 포함)만 부를 수 있다
+- 가로·세로 창 확인: `adb shell am task resize <taskId> <left> <top> <right> <bottom>`으로 앱 창 크기를 바꾼다(taskId는 `adb shell dumpsys activity activities`의 `Task{… #<id> … com.chagok.car`). Pleos 에뮬레이터의 한 칸 창은 너비 약 848(portrait), 두 칸 창은 약 1682(landscape)다
+- Maestro에서 `clearState`는 쓰지 않는다. 이 에뮬레이터는 앱이 사용자 10에서 돌아 데이터가 지워지지 않는다. 상태 초기화는 `chagok-debug://signal?now=...`(데모 초기화)로 한다
+- Maestro `assertVisible` 글자는 정규식 전체 일치다. 줄바꿈이 낀 문장은 `.*...*`로 받고, 시각·시간 사이 공백은 NBSP라 `.`로 받는다

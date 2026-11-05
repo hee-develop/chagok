@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 曲 달력 심볼. preview.html의 인라인 SVG(viewBox 100x100, 선 10)를 옮긴 것. ink 색이라 테마를 따른다. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <!-- 달력 몸통 rect x10 y26 w80 h62 rx8 -->
+    <path
+        android:pathData="M18,26H82A8,8 0 0 1 90,34V80A8,8 0 0 1 82,88H18A8,8 0 0 1 10,80V34A8,8 0 0 1 18,26Z"
+        android:strokeColor="@color/ink"
+        android:strokeWidth="10"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 고리 두 획과 가운데 가로선 -->
+    <path
+        android:pathData="M37,10V88M63,10V88M10,57H90"
+        android:strokeColor="@color/ink"
+        android:strokeWidth="10"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 채운 한 칸: 지금 챙길 다음 일정 -->
+    <path
+        android:pathData="M72.5,64H80.5A2.5,2.5 0 0 1 83,66.5V78.5A2.5,2.5 0 0 1 80.5,81H72.5A2.5,2.5 0 0 1 70,78.5V66.5A2.5,2.5 0 0 1 72.5,64Z"
+        android:fillColor="@color/ink" />
+</vector>

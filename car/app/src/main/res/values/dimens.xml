@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    차곡 간격·모서리·크기 토큰(tokens.json). 값은 "차곡 창 너비 800px 기준"의 디자인 px이고 dp 단위로 적어 두었다.
+    실제 크기는 ui/DesignScale이 창 너비로 구한 배율을 곱해서 쓴다. 이 값을 직접 View에 넣지 않는다.
+-->
+<resources>
+    <!-- 간격 -->
+    <dimen name="space_2xs">6dp</dimen>
+    <dimen name="space_xs">8dp</dimen>
+    <dimen name="space_s">12dp</dimen>
+    <dimen name="space_m">14dp</dimen>
+    <dimen name="space_l">16dp</dimen>
+    <dimen name="space_xl">20dp</dimen>
+    <dimen name="space_2xl">24dp</dimen>
+    <dimen name="space_3xl">32dp</dimen>
+    <dimen name="space_4xl">36dp</dimen>
+    <!-- 모서리 -->
+    <dimen name="radius_s">10dp</dimen>
+    <dimen name="radius_m">12dp</dimen>
+    <dimen name="radius_l">18dp</dimen>
+    <dimen name="radius_xl">24dp</dimen>
+    <dimen name="radius_2xl">28dp</dimen>
+    <dimen name="radius_pill">999dp</dimen>
+    <!-- 크기 -->
+    <dimen name="size_button">68dp</dimen>
+    <dimen name="size_check">68dp</dimen>
+    <dimen name="size_chip">60dp</dimen>
+    <dimen name="size_mark">48dp</dimen>
+    <dimen name="size_mark_s">40dp</dimen>
+    <dimen name="size_logo_min">24dp</dimen>
+    <dimen name="size_card_w">800dp</dimen>
+    <dimen name="size_card_h">592dp</dimen>
+    <!-- 컴포넌트 규격(README) -->
+    <dimen name="button_pad_primary">36dp</dimen>
+    <dimen name="button_pad_secondary">28dp</dimen>
+    <dimen name="button_stroke">1.5dp</dimen>
+    <dimen name="hairline">1dp</dimen>
+    <dimen name="chip_pad_left">10dp</dimen>
+    <dimen name="chip_pad_right">24dp</dimen>
+    <dimen name="status_pad_v">8dp</dimen>
+    <dimen name="status_pad_h">16dp</dimen>
+    <dimen name="symbol_in_mark">30dp</dimen>
+    <dimen name="symbol_in_mark_s">26dp</dimen>
+    <dimen name="wordmark_w">55dp</dimen>
+    <dimen name="wordmark_h">26dp</dimen>
+    <dimen name="voice_w">40dp</dimen>
+    <dimen name="voice_h">24dp</dimen>
+    <dimen name="voice_bar">3dp</dimen>
+    <dimen name="care_tag_h">38dp</dimen>
+    <dimen name="care_tag_pad">14dp</dimen>
+    <dimen name="care_tag_stroke">1.5dp</dimen>
+    <dimen name="tile_gap">6dp</dimen>
+    <dimen name="tile_care_gap">10dp</dimen>
+    <dimen name="hint_gap">2dp</dimen>
+    <dimen name="card_enter_offset">90dp</dimen>
+    <dimen name="ducking_icon">18dp</dimen>
+    <dimen name="ducking_text">16dp</dimen>
+    <dimen name="dismiss_bar_h">6dp</dimen>
+    <dimen name="shadow_card_blur">60dp</dimen>
+    <dimen name="shadow_card_dy">24dp</dimen>
+    <dimen name="press_ring">6dp</dimen>
+    <!-- 기준 창 -->
+    <dimen name="ref_window_w">800dp</dimen>
+    <dimen name="ref_window_h">640dp</dimen>
+</resources>
