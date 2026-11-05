@@ -5,12 +5,30 @@
         android:name="android.hardware.type.automotive"
         android:required="true" />
 
+    <!-- 기어·시동(AAOS CarPropertyManager) -->
+    <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
+
+    <!-- NaviHelper 소요 시간 조회(requestTrip), TTS -->
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE_SEARCH" />
+    <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
+        android:name=".ChagokApp"
         android:allowBackup="false"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault">
+        android:theme="@style/Theme.Chagok">
 
+        <!-- CCP(회전식 컨트롤러) 미지원 선언. 터치·음성만으로 조작한다 -->
+        <meta-data
+            android:name="com.hmg.rotary.ROTARY_SUPPORTED"
+            android:value="false" />
+
+        <!-- screenOrientation은 지정하지 않는다. 지정하지 않으면 portrait(window 한 칸)로 열리고,
+             이미 landscape 앱이 떠 있으면 landscape(window 두 칸)로 열린다. 화면은 두 방향 모두 같은 카드를 쓴다 -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -18,6 +36,11 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- 주행 중에는 카드를 접고 화면에 아무것도 말하거나 띄우지 않으므로 DO로 선언한다 -->
+            <meta-data
+                android:name="distractionOptimized"
+                android:value="true" />
         </activity>
     </application>
 </manifest>

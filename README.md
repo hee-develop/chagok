@@ -59,3 +59,17 @@ adb -s emulator-5554 shell am start -n com.chagok.car/.MainActivity
 ```
 
 Android Studio에서는 `car/` 폴더를 열고 Run 하면 된다.
+
+## 테스트
+
+| 종류 | 명령 | 필요한 것 |
+| --- | --- | --- |
+| 서버 단위 | `pnpm server:test` | |
+| 타입체크 | `pnpm typecheck` | |
+| 차량 앱 단위(JVM) | `pnpm car:test` 또는 `cd car && ./gradlew :app:testDebugUnitTest` | |
+| 차량 앱 계측 E2E | `cd car && ANDROID_SERIAL=emulator-5554 ./gradlew :app:connectedDebugAndroidTest` | 에뮬레이터. 가짜 신호·고정 시계(09:20)·픽스처 일정을 쓰므로 서버는 필요 없다 |
+| 차량 앱 Maestro E2E | `pnpm e2e:car` | 에뮬레이터, [Maestro](https://get.maestro.mobile.dev) |
+
+- `pnpm e2e:car`는 debug 앱 설치 → 서버(watch 없이 `tsx src/index.ts`, 8787) 시작 → `e2e/maestro/car/boarding-briefing.yaml` 실행 → 서버 종료(프로세스 그룹째)를 한다. 에뮬레이터 시간대를 서울로 잠시 바꿨다가 되돌린다(원래 값이 비어 있었으면 UTC로 두고 비운다). 스크린샷은 실행마다 새로 만드는 `e2e/output/car/<실행 시각>/shots/`(git 제외)에 남는다. `E2E_FRESH_INSTALL=1`을 주면 앱을 지우고 설치한 상태로 돈다. 기기가 여럿이면 `ANDROID_SERIAL`을 지정한다.
+- 일정 데이터는 `fixtures/schedules/gwangju-day.json`(프로토타입 '광주 직관 하루')이고, 기본값은 저장소 루트의 `fixtures/` 아래 이 파일이다. `FIXTURE_PATH`로 바꿀 수 있고, 절대 경로는 그대로, 상대 경로는 작업 폴더가 아니라 **저장소 루트 기준**으로 읽는다(예: `FIXTURE_PATH=fixtures/schedules/gwangju-day.json`). 형식이 틀리면(place의 lat·lng 숫자, memo·locationText 문자열 또는 null, attendees 문자열 배열) 서버가 시작할 때 오류로 멈춘다. 서버가 시작할 때 읽어 `GET /schedules/today?at=<ISO8601>`로 내려준다. 차량 앱 단위·계측 테스트도 같은 파일을 읽는다.
+- debug 빌드에만 신호 주입 통로가 있다. `adb shell am start -a android.intent.action.VIEW -d "chagok-debug://signal?gear=D"`처럼 `now`(ISO8601, 데모 시계·초기화), `gear`(P·R·N·D), `ignition`, `restricted`, `enter`, `board`를 줄 수 있다. debug 빌드만 평문 HTTP로 `10.0.2.2:8787`(PC의 서버)에 붙는다.

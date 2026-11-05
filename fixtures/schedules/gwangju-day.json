@@ -1,0 +1,56 @@
+{
+  "id": "gwangju-day",
+  "name": "광주 직관 하루",
+  "schedules": [
+    {
+      "id": "gwangju-allday",
+      "title": "광주 직관",
+      "startOffsetMinutes": 0,
+      "endOffsetMinutes": 1440,
+      "allDay": true,
+      "locationText": null,
+      "place": null,
+      "memo": null,
+      "attendees": []
+    },
+    {
+      "id": "gwangju-lunch",
+      "title": "육전집 점심",
+      "startOffsetMinutes": 220,
+      "endOffsetMinutes": 280,
+      "allDay": false,
+      "locationText": "광주 육전집",
+      "place": { "name": "광주 육전집", "lat": 35.1595, "lng": 126.8526 },
+      "memo": "유니폼·응원봉·티켓",
+      "attendees": []
+    },
+    {
+      "id": "gwangju-kia",
+      "title": "KIA 직관",
+      "startOffsetMinutes": 460,
+      "endOffsetMinutes": 640,
+      "allDay": false,
+      "locationText": "광주-기아 챔피언스필드",
+      "place": { "name": "광주-기아 챔피언스필드", "lat": 35.1681, "lng": 126.8888 },
+      "memo": "유니폼·응원봉·티켓",
+      "attendees": []
+    },
+    {
+      "id": "gwangju-kongmul",
+      "title": "콩물 픽업",
+      "startOffsetMinutes": 700,
+      "endOffsetMinutes": 760,
+      "allDay": false,
+      "locationText": "단골 콩물집",
+      "place": { "name": "단골 콩물집", "lat": 35.146, "lng": 126.922 },
+      "memo": null,
+      "attendees": []
+    }
+  ],
+  "favorites": [
+    { "name": "집", "note": "직접 등록" },
+    { "name": "회사", "note": "도착 1순위" },
+    { "name": "광주-기아 챔피언스필드", "note": "도착 4번" }
+  ],
+  "vehicle": { "batteryPercent": 100, "chargesNeededToday": 1 }
+}

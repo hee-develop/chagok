@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 워드마크 "차곡". preview.html의 인라인 SVG(viewBox 212x100, 선 10)를 옮긴 것. 서체로 다시 쓰지 않는다. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="212dp"
+    android:height="100dp"
+    android:viewportWidth="212"
+    android:viewportHeight="100">
+    <path
+        android:pathData="M32,6V16M8,24H56M32,24Q30,72 8,92M28,56L56,92M76,6V94M76,50H94"
+        android:strokeColor="@color/ink"
+        android:strokeWidth="10"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M126,8H196V28M161,34V52M118,52H204M126,70H196V95"
+        android:strokeColor="@color/ink"
+        android:strokeWidth="10"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

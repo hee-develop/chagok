@@ -9,6 +9,8 @@
     "server:dev": "pnpm --filter @chagok/server dev",
     "server:test": "pnpm --filter @chagok/server test",
     "phone:start": "pnpm --filter @chagok/phone start",
-    "typecheck": "pnpm -r --workspace-concurrency=1 exec tsc --noEmit"
+    "typecheck": "pnpm -r --workspace-concurrency=1 exec tsc --noEmit",
+    "e2e:car": "bash scripts/e2e-car.sh",
+    "car:test": "cd car && ./gradlew :app:testDebugUnitTest"
   }
 }

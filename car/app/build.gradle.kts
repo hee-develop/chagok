@@ -9,8 +9,7 @@ android {
     namespace = "com.chagok.car"
     compileSdk = 36
 
-    // AAOS 표준 Car API(CarPropertyManager, CarUxRestrictionsManager).
-    // 시동·기어·속도·연료 종류·주행 가능 거리는 Pleos Vehicle SDK에 없어서 여기서 읽는다.
+    // AAOS 표준 Car API(CarPropertyManager, CarUxRestrictionsManager)로 시동·기어·주행 제한을 읽는다.
     useLibrary("android.car")
 
     defaultConfig {
@@ -20,11 +19,33 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "com.chagok.car.E2eRunner"
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
+        debug {
+            // 에뮬레이터에서 PC의 서버(pnpm server:dev)에 붙는 주소
+            buildConfigField("String", "SERVER_URL", "\"http://10.0.2.2:8787\"")
+        }
         release {
             isMinifyEnabled = false
+            buildConfigField("String", "SERVER_URL", "\"https://chagok.invalid\"")
+        }
+    }
+
+    sourceSets {
+        // JVM 단위 테스트와 계측 테스트가 같은 픽스처(저장소 루트 fixtures/)와 도우미를 쓴다.
+        getByName("test") {
+            java.srcDir("src/sharedTest/java")
+            resources.srcDir("../../fixtures")
+        }
+        getByName("androidTest") {
+            java.srcDir("src/sharedTest/java")
+            assets.srcDir("../../fixtures")
         }
     }
 
@@ -48,6 +69,10 @@ dependencies {
     implementation("ai.pleos.playground:SpeechToText:3.3.1")
 
     testImplementation("junit:junit:4.13.2")
-    // JVM 단위 테스트에서는 android.jar의 org.json이 스텁이라 실제 구현을 쓴다(SnapshotCodec 테스트)
+    // JVM 단위 테스트(SnapshotCodec)는 android.jar의 org.json 스텁 대신 이 구현을 쓴다
     testImplementation("org.json:json:20231013")
+
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
 }

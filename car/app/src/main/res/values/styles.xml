@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 차곡 글자 스타일(tokens.json). 크기·줄 높이는 디자인 px이고 ui/DesignScale 배율을 곱해서 쓴다. 굵기는 400·600만 쓴다. -->
+<resources>
+    <style name="Theme.Chagok" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/bg_base</item>
+        <item name="android:statusBarColor">@color/bg_base</item>
+        <item name="android:navigationBarColor">@color/bg_base</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+    <style name="t_base">
+        <item name="android:fontFamily">@font/ibm_plex_sans_kr</item>
+        <item name="android:textFontWeight">400</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+    <!-- t-voice-alert: 46px/600 -->
+    <style name="t_voice_alert" parent="t_base">
+        <item name="android:textSize">46sp</item>
+        <item name="android:lineHeight">57.5sp</item>
+        <item name="android:textFontWeight">600</item>
+        <item name="android:letterSpacing">-0.0109</item>
+    </style>
+    <!-- t-voice: 38px/600 -->
+    <style name="t_voice" parent="t_base">
+        <item name="android:textSize">38sp</item>
+        <item name="android:lineHeight">49.4sp</item>
+        <item name="android:textFontWeight">600</item>
+        <item name="android:letterSpacing">-0.0132</item>
+    </style>
+    <!-- t-voice-sub: 23px/400 -->
+    <style name="t_voice_sub" parent="t_base">
+        <item name="android:textSize">23sp</item>
+        <item name="android:lineHeight">33.35sp</item>
+        <item name="android:textFontWeight">400</item>
+    </style>
+    <!-- t-button: 24px/600 -->
+    <style name="t_button" parent="t_base">
+        <item name="android:textSize">24sp</item>
+        <item name="android:lineHeight">28.8sp</item>
+        <item name="android:textFontWeight">600</item>
+    </style>
+    <!-- t-time: 20px/600 -->
+    <style name="t_time" parent="t_base">
+        <item name="android:textSize">20sp</item>
+        <item name="android:lineHeight">26sp</item>
+        <item name="android:textFontWeight">600</item>
+    </style>
+    <!-- t-chip: 20px/400 -->
+    <style name="t_chip" parent="t_base">
+        <item name="android:textSize">20sp</item>
+        <item name="android:lineHeight">26sp</item>
+        <item name="android:textFontWeight">400</item>
+    </style>
+    <!-- t-body: 18px/400 -->
+    <style name="t_body" parent="t_base">
+        <item name="android:textSize">18sp</item>
+        <item name="android:lineHeight">26.1sp</item>
+        <item name="android:textFontWeight">400</item>
+    </style>
+    <!-- t-status: 17px/400 -->
+    <style name="t_status" parent="t_base">
+        <item name="android:textSize">17sp</item>
+        <item name="android:lineHeight">22.1sp</item>
+        <item name="android:textFontWeight">400</item>
+    </style>
+    <!-- t-label: 15px/400 -->
+    <style name="t_label" parent="t_base">
+        <item name="android:textSize">15sp</item>
+        <item name="android:lineHeight">21.75sp</item>
+        <item name="android:textFontWeight">400</item>
+    </style>
+    <!-- t-meta: 13px/400 -->
+    <style name="t_meta" parent="t_base">
+        <item name="android:textSize">13sp</item>
+        <item name="android:lineHeight">18.2sp</item>
+        <item name="android:textFontWeight">400</item>
+    </style>
+    <!-- 보조 버튼은 t-button 크기에 굵기 400 -->
+    <style name="t_button_regular" parent="t_button">
+        <item name="android:textFontWeight">400</item>
+    </style>
+</resources>

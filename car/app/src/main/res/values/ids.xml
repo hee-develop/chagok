@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- CardMotion의 페이드 진행 표식 -->
+    <item name="card_fade" type="id" />
+    <!-- BriefingCardView의 뷰 ID(계측 테스트가 카드 위치를 찾는다) -->
+    <item name="briefing_card" type="id" />
+</resources>
