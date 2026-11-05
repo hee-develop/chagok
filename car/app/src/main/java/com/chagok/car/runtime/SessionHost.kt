@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import com.chagok.car.BuildConfig
+import com.chagok.car.DebugHooks
 import com.chagok.car.flow.DriveSession
 import com.chagok.car.flow.Effect
 import com.chagok.car.flow.Event
@@ -23,8 +24,12 @@ import java.time.Instant
 /** 화면이 그릴 현재 상태. */
 data class UiState(
     val card: CardContent? = null,
+    /** 카드를 접은 뒤에도 남기는 결과 한 줄. 정차 중에만 화면에 보인다. */
+    val result: String = "",
     /** 차곡이 말하는 동안 true */
     val speaking: Boolean = false,
+    /** 오디오 포커스를 쥐고 볼륨을 낮추는 동안(말하기와 듣기) true */
+    val ducking: Boolean = false,
     /** 카드가 접힐 때 애니메이션 없이 바로 접는다(주행 제한 등). card가 null일 때만 뜻이 있다. */
     val collapseInstantly: Boolean = false,
     /** 주행 중(기어 D·R 또는 주행 제한)이면 true. 화면은 이때 아무것도 말하거나 띄우지 않는다. */
@@ -33,7 +38,7 @@ data class UiState(
 
 /** 세션이 쓰는 SDK 어댑터 묶음. */
 class Adapters(
-    val travel: TravelTimeProvider,
+    val navi: Navigator,
     val voice: Speaker,
     val signals: VehicleSignals,
 )
@@ -53,12 +58,20 @@ class SessionHost(
     private val context: Context,
     val clock: DemoClock = DemoClock(),
     fetcher: ScheduleFetcher = HttpScheduleFetcher(BuildConfig.SERVER_URL),
-    adapters: (post: (Event) -> Unit, onSpeaking: (Boolean) -> Unit, onIgnitionSupport: (Boolean) -> Unit) -> Adapters =
-        { post, onSpeaking, onIgnitionSupport ->
-            Adapters(
-                travel = NaviAdapter(context, post),
-                voice = VoiceAdapter(context, onSpeaking),
-                signals = CarSignals(context, post, onIgnitionSupport),
+    adapters: (
+        post: (Event) -> Unit,
+        onSpeaking: (Boolean) -> Unit,
+        onDucking: (Boolean) -> Unit,
+        onIgnitionSupport: (Boolean) -> Unit,
+    ) -> Adapters =
+        { post, onSpeaking, onDucking, onIgnitionSupport ->
+            DebugHooks.wrap(
+                Adapters(
+                    navi = NaviAdapter(context, post),
+                    voice = VoiceAdapter(context, post, onSpeaking, onDucking),
+                    signals = CarSignals(context, post, onIgnitionSupport),
+                ),
+                post,
             )
         },
 ) {
@@ -77,8 +90,8 @@ class SessionHost(
     /** 이번 이벤트를 처리하는 중 세션이 일정 다시 받기를 요청했는가. 처리가 끝난 뒤 한 번만 받는다. */
     private var refreshRequested = false
 
-    private val parts = adapters(::post, ::onSpeaking, ::onIgnitionSupport)
-    private val navi = parts.travel
+    private val parts = adapters(::post, ::onSpeaking, ::onDucking, ::onIgnitionSupport)
+    private val navi = parts.navi
     private val voice = parts.voice
     private val carSignals = parts.signals
 
@@ -176,9 +189,10 @@ class SessionHost(
 
     private fun execute(effect: Effect) {
         when (effect) {
-            is Effect.ShowCard -> publish(ui.copy(card = effect.card))
+            is Effect.ShowCard -> publish(ui.copy(card = effect.card, result = ""))
             is Effect.CollapseCard -> publish(ui.copy(card = null, collapseInstantly = effect.instant))
-            is Effect.Speak -> voice.speak(effect.text)
+            is Effect.ShowResult -> publish(ui.copy(result = effect.text))
+            is Effect.Speak -> voice.speak(effect.text, effect.thenListen)
             Effect.StopVoice -> voice.stopAll()
             // 이 앞에 StopVoice(재생 중단·포커스 반납)와 Save(상태 저장)가 이미 실행됐다.
             // 시동 신호를 받는 carSignals는 그대로 둔다.
@@ -191,8 +205,11 @@ class SessionHost(
                 voice.start()
             }
             is Effect.RequestTravelTime -> navi.requestTravelTime(effect.requestId, effect.place)
+            is Effect.StartRoute -> post(Event.RouteRequestResult(navi.startRoute(effect.place)))
             is Effect.Save -> store.save(effect.snapshot)
             Effect.RefreshSchedules -> refreshRequested = true
+            is Effect.ScheduleResultTimeout ->
+                main.postDelayed({ post(Event.ResultTimedOut(effect.timerId)) }, effect.delay.toMillis())
             is Effect.ScheduleCardTimeout ->
                 main.postDelayed({ post(Event.CardTimedOut(effect.timerId)) }, effect.delay.toMillis())
         }
@@ -201,6 +218,10 @@ class SessionHost(
     /** TTS 콜백·오디오 포커스 콜백은 어느 스레드에서든 올 수 있어 메인으로 넘겨 화면 상태에 반영한다. */
     private fun onSpeaking(speaking: Boolean) {
         main.post { if (ui.speaking != speaking) publish(ui.copy(speaking = speaking)) }
+    }
+
+    private fun onDucking(ducking: Boolean) {
+        main.post { if (ui.ducking != ducking) publish(ui.copy(ducking = ducking)) }
     }
 
     private fun publish(state: UiState) {

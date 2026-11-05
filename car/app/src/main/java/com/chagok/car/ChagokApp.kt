@@ -25,7 +25,7 @@ open class ChagokApp : Application() {
 
     companion object {
         /**
-         * 런타임(dangerous) 동의가 필요한 권한. 탑승 브리핑이 쓰는 CAR_POWERTRAIN·NAVI_ROUTE·TTS_SERVICE 등은
+         * 런타임(dangerous) 동의가 필요한 권한. 지금 쓰는 CAR_POWERTRAIN·NAVI_ROUTE·NAVI_ROUTE_SEARCH·TTS_SERVICE·STT_SERVICE는
          * 모두 normal이라 비어 있다. dangerous 권한을 쓰는 기능(예: CAR_SPEED, FUSED_LOCATION)이 생기면 여기에 더한다.
          */
         val RUNTIME_PERMISSIONS = emptyList<String>()

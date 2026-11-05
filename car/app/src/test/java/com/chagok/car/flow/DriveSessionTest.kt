@@ -76,7 +76,7 @@ class DriveSessionTest {
     }
 
     @Test
-    fun 첫_탑승은_카드를_띄우고_말한다() {
+    fun 첫_탑승은_카드를_띄우고_말한_뒤_듣는다() {
         val boarded = session.handle(Event.Boarded)
         val request = boarded.one<Effect.RequestTravelTime>()
         assertEquals(gangnam, request.place)
@@ -87,18 +87,19 @@ class DriveSessionTest {
         assertEquals(day, out.one<Effect.Save>().snapshot.log.lastBoardedOn)
         val card = out.one<Effect.ShowCard>().card
         assertEquals("12시 40분 고객 미팅까지 40분이에요.", card.voice)
-        assertEquals("고객 미팅 메모에 ‘계약서 2부’가 있어요. 챙기셨어요?", card.sub)
-        assertNull(card.primary)
-        assertEquals("닫기", card.secondary)
+        assertEquals("고객 미팅 메모에 ‘계약서 2부’가 있어요. 출발할까요?", card.sub)
+        assertEquals("응, 출발", card.primary)
+        assertEquals("잠깐만", card.secondary)
         val speak = out.one<Effect.Speak>()
-        assertEquals("12시 40분 고객 미팅까지 40분이에요. 고객 미팅 메모에 ‘계약서 2부’가 있어요. 챙기셨어요?", speak.text)
+        assertTrue(speak.thenListen)
+        assertEquals("12시 40분 고객 미팅까지 40분이에요. 고객 미팅 메모에 ‘계약서 2부’가 있어요. 출발할까요?", speak.text)
         assertEquals(Rules.CARD_TIMEOUT, out.one<Effect.ScheduleCardTimeout>().delay)
     }
 
     @Test
     fun 소요_시간을_모르면_출발을_제안한다() {
         val out = boardWithCard(travel = null)
-        assertEquals("고객 미팅 메모에 ‘계약서 2부’가 있어요. 챙기셨어요?", out.one<Effect.ShowCard>().card.sub)
+        assertEquals("고객 미팅 메모에 ‘계약서 2부’가 있어요. 출발할까요?", out.one<Effect.ShowCard>().card.sub)
     }
 
     @Test
@@ -163,14 +164,236 @@ class DriveSessionTest {
     }
 
     @Test
-    fun 닫기_버튼은_음성을_멈추고_카드를_접는다() {
-        val timer = boardWithCard().one<Effect.ScheduleCardTimeout>()
-        val out = session.handle(Event.CloseRequested)
+    fun 수락하면_길안내를_요청하고_결과를_알린다() {
+        boardWithCard()
+        val out = session.handle(Event.Heard("응"))
+        assertEquals(gangnam, out.one<Effect.StartRoute>().place)
+        assertTrue(out.has<Effect.CollapseCard>())
+
+        val done = session.handle(Event.RouteRequestResult(true))
+        assertEquals(Effect.Speak("길안내를 시작할게요.", thenListen = false), done.one<Effect.Speak>())
+        assertEquals("길안내를 시작할게요.", done.one<Effect.ShowResult>().text)
+    }
+
+    @Test
+    fun 수락은_음성을_한_번만_멈춘다() {
+        boardWithCard()
+        assertEquals(1, session.handle(Event.PrimaryPressed).count { it is Effect.StopVoice })
+        newSession()
+        boardWithCard()
+        assertEquals(1, session.handle(Event.Heard("응")).count { it is Effect.StopVoice })
+        newSession()
+        boardWithCard()
+        assertEquals(1, session.handle(Event.SecondaryPressed).count { it is Effect.StopVoice })
+    }
+
+    @Test
+    fun 주_버튼도_수락과_같다() {
+        boardWithCard()
+        val out = session.handle(Event.PrimaryPressed)
         assertTrue(out.has<Effect.StopVoice>())
+        assertEquals(gangnam, out.one<Effect.StartRoute>().place)
         assertEquals(Effect.CollapseCard(instant = false), out.one<Effect.CollapseCard>())
-        // 닫힌 카드의 타이머와 닫기는 아무 일도 하지 않는다.
+    }
+
+    @Test
+    fun 길안내_요청이_실패하면_실패를_알린다() {
+        boardWithCard()
+        session.handle(Event.PrimaryPressed)
+        val out = session.handle(Event.RouteRequestResult(false))
+        assertEquals("길안내를 시작하지 못했어요.", out.one<Effect.Speak>().text)
+        assertEquals("길안내를 시작하지 못했어요.", out.one<Effect.ShowResult>().text)
+    }
+
+    @Test
+    fun 요청하지_않은_길안내_결과는_무시한다() {
+        assertEquals(emptyList<Effect>(), session.handle(Event.RouteRequestResult(true)))
+        boardWithCard()
+        session.handle(Event.PrimaryPressed)
+        session.handle(Event.RouteRequestResult(true))
+        assertEquals(emptyList<Effect>(), session.handle(Event.RouteRequestResult(false)))
+    }
+
+    @Test
+    fun 거절하면_카드를_접고_다시_묻지_않는다() {
+        val timer = boardWithCard().one<Effect.ScheduleCardTimeout>()
+        val out = session.handle(Event.Heard("아니"))
+        assertTrue(out.has<Effect.CollapseCard>())
+        assertTrue(out.none { it is Effect.StartRoute || it is Effect.Speak })
         assertEquals(emptyList<Effect>(), session.handle(Event.CardTimedOut(timer.timerId)))
-        assertEquals(emptyList<Effect>(), session.handle(Event.CloseRequested))
+    }
+
+    @Test
+    fun 알아듣지_못하면_한_번_다시_묻고_두_번째는_버튼만_남긴다() {
+        boardWithCard()
+        val first = session.handle(Event.Heard("글쎄"))
+        assertEquals(Effect.Speak("다시 말해 줄래요? '응'이나 '아니'로요.", thenListen = true), first.one<Effect.Speak>())
+
+        val second = session.handle(Event.Heard("음"))
+        assertEquals(Effect.Speak("화면에서 눌러 주세요.", thenListen = false), second.one<Effect.Speak>())
+        assertEquals("화면에서 눌러 주세요.", second.one<Effect.ShowCard>().card.notice)
+
+        // 듣기가 닫힌 뒤의 음성은 무시한다.
+        assertEquals(emptyList<Effect>(), session.handle(Event.Heard("응")))
+    }
+
+    @Test
+    fun 차_안_대화는_무시한다() {
+        boardWithCard()
+        assertEquals(emptyList<Effect>(), session.handle(Event.Heard("오늘 점심에 뭐 먹을지 생각 중이야")))
+    }
+
+    @Test
+    fun 무응답이면_듣기만_닫고_카드는_둔다() {
+        boardWithCard()
+        assertEquals(emptyList<Effect>(), session.handle(Event.Heard("")))
+        assertTrue(session.handle(Event.PrimaryPressed).has<Effect.StartRoute>())
+    }
+
+    @Test
+    fun 대안은_없다고_말한다() {
+        boardWithCard()
+        val out = session.handle(Event.Heard("다른 데"))
+        assertEquals("다른 곳은 찾지 못했어요.", out.one<Effect.Speak>().text)
+        assertEquals("다른 곳은 찾지 못했어요.", out.one<Effect.ShowCard>().card.notice)
+    }
+
+    @Test
+    fun 보류하면_30초를_다시_세고_이전_타이머는_무시한다() {
+        val first = boardWithCard().one<Effect.ScheduleCardTimeout>()
+        val hold = session.handle(Event.Heard("잠깐만")).one<Effect.ScheduleCardTimeout>()
+        assertEquals(Rules.CARD_TIMEOUT, hold.delay)
+
+        assertEquals(emptyList<Effect>(), session.handle(Event.CardTimedOut(first.timerId)))
+        assertTrue(session.handle(Event.CardTimedOut(hold.timerId)).has<Effect.CollapseCard>())
+    }
+
+    @Test
+    fun 잠깐만_버튼은_보류다_카드를_둔_채_30초를_다시_센다() {
+        val first = boardWithCard().one<Effect.ScheduleCardTimeout>()
+        val out = session.handle(Event.SecondaryPressed)
+        assertTrue(out.none { it is Effect.CollapseCard || it is Effect.StartRoute })
+        assertTrue(out.has<Effect.StopVoice>())
+        val hold = out.one<Effect.ScheduleCardTimeout>()
+        assertEquals(Rules.CARD_TIMEOUT, hold.delay)
+        // 이전 타이머는 무시하고, 새 타이머가 되면 접는다(애니메이션 있이).
+        assertEquals(emptyList<Effect>(), session.handle(Event.CardTimedOut(first.timerId)))
+        assertEquals(Effect.CollapseCard(instant = false), session.handle(Event.CardTimedOut(hold.timerId)).one<Effect.CollapseCard>())
+    }
+
+    @Test
+    fun 보류한_뒤_듣기는_닫히고_버튼으로_수락한다() {
+        boardWithCard()
+        session.handle(Event.SecondaryPressed)
+        assertEquals(emptyList<Effect>(), session.handle(Event.Heard("응")))
+        assertEquals(gangnam, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place)
+    }
+
+    @Test
+    fun 보류한_뒤에도_버튼으로_수락한다() {
+        val first = boardWithCard().one<Effect.ScheduleCardTimeout>()
+        val hold = session.handle(Event.Heard("잠깐만")).one<Effect.ScheduleCardTimeout>()
+        assertEquals(gangnam, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place)
+        // 접힌 카드에는 이전·새 타이머 모두 효과가 없다.
+        assertEquals(emptyList<Effect>(), session.handle(Event.CardTimedOut(first.timerId)))
+        assertEquals(emptyList<Effect>(), session.handle(Event.CardTimedOut(hold.timerId)))
+    }
+
+    @Test
+    fun 카드가_없을_때의_버튼과_음성은_무시한다() {
+        assertEquals(emptyList<Effect>(), session.handle(Event.PrimaryPressed))
+        assertEquals(emptyList<Effect>(), session.handle(Event.SecondaryPressed))
+        assertEquals(emptyList<Effect>(), session.handle(Event.Heard("응")))
+    }
+
+    @Test
+    fun 길안내_결과_전에_D가_되면_결과를_보이지도_말하지도_않는다() {
+        boardWithCard()
+        session.handle(Event.PrimaryPressed)
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        assertEquals(emptyList<Effect>(), session.handle(Event.RouteRequestResult(true)))
+    }
+
+    @Test
+    fun 결과_한_줄은_10초_뒤_지운다() {
+        boardWithCard()
+        session.handle(Event.PrimaryPressed)
+        val done = session.handle(Event.RouteRequestResult(true))
+        val timer = done.one<Effect.ScheduleResultTimeout>()
+        assertEquals(Rules.RESULT_VISIBLE, timer.delay)
+        assertEquals("", session.handle(Event.ResultTimedOut(timer.timerId)).one<Effect.ShowResult>().text)
+        // 이미 지운 뒤의 타이머는 아무 일도 하지 않는다.
+        assertEquals(emptyList<Effect>(), session.handle(Event.ResultTimedOut(timer.timerId)))
+    }
+
+    @Test
+    fun 결과_한_줄이_떠_있을_때_주행이_시작되면_지운다() {
+        boardWithCard()
+        session.handle(Event.PrimaryPressed)
+        val timer = session.handle(Event.RouteRequestResult(true)).one<Effect.ScheduleResultTimeout>()
+        assertEquals("", session.handle(Event.GearChanged(Gear.DRIVE)).one<Effect.ShowResult>().text)
+        assertEquals(emptyList<Effect>(), session.handle(Event.ResultTimedOut(timer.timerId)))
+    }
+
+    @Test
+    fun 결과_한_줄이_떠_있을_때_Suspend가_되면_지운다() {
+        boardWithCard()
+        session.handle(Event.PrimaryPressed)
+        session.handle(Event.RouteRequestResult(true))
+        val out = session.handle(Event.SuspendRequested)
+        assertEquals("", out.one<Effect.ShowResult>().text)
+    }
+
+    @Test
+    fun 수락하면_카드_음성을_멈추고_결과를_말한다() {
+        boardWithCard()
+        val accepted = session.handle(Event.Heard("응"))
+        val order = accepted.map { it::class }
+        assertTrue(order.indexOf(Effect.StopVoice::class) < order.indexOf(Effect.StartRoute::class))
+        // 결과 안내는 새 말하기이고, 수락 뒤에는 카드가 없어 끊을 카드 음성이 없다.
+        assertEquals(Effect.Speak("길안내를 시작할게요.", thenListen = false), session.handle(Event.RouteRequestResult(true)).one<Effect.Speak>())
+    }
+
+    @Test
+    fun 갈_곳이_없는_목적지_묻기에서_응은_알아듣지_못한_것이다() {
+        schedules = emptyList()
+        newSession()
+        session.handle(Event.Boarded)
+        val first = session.handle(Event.Heard("응"))
+        assertEquals(Effect.Speak("다시 말해 줄래요? '응'이나 '아니'로요.", thenListen = true), first.one<Effect.Speak>())
+        assertTrue(first.none { it is Effect.StartRoute || it is Effect.CollapseCard })
+        val second = session.handle(Event.Heard("응"))
+        assertEquals("화면에서 눌러 주세요.", second.one<Effect.ShowCard>().card.notice)
+
+        schedules = listOf(schedule("d", "치과", 30, null))
+        newSession()
+        session.handle(Event.Boarded)
+        assertEquals("다시 말해 줄래요? '응'이나 '아니'로요.", session.handle(Event.Heard("응")).one<Effect.Speak>().text)
+    }
+
+    @Test
+    fun Suspend_뒤에는_길안내_결과를_알리지_않는다() {
+        boardWithCard()
+        session.handle(Event.PrimaryPressed)
+        session.handle(Event.SuspendRequested)
+        assertEquals(emptyList<Effect>(), session.handle(Event.RouteRequestResult(true)))
+    }
+
+    @Test
+    fun 정차가_아니면_카드_안의_말도_하지_않는다() {
+        boardWithCard()
+        session.handle(Event.GearChanged(Gear.UNKNOWN))
+        val out = session.handle(Event.Heard("다른 데"))
+        assertEquals("다른 곳은 찾지 못했어요.", out.one<Effect.ShowCard>().card.notice)
+        assertTrue(out.none { it is Effect.Speak })
+    }
+
+    @Test
+    fun 초기화하면_결과_한_줄을_지운다() {
+        boardWithCard()
+        session.handle(Event.PrimaryPressed)
+        session.handle(Event.RouteRequestResult(true))
+        assertEquals("", session.handle(Event.Reset).one<Effect.ShowResult>().text)
     }
 
     @Test
@@ -194,11 +417,46 @@ class DriveSessionTest {
         val out = boardWithCard(travel = Duration.ofMinutes(60))
         val card = out.one<Effect.ShowCard>().card
         assertEquals("고객 미팅이 12시 40분인데 지금 출발하면 1시 도착이에요.", card.voice)
-        assertNull(card.sub)
-        assertNull(card.primary)
-        assertEquals("닫기", card.secondary)
+        // 출발 제안과 같은 질문·버튼·힌트
+        assertEquals("출발할까요?", card.sub)
+        assertEquals("응, 출발", card.primary)
+        assertEquals("잠깐만", card.secondary)
+        assertEquals(listOf("“응”이라고 말해도 돼요", "출발하면 자동으로 접혀요"), card.hints)
         assertEquals(ScheduleStatus.LATE, out.one<Effect.Save>().snapshot.statuses["a"])
-        assertEquals(Effect.Speak("고객 미팅이 12시 40분인데 지금 출발하면 1시 도착이에요."), out.one<Effect.Speak>())
+        // 묻고 듣는다. 길안내는 수락할 때까지 요청하지 않는다.
+        assertEquals(
+            Effect.Speak("고객 미팅이 12시 40분인데 지금 출발하면 1시 도착이에요. 출발할까요?", thenListen = true),
+            out.one<Effect.Speak>(),
+        )
+        assertTrue(out.none { it is Effect.StartRoute })
+        assertTrue(!Phrases.spoken(card).contains("길안내를 시작할게요."))
+    }
+
+    @Test
+    fun 늦게_타도_수락하면_길안내를_요청하고_결과를_알린다() {
+        boardWithCard(travel = Duration.ofMinutes(60))
+        val out = session.handle(Event.Heard("응"))
+        assertEquals(gangnam, out.one<Effect.StartRoute>().place)
+        val done = session.handle(Event.RouteRequestResult(true))
+        assertEquals("길안내를 시작할게요.", done.one<Effect.ShowResult>().text)
+        assertEquals("길안내를 시작할게요.", done.one<Effect.Speak>().text)
+    }
+
+    @Test
+    fun 늦게_타고_수락했는데_경로_요청이_실패하면_실패를_알린다() {
+        boardWithCard(travel = Duration.ofMinutes(60))
+        session.handle(Event.PrimaryPressed)
+        val out = session.handle(Event.RouteRequestResult(false))
+        assertEquals("길안내를 시작하지 못했어요.", out.one<Effect.ShowResult>().text)
+        assertEquals("길안내를 시작하지 못했어요.", out.one<Effect.Speak>().text)
+    }
+
+    @Test
+    fun 늦게_탐_카드의_잠깐만도_보류다() {
+        boardWithCard(travel = Duration.ofMinutes(60))
+        val out = session.handle(Event.SecondaryPressed)
+        assertTrue(out.none { it is Effect.CollapseCard || it is Effect.StartRoute })
+        assertEquals(Rules.CARD_TIMEOUT, out.one<Effect.ScheduleCardTimeout>().delay)
     }
 
     @Test
@@ -206,6 +464,7 @@ class DriveSessionTest {
         clock.now = start + Duration.ofMinutes(52)
         val out = boardWithCard(travel = null)
         assertEquals("고객 미팅이 12시 40분인데 이미 12분 지났어요.", out.one<Effect.ShowCard>().card.voice)
+        assertTrue(out.none { it is Effect.StartRoute })
     }
 
     @Test
@@ -214,21 +473,56 @@ class DriveSessionTest {
         newSession()
         val card = boardWithCard(travel = Duration.ofMinutes(20)).one<Effect.ShowCard>().card
         assertEquals("어디로 갈까요? 5시 저녁 모임은 4시 30분에 출발하면 돼요.", card.voice)
-        assertNull(card.primary)
-        assertEquals("닫기", card.secondary)
+        assertEquals("서울시청으로", card.primary)
+        assertEquals("그냥 갈게", card.secondary)
+
+        assertEquals(cityHall, session.handle(Event.Heard("서울시청")).one<Effect.StartRoute>().place)
     }
 
     @Test
-    fun 일정이_없으면_어디로_갈까요를_묻고_닫기로_접는다() {
+    fun 후보는_응과_버튼_모두_같은_길안내가_된다() {
+        schedules = listOf(schedule("c", "저녁 모임", 300, cityHall))
+        newSession()
+        boardWithCard(travel = Duration.ofMinutes(20))
+        assertEquals(cityHall, session.handle(Event.Heard("응")).one<Effect.StartRoute>().place)
+
+        newSession()
+        boardWithCard(travel = Duration.ofMinutes(20))
+        assertEquals(cityHall, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place)
+    }
+
+    @Test
+    fun 응과_후보_이름이_같이_들려도_그_후보로_진행한다() {
+        schedules = listOf(schedule("c", "저녁 모임", 300, cityHall))
+        newSession()
+        boardWithCard(travel = Duration.ofMinutes(20))
+        assertEquals(cityHall, session.handle(Event.Heard("응, 서울시청")).one<Effect.StartRoute>().place)
+    }
+
+    @Test
+    fun 후보가_아닌_장소_이름은_알아듣지_못한_것이다() {
+        schedules = listOf(schedule("c", "저녁 모임", 300, cityHall))
+        newSession()
+        boardWithCard(travel = Duration.ofMinutes(20))
+        val out = session.handle(Event.Heard("강남역"))
+        assertEquals("다시 말해 줄래요? '응'이나 '아니'로요.", out.one<Effect.Speak>().text)
+        assertTrue(out.none { it is Effect.StartRoute })
+    }
+
+    @Test
+    fun 일정이_없으면_어디로_갈까요를_묻고_그냥_갈게로_접는다() {
         schedules = emptyList()
         newSession()
         val out = session.handle(Event.Boarded)
         val card = out.one<Effect.ShowCard>().card
         assertEquals("어디로 갈까요?", card.voice)
         assertNull(card.primary)
-        assertEquals("닫기", card.secondary)
+        assertEquals("그냥 갈게", card.secondary)
+        // "그냥 갈게"는 거절과 같다: 카드를 접고 길안내는 하지 않으며 다시 묻지 않는다.
         val timer = out.one<Effect.ScheduleCardTimeout>()
-        assertTrue(session.handle(Event.CloseRequested).has<Effect.CollapseCard>())
+        val pressed = session.handle(Event.SecondaryPressed)
+        assertTrue(pressed.has<Effect.CollapseCard>())
+        assertTrue(pressed.none { it is Effect.StartRoute || it is Effect.Speak || it is Effect.ShowCard })
         assertEquals(emptyList<Effect>(), session.handle(Event.CardTimedOut(timer.timerId)))
     }
 
@@ -239,7 +533,7 @@ class DriveSessionTest {
         val card = session.handle(Event.Boarded).one<Effect.ShowCard>().card
         assertEquals("'치과' 어디로 가면 될까요?", card.voice)
         assertNull(card.primary)
-        assertEquals("닫기", card.secondary)
+        assertEquals("그냥 갈게", card.secondary)
     }
 
     @Test
@@ -324,7 +618,7 @@ class DriveSessionTest {
     fun 다음_날_첫_진입은_다시_첫_탑승이다() {
         val request = session.handle(Event.AppEntered).one<Effect.RequestTravelTime>()
         session.handle(Event.TravelTimeResult(request.requestId, null))
-        session.handle(Event.CloseRequested)
+        session.handle(Event.Heard("아니"))
         clock.now += Duration.ofDays(1)
         schedules = listOf(schedule("n", "다음 날 미팅", 24 * 60 + 60, gangnam))
         val next = session.handle(Event.AppEntered).one<Effect.RequestTravelTime>()
@@ -467,7 +761,7 @@ class DriveSessionTest {
     // ---- 접는 방식 ----
 
     @Test
-    fun 주행_제한과_D는_바로_접고_닫기_버튼은_애니메이션이_있다() {
+    fun 주행_제한과_D는_바로_접고_버튼으로_접을_때는_애니메이션이_있다() {
         boardWithCard()
         assertEquals(Effect.CollapseCard(instant = true), session.handle(Event.RestrictionChanged(true)).one<Effect.CollapseCard>())
 
@@ -477,6 +771,6 @@ class DriveSessionTest {
 
         newSession()
         boardWithCard()
-        assertEquals(Effect.CollapseCard(instant = false), session.handle(Event.CloseRequested).one<Effect.CollapseCard>())
+        assertEquals(Effect.CollapseCard(instant = false), session.handle(Event.PrimaryPressed).one<Effect.CollapseCard>())
     }
 }

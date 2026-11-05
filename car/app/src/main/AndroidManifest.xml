@@ -8,10 +8,11 @@
     <!-- 기어·시동(AAOS CarPropertyManager) -->
     <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
 
-    <!-- NaviHelper 소요 시간 조회(requestTrip), TTS -->
+    <!-- NaviHelper 소요 시간 조회(requestTrip)·길안내 요청(requestRoute), TTS, STT -->
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE_SEARCH" />
     <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
+    <uses-permission android:name="pleos.car.permission.STT_SERVICE" />
 
     <uses-permission android:name="android.permission.INTERNET" />
 

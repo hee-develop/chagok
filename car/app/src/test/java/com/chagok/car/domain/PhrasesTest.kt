@@ -50,6 +50,19 @@ class PhrasesTest {
         assertEquals("회의 2가", Phrases.iGa("회의 2"))
     }
 
+    @Test fun `으로와 로는 받침이 있으면 으로 ㄹ 받침과 없으면 로`() {
+        assertEquals("강남역으로", Phrases.ro("강남역"))
+        assertEquals("광주 육전집으로", Phrases.ro("광주 육전집"))
+        assertEquals("서울대로", Phrases.ro("서울대"))
+        assertEquals("성수동으로", Phrases.ro("성수동"))
+        assertEquals("서울숲 근처 달로", Phrases.ro("서울숲 근처 달"))
+        assertEquals("챔피언스필드로", Phrases.ro("챔피언스필드"))
+        assertEquals("7로", Phrases.ro("7"))
+        assertEquals("1로", Phrases.ro("1"))
+        assertEquals("8로", Phrases.ro("8"))
+        assertEquals("3으로", Phrases.ro("3"))
+    }
+
     @Test fun `말하는 시각은 12시간제이고 오전 오후가 없다`() {
         assertEquals("1시", Phrases.spokenTime(at("13:00"), SEOUL))
         assertEquals("2시 40분", Phrases.spokenTime(at("14:40"), SEOUL))
@@ -78,7 +91,7 @@ class PhrasesTest {
         val b = briefing(Briefing.Level.FULL, lunch, listOf(lunch, game, pickup), allDay = "광주 직관", memo = MemoNote.ReadAloud("유니폼·응원봉·티켓"))
         val c = card(b, Question.Depart(lunch), "09:20")
         assertEquals("광주 직관 날이에요!\n1시 육전집 점심까지 3시간 40분이에요.", c.voice)
-        assertEquals("육전집 점심 메모에 ‘유니폼·응원봉·티켓’이 있어요. 챙기셨어요?", c.sub)
+        assertEquals("육전집 점심 메모에 ‘유니폼·응원봉·티켓’이 있어요. 출발할까요?", c.sub)
         assertEquals("정차 중 · 출발 전", c.status)
         assertEquals(
             listOf(
@@ -87,11 +100,24 @@ class PhrasesTest {
             ),
             c.tiles,
         )
-        assertNull(c.primary)
-        assertEquals("닫기", c.secondary)
-        assertEquals(listOf("출발하면 자동으로 접혀요"), c.hints)
+        assertEquals("응, 출발", c.primary)
+        assertEquals("잠깐만", c.secondary)
+        assertEquals(listOf("“응”이라고 말해도 돼요", "출발하면 자동으로 접혀요"), c.hints)
         // 화면 문장과 TTS 문장은 같다(화면용 줄바꿈만 공백)
-        assertEquals("광주 직관 날이에요! 1시 육전집 점심까지 3시간 40분이에요. 육전집 점심 메모에 ‘유니폼·응원봉·티켓’이 있어요. 챙기셨어요?", Phrases.spoken(c))
+        assertEquals("광주 직관 날이에요! 1시 육전집 점심까지 3시간 40분이에요. 육전집 점심 메모에 ‘유니폼·응원봉·티켓’이 있어요. 출발할까요?", Phrases.spoken(c))
+    }
+
+    @Test fun `카드에는 질문이 하나이고 출발 제안은 출발할까요로 끝난다`() {
+        val withMemo = card(briefing(Briefing.Level.FULL, lunch, allDay = "광주 직관", memo = MemoNote.ReadAloud("유니폼·응원봉·티켓")), Question.Depart(lunch), "09:20")
+        val long = card(briefing(Briefing.Level.FULL, lunch, memo = MemoNote.HasMemo), Question.Depart(lunch), "09:20")
+        val none = card(briefing(Briefing.Level.FULL, lunch), Question.Depart(lunch), "09:20")
+        val late = card(briefing(Briefing.Level.ONE_LINE, lunch), Question.DepartLate(lunch, Duration.ofMinutes(20), at("13:20")), "13:00")
+        listOf(withMemo, long, none, late).forEach {
+            assertEquals(Phrases.spoken(it), 1, Phrases.spoken(it).count { c -> c == '?' })
+            assertTrue(Phrases.spoken(it), Phrases.spoken(it).endsWith("출발할까요?"))
+        }
+        val ask = card(briefing(Briefing.Level.FULL, lunch, memo = MemoNote.ReadAloud("유니폼")), Question.AskDestination(AskReason.PLENTY_OF_TIME, lunch, at("12:50")), "09:00")
+        assertEquals(Phrases.spoken(ask), 1, Phrases.spoken(ask).count { c -> c == '?' })
     }
 
     @Test fun `종일 일정이 없으면 인사 첫 문장을 뺀다`() {
@@ -101,7 +127,7 @@ class PhrasesTest {
 
     @Test fun `메모가 길면 메모가 있다고만 하고 없으면 출발을 묻는다`() {
         val long = card(briefing(Briefing.Level.FULL, lunch, memo = MemoNote.HasMemo), Question.Depart(lunch), "09:20")
-        assertEquals("육전집 점심 메모가 있어요.", long.sub)
+        assertEquals("육전집 점심 메모가 있어요. 출발할까요?", long.sub)
         assertEquals(1, long.tiles.size)
         val none = card(briefing(Briefing.Level.FULL, lunch), Question.Depart(lunch), "09:20")
         assertEquals("출발할까요?", none.sub)
@@ -110,7 +136,7 @@ class PhrasesTest {
     @Test fun `메모의 채비 조사는 받침에 맞춘다`() {
         val shirt = sched("s", "야구장", "13:00", memo = "티셔츠")
         val c = card(briefing(Briefing.Level.FULL, shirt, memo = MemoNote.ReadAloud("티셔츠")), Question.Depart(shirt), "09:20")
-        assertEquals("야구장 메모에 ‘티셔츠’가 있어요. 챙기셨어요?", c.sub)
+        assertEquals("야구장 메모에 ‘티셔츠’가 있어요. 출발할까요?", c.sub)
     }
 
     @Test fun `제목이 길어 t-voice가 두 줄을 넘으면 남은 시간 문장을 sub로 내린다`() {
@@ -126,13 +152,14 @@ class PhrasesTest {
         assertTrue(Phrases.voiceLines("광주 직관 날이에요!\n1시 광주 챔피언스필드 개막전 응원까지 3시간 40분이에요.") > 2)
     }
 
-    @Test fun `늦게 탐은 늦는다는 말만 하고 닫기와 자동 접힘 힌트만 둔다`() {
+    @Test fun `늦게 탐은 늦는다고 말한 뒤 출발 제안과 같은 질문과 버튼을 둔다`() {
         val c = card(briefing(Briefing.Level.ONE_LINE, lunch), Question.DepartLate(lunch, Duration.ofMinutes(20), at("13:20")), "13:00")
         assertEquals("육전집 점심이 1시인데 지금 출발하면 1시 20분 도착이에요.", c.voice)
-        assertNull(c.sub)
-        assertNull(c.primary)
-        assertEquals("닫기", c.secondary)
-        assertEquals(listOf("출발하면 자동으로 접혀요"), c.hints)
+        assertEquals("출발할까요?", c.sub)
+        assertEquals("응, 출발", c.primary)
+        assertEquals("잠깐만", c.secondary)
+        assertEquals(listOf("“응”이라고 말해도 돼요", "출발하면 자동으로 접혀요"), c.hints)
+        assertEquals("육전집 점심이 1시인데 지금 출발하면 1시 20분 도착이에요. 출발할까요?", Phrases.spoken(c))
     }
 
     @Test fun `늦게 탐 소요 시간을 모르면 이미 지난 시간만 말한다`() {
@@ -142,13 +169,13 @@ class PhrasesTest {
         assertEquals("치과가 1시인데 이미 7분 지났어요.", card(briefing(Briefing.Level.ONE_LINE, shirt), Question.DepartLate(shirt, Duration.ofMinutes(7)), "13:07").voice)
     }
 
-    @Test fun `목적지 묻기 일정 없음은 닫기 하나만 둔다`() {
+    @Test fun `목적지 묻기 일정 없음은 그냥 갈게 하나만 둔다`() {
         val c = card(briefing(Briefing.Level.FULL, null, emptyList()), Question.AskDestination(AskReason.NO_SCHEDULE), "09:00")
         assertEquals("어디로 갈까요?", c.voice)
         assertNull(c.primary)
-        assertEquals("닫기", c.secondary)
+        assertEquals("그냥 갈게", c.secondary)
         assertTrue(c.tiles.isEmpty())
-        assertEquals(listOf("출발하면 자동으로 접혀요"), c.hints)
+        assertEquals(listOf("“그냥 갈게”라고 말해도 돼요", "출발하면 자동으로 접혀요"), c.hints)
     }
 
     @Test fun `목적지 묻기 1시간 넘게 남음은 출발 시각과 장소 타일과 장소 버튼`() {
@@ -156,8 +183,8 @@ class PhrasesTest {
         val c = card(briefing(Briefing.Level.FULL, meeting), Question.AskDestination(AskReason.PLENTY_OF_TIME, meeting, at("12:50")), "09:00")
         assertEquals("어디로 갈까요? 1시 30분 육전집 점심은 12시 50분에 출발하면 돼요.", c.voice)
         assertEquals(listOf<TileView>(TileView.PlaceTile("광주 육전집", "13:30 육전집 점심")), c.tiles)
-        assertNull(c.primary)
-        assertEquals("닫기", c.secondary)
+        assertEquals("광주 육전집으로", c.primary)
+        assertEquals("그냥 갈게", c.secondary)
     }
 
     @Test fun `목적지 묻기 장소 없음`() {
@@ -165,7 +192,7 @@ class PhrasesTest {
         val c = card(briefing(Briefing.Level.FULL, noPlace), Question.AskDestination(AskReason.PLACE_UNKNOWN, noPlace), "12:30")
         assertEquals("'치과' 어디로 가면 될까요?", c.voice)
         assertNull(c.primary)
-        assertEquals("닫기", c.secondary)
+        assertEquals("그냥 갈게", c.secondary)
     }
 
     @Test fun `일정을 새로 못 받으면 한 줄을 붙인다`() {

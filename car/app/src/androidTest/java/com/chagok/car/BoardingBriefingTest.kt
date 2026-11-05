@@ -32,6 +32,8 @@ class BoardingBriefingTest {
         host.resetDemo()
         host.post(Event.GearChanged(Gear.PARK))
         speaker.spoken.clear()
+        speaker.listened.clear()
+        E2eApp.fakeNavigator.apply { travelTime = null; routeOk = true; routes.clear() }
     }
 
     @After
@@ -64,9 +66,10 @@ class BoardingBriefingTest {
         assertNotNull(device.findObject(By.text("육전집 점심")))
         assertNotNull(device.findObject(By.text("KIA 직관")))
         assertNotNull(device.findObject(By.text("콩물 픽업")))
-        // 채비 타일과 닫기 버튼
+        // 채비 타일과 출발 제안 버튼
         assertNotNull(device.findObject(By.text("유니폼")))
-        assertNotNull(device.findObject(By.text("닫기")))
+        assertNotNull(device.findObject(By.text("응, 출발")))
+        assertNotNull(device.findObject(By.text("잠깐만")))
         // 읽어 주는 중에는 볼륨을 낮췄다는 알약이 보인다
         assertNotNull(waitFor("볼륨을 잠깐 낮췄어요"))
         assertEquals(1, speaker.spoken.size)
@@ -95,22 +98,10 @@ class BoardingBriefingTest {
     }
 
     @Test
-    fun 닫기_버튼을_누르면_카드가_닫히고_음성이_멈춘다() {
-        launch()
-        assertNotNull(waitFor("광주 직관 날이에요!"))
-        val stopsBefore = speaker.stopCount
-
-        device.findObject(By.text("닫기")).click()
-
-        assertGone("광주 직관 날이에요!")
-        assertTrue(speaker.stopCount > stopsBefore)
-    }
-
-    @Test
     fun 같은_날_두_번째_탑승에는_아무_반응이_없다() {
         launch()
         assertNotNull(waitFor("광주 직관 날이에요!"))
-        device.findObject(By.text("닫기")).click()
+        device.findObject(By.text("응, 출발")).click()
         assertGone("광주 직관 날이에요!")
         speaker.spoken.clear()
 
@@ -118,9 +109,9 @@ class BoardingBriefingTest {
 
         assertNull(device.wait(Until.findObject(By.textContains("육전집 점심까지")), 1_500))
         assertTrue(speaker.spoken.isEmpty())
-        // 화면에 카드가 없다: 카드 뷰, 닫기 버튼, 인사 문구 모두 보이지 않는다
+        // 화면에 카드가 없다: 카드 뷰, 버튼, 인사 문구 모두 보이지 않는다
         assertNull(device.findObject(By.res(instrumentation.targetContext.packageName, "briefing_card")))
-        assertNull(device.findObject(By.text("닫기")))
+        assertNull(device.findObject(By.text("응, 출발")))
         assertNull(device.findObject(By.textContains("광주 직관 날이에요!")))
     }
 

@@ -1,5 +1,6 @@
 # 탑승 브리핑 E2E. 서버가 떠 있고 debug 앱이 설치된 에뮬레이터에서 돈다(scripts/e2e-car.sh가 서버와 설치를 맡는다).
 # 신호는 debug 빌드의 chagok-debug://signal 주소로 넣는다(now: 데모 시계·일정 기준 시각, gear, restricted, enter).
+# trip=none, route=ok, listen=off는 실제 내비·음성 인식 대신 "소요 시간 모름"·"경로 요청 성공"·"듣지 않음"으로 고정한다.
 # 스크린샷은 ${SHOT_DIR} 아래에 남긴다. scripts/e2e-car.sh 가 값을 넘겨 준다.
 # 글자 검증은 정규식(전체 일치)이다. 두 줄 문장은 앞뒤를 .* 로 받고, "3시간 40분" 사이 공백은 줄바꿈 방지용 NBSP라 . 로 받는다.
 # 기기 시간대는 Asia/Seoul 이어야 한다(스크립트가 맞춘다).
@@ -12,7 +13,7 @@ env:
 - launchApp
 
 # 2. 시계를 프로토타입 장면(09:20 KST)으로 맞추고 첫 탑승부터 다시 → 인사와 서버 일정이 보인다
-- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&gear=P&enter=true
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&trip=none&route=ok&listen=off&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
     timeout: 20000
@@ -21,7 +22,8 @@ env:
 - assertVisible: "KIA 직관"
 - assertVisible: "콩물 픽업"
 - assertVisible: "유니폼"
-- assertVisible: "닫기"
+- assertVisible: "응, 출발"
+- assertVisible: "잠깐만"
 - takeScreenshot: ${SHOT_DIR}/01-briefing-card
 
 # 3. 기어 D → 카드가 사라진다
@@ -29,16 +31,16 @@ env:
 - extendedWaitUntil:
     notVisible: ".*광주 직관 날이에요!.*"
     timeout: 5000
-- assertNotVisible: "닫기"
+- assertNotVisible: "응, 출발"
 - takeScreenshot: ${SHOT_DIR}/02-gear-d-collapsed
 
-# 4. 다시 첫 탑승(상태 초기화, 기어 P, 앱 진입) → 닫기 버튼으로 닫는다
+# 4. 다시 첫 탑승(상태 초기화, 기어 P, 앱 진입) → 주 버튼으로 수락하면 카드가 접힌다
 - openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
     timeout: 20000
-- tapOn: "닫기"
+- tapOn: "응, 출발"
 - extendedWaitUntil:
     notVisible: ".*광주 직관 날이에요!.*"
     timeout: 5000
-- takeScreenshot: ${SHOT_DIR}/03-closed
+- takeScreenshot: ${SHOT_DIR}/03-accepted

@@ -13,6 +13,18 @@ class TripRequestTrackerTest {
     private val place = Place("강남역", LatLng(37.4979, 127.0276))
     private val tracker = TripRequestTracker(Duration.ofSeconds(3))
 
+    @Test fun `연결되기 전과 재시작 직후와 연결 실패 뒤에는 길안내 요청을 보낼 수 없다`() {
+        assertEquals(false, tracker.ready)
+        tracker.connected()
+        assertEquals(true, tracker.ready)
+        // 내비를 끄고 다시 켠 직후(reset)에는 다시 연결될 때까지 준비 안 됨
+        tracker.reset()
+        assertEquals(false, tracker.ready)
+        tracker.connected()
+        tracker.connectionFailed()
+        assertEquals(false, tracker.ready)
+    }
+
     @Test fun `연결된 뒤의 요청은 바로 보낸다`() {
         tracker.connected()
         assertEquals(TripRequestTracker.Step.SEND_NOW, tracker.request(1, place))

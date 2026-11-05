@@ -21,14 +21,28 @@ import java.time.format.DateTimeFormatter
  * 시각 표기: 말(t-voice·TTS)은 12시간제 "1시", "2시 40분"(오전·오후 없음), 타일은 24시간제 "13:00".
  */
 object Phrases {
+    const val ASK_DEPART = "출발할까요?"
+    const val ASK_AGAIN = "다시 말해 줄래요? '응'이나 '아니'로요."
+    const val USE_SCREEN = "화면에서 눌러 주세요."
+    const val NO_ALTERNATIVE = "다른 곳은 찾지 못했어요."
+    const val ROUTE_STARTED = "길안내를 시작할게요."
+    const val ROUTE_FAILED = "길안내를 시작하지 못했어요."
     const val STALE_SCHEDULE = "서버에 연결하지 못해 마지막으로 받은 일정 기준이에요."
 
     // 카드 머리 상태 칩(StatusChip). 다른 문구를 만들지 않는다.
     const val STATUS_BEFORE_DEPARTURE = "정차 중 · 출발 전"
 
+    // 버튼 라벨은 운전자가 소리 내 말할 문장 그대로
+    const val ACCEPT_DEPART = "응, 출발"
+    const val HOLD = "잠깐만"
+    const val JUST_GO = "그냥 갈게"
+
+    /** 일정 안내 카드의 버튼 */
     const val CLOSE = "닫기"
 
-    // 버튼 줄 오른쪽 끝 음성 힌트
+    // 버튼 줄 오른쪽 끝 음성 힌트 두 줄
+    const val HINT_SAY_YES = "“응”이라고 말해도 돼요"
+    const val HINT_SAY_JUST_GO = "“그냥 갈게”라고 말해도 돼요"
     const val HINT_AUTO_FOLD = "출발하면 자동으로 접혀요"
 
     const val ASK_DESTINATION = "어디로 갈까요?"
@@ -43,6 +57,13 @@ object Phrases {
     // 일정 안내 카드
     const val SCHEDULE_UNAVAILABLE = "일정을 불러오지 못했어요. 연결을 확인해 주세요."
 
+    private const val RIEUL = 8
+
+    /** 한국어로 읽을 때 받침이 있는 숫자: 영·일·삼·육·칠·팔 */
+    private val BATCHIM_DIGITS = setOf('0', '1', '3', '6', '7', '8')
+
+    /** 읽을 때 ㄹ 받침으로 끝나는 숫자: 일·칠·팔 */
+    private val RIEUL_DIGITS = setOf('1', '7', '8')
     private val TIME = DateTimeFormatter.ofPattern("HH:mm")
 
     /** 타일의 24시간제 시각 "13:00" */
@@ -80,6 +101,12 @@ object Phrases {
 
     private fun iGaJosa(word: String) = if (hasBatchim(word)) "이" else "가"
 
+    /** "{장소}로/으로": 받침이 있으면(ㄹ 제외) "으로". */
+    fun ro(word: String): String {
+        val josa = if (hasBatchim(word) && !endsWithRieul(word)) "으로" else "로"
+        return "$word$josa"
+    }
+
     private fun lastReadable(word: String): Char? = word.lastOrNull { it.isLetterOrDigit() }
 
     private fun finalConsonantOf(c: Char): Int? {
@@ -87,11 +114,15 @@ object Phrases {
         return if (code in 0xAC00..0xD7A3) (code - 0xAC00) % 28 else null
     }
 
+    // 한글 ㄹ 받침, 숫자 1(일)·7(칠)·8(팔)
+    private fun endsWithRieul(word: String): Boolean =
+        lastReadable(word)?.let { finalConsonantOf(it) == RIEUL || it in RIEUL_DIGITS } ?: false
+
     /** 마지막 글자의 받침 여부. 한글은 받침을 보고, 숫자는 한국어 읽기(일·삼·육·칠·팔은 받침 있음), 그 밖의 글자는 없음으로 본다. */
     fun hasBatchim(word: String): Boolean {
         val last = lastReadable(word) ?: return false
         finalConsonantOf(last)?.let { return it != 0 }
-        return last in "0136 78".replace(" ", "")
+        return last in BATCHIM_DIGITS
     }
 
     // ---- 장면별 대사 ----
@@ -143,13 +174,13 @@ object Phrases {
 
     /** 채비 문장. 메모가 짧으면 채비를 읽고, 길면 메모가 있다고만 하고, 없으면 출발을 묻는다. */
     fun greetingSub(target: Schedule, memo: MemoNote): String = when (memo) {
-        is MemoNote.ReadAloud -> "${target.title} 메모에 ‘${memo.text}’${iGaJosa(memo.text)} 있어요. 챙기셨어요?"
-        MemoNote.HasMemo -> "${target.title} 메모가 있어요."
-        MemoNote.None -> "출발할까요?"
+        is MemoNote.ReadAloud -> "${target.title} 메모에 ‘${memo.text}’${iGaJosa(memo.text)} 있어요. $ASK_DEPART"
+        MemoNote.HasMemo -> "${target.title} 메모가 있어요. $ASK_DEPART"
+        MemoNote.None -> ASK_DEPART
     }
 
     /**
-     * 늦게 탐: 일정이 몇 시인데 지금 출발하면 몇 시 도착이라고 말한다.
+     * 늦게 탐: 일정이 몇 시인데 지금 출발하면 몇 시 도착이라고 말한다(이어서 출발 제안과 같은 질문을 한다).
      * 소요 시간을 모르면 도착 시각 대신 이미 지난 시간만 사실대로 말한다.
      */
     fun late(target: Schedule, lateBy: Duration, arrival: Instant?, zone: ZoneId): String {
@@ -176,7 +207,7 @@ object Phrases {
 
     /**
      * 탑승 판단 결과를 카드 한 장으로. [now]는 카드를 띄우는 시각이다.
-     * 버튼은 닫기 하나이고, 카드 끝에는 자동으로 접힌다는 힌트가 붙는다.
+     * 출발 제안과 늦게 탐은 출발·잠깐만, 목적지 묻기는 후보(있을 때)·그냥 갈게 버튼이다.
      */
     fun card(decision: BoardingDecision.Card, now: Instant, zone: ZoneId): CardContent {
         val briefing = decision.briefing
@@ -185,8 +216,7 @@ object Phrases {
             status = STATUS_BEFORE_DEPARTURE,
             voice = "",
             footnote = footnote,
-            secondary = CLOSE,
-            hints = listOf(HINT_AUTO_FOLD),
+            hints = listOf(HINT_SAY_YES, HINT_AUTO_FOLD),
         )
         return when (val q = decision.question) {
             is Question.Depart -> {
@@ -196,22 +226,37 @@ object Phrases {
                     voice = voice,
                     sub = sub,
                     tiles = firstBoardingTiles(briefing, zone),
+                    primary = ACCEPT_DEPART,
+                    secondary = HOLD,
                 )
             }
             is Question.DepartLate -> base.copy(
                 voice = late(q.target, q.lateBy, q.arrival, zone),
+                sub = ASK_DEPART,
+                primary = ACCEPT_DEPART,
+                secondary = HOLD,
             )
             is Question.AskDestination -> when (q.reason) {
-                AskReason.NO_SCHEDULE -> base.copy(voice = ASK_DESTINATION)
+                AskReason.NO_SCHEDULE -> base.copy(
+                    voice = ASK_DESTINATION,
+                    secondary = JUST_GO,
+                    hints = listOf(HINT_SAY_JUST_GO, HINT_AUTO_FOLD),
+                )
                 AskReason.PLENTY_OF_TIME -> {
                     val target = checkNotNull(q.suggested)
                     val departBy = checkNotNull(q.departBy)
                     base.copy(
                         voice = askDestinationPlenty(target, departBy, zone),
                         tiles = listOf(TileView.PlaceTile(target.place?.name.orEmpty(), "${time(target, zone)} ${target.title}")),
+                        primary = ro(target.place?.name.orEmpty()),
+                        secondary = JUST_GO,
                     )
                 }
-                AskReason.PLACE_UNKNOWN -> base.copy(voice = askPlace(q.suggested?.title.orEmpty()))
+                AskReason.PLACE_UNKNOWN -> base.copy(
+                    voice = askPlace(q.suggested?.title.orEmpty()),
+                    secondary = JUST_GO,
+                    hints = listOf(HINT_SAY_JUST_GO, HINT_AUTO_FOLD),
+                )
             }
         }
     }

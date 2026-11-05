@@ -5,6 +5,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.TextView
 import com.chagok.car.domain.Gear
 import com.chagok.car.flow.Event
 import com.chagok.car.runtime.SessionHost
@@ -25,6 +26,9 @@ object DebugRow {
         addView(button(activity, "정차") { host.post(Event.GearChanged(Gear.PARK)) })
         addView(button(activity, "시간 +10분") { host.advanceClock(Duration.ofMinutes(10)) })
         addView(button(activity, "데모 초기화") { host.resetDemo() })
+        val heard = TextView(activity).apply { textSize = 12f }
+        addView(heard)
+        DebugInjection.heardProcessed = { heard.text = "들은 말 처리: $it" }
     }
 
     private fun button(activity: Activity, label: String, onClick: () -> Unit) = Button(activity).apply {

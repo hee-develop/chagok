@@ -26,7 +26,7 @@ sealed interface Question {
     data class Depart(val target: Schedule, val arrival: Instant? = null) : Question
 
     /**
-     * 늦게 탐: 출발을 묻지 않고 늦는다는 사실을 알린다.
+     * 늦게 탐: 늦는다는 사실을 알린 뒤 출발 제안과 같이 출발을 묻는다(수락하면 길안내).
      * arrival은 지금 출발하면 도착할 시각이고, 소요 시간을 모르면 null(이때 lateBy는 시작 시각이 지난 시간이다).
      */
     data class DepartLate(val target: Schedule, val lateBy: Duration, val arrival: Instant? = null) : Question
@@ -54,7 +54,7 @@ sealed interface MemoNote {
     data object None : MemoNote
     data class ReadAloud(val text: String) : MemoNote
 
-    /** 길어서 "{일정} 메모가 있어요."만 말함 */
+    /** 길어서 "{일정} 메모가 있어요."만 알림(질문은 카드의 출발 질문 하나) */
     data object HasMemo : MemoNote
 
     companion object {

@@ -23,8 +23,8 @@ import com.chagok.car.ui.DuckingPill
 import com.chagok.car.ui.NoticePill
 
 /**
- * 차곡 화면: BriefingCard, DuckingPill, 권한 설명 카드.
- * 주행 중에는 카드를 접고 화면에 아무것도 말하거나 띄우지 않는다(DO로 선언). 권한 설명 카드와 요청도 주행 중에는 미룬다.
+ * 차곡 화면: BriefingCard, 결과 한 줄, DuckingPill, 권한 설명 카드.
+ * 주행 중에는 카드를 접고 화면에 아무것도 말하거나 띄우지 않는다(DO로 선언). 결과 한 줄과 권한 설명 카드·요청도 주행 중에는 미룬다.
  * 상태와 흐름은 [SessionHost]가 갖고, 여기서는 그리고 버튼을 이벤트로 넘기기만 한다.
  * 최상위 화면이므로 Back은 종료하지 않고 숨긴다(moveTaskToBack, CCP 가이드).
  */
@@ -34,6 +34,7 @@ class MainActivity : Activity() {
 
     private lateinit var d: DesignScale
     private lateinit var card: BriefingCardView
+    private lateinit var result: NoticePill
     private lateinit var permissionNotice: NoticePill
     private lateinit var permissionCard: BriefingCardView
     private lateinit var ducking: DuckingPill
@@ -72,14 +73,17 @@ class MainActivity : Activity() {
 
         card = BriefingCardView(this, d).apply {
             visibility = View.GONE
-            onSecondary = { host.post(Event.CloseRequested) }
+            onPrimary = { host.post(Event.PrimaryPressed) }
+            onSecondary = { host.post(Event.SecondaryPressed) }
         }
         column.addView(card, cardParams())
 
+        result = NoticePill(this, d)
         permissionNotice = NoticePill(this, d)
         notices = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(permissionNotice)
+            addView(result)
+            addView(permissionNotice, LinearLayout.LayoutParams(-2, -2).apply { topMargin = d.dimenInt(R.dimen.space_s) })
         }
         column.addView(
             notices,
@@ -159,7 +163,12 @@ class MainActivity : Activity() {
         }
         firstRender = false
         card.speaking = state.speaking && view != null
-        ducking.visibility = if (state.speaking) View.VISIBLE else View.GONE
+        ducking.visibility = if (state.ducking) View.VISIBLE else View.GONE
+        val resultText = if (driving || view != null) "" else state.result
+        result.show(resultText)
+        (permissionNotice.layoutParams as LinearLayout.LayoutParams).topMargin =
+            if (resultText.isEmpty()) 0 else d.dimenInt(R.dimen.space_s)
+        permissionNotice.requestLayout()
     }
 
     private fun showWithoutMotion(view: View) {

@@ -27,7 +27,7 @@ class FixtureBriefingTest {
 
         assertEquals(Question.Depart(plan.target()!!), decision.question)
         assertEquals("광주 직관 날이에요!\n1시 육전집 점심까지 3시간 40분이에요.", card.voice)
-        assertEquals("육전집 점심 메모에 ‘유니폼·응원봉·티켓’이 있어요. 챙기셨어요?", card.sub)
+        assertEquals("육전집 점심 메모에 ‘유니폼·응원봉·티켓’이 있어요. 출발할까요?", card.sub)
         assertEquals(
             listOf(
                 TileView.Schedules(listOf(TileRow("13:00", "육전집 점심", true), TileRow("17:00", "KIA 직관", false), TileRow("21:00", "콩물 픽업", false))),
