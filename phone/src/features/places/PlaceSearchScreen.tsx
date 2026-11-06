@@ -7,16 +7,16 @@ import { isClientError, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api
 import { strings } from '../../i18n/ko';
 import { SetupHeader } from '../../ui/SetupHeader';
 import { colors, useFont } from '../../ui/theme';
+import { schedulePlacesApi, type SchedulePlacesApi } from '../fill-places/schedulePlacesApi';
 import type { PlaceTarget } from './favorites';
 import { PlaceRow } from './PlaceRow';
 import { placesApi, type Place, type PlacesApi } from './placesApi';
 
 /** 서버 검색어 상한과 같다. */
 const MAX_QUERY_LENGTH = 50;
-const BACK_FALLBACK_ROUTE = '/setup/places';
 
-type Props = {
-  target: PlaceTarget;
+type Props = ({ target: PlaceTarget; scheduleId?: never } | { scheduleId: string; target?: never }) & {
+  scheduleApi?: SchedulePlacesApi;
   api?: PlacesApi;
   timeoutMs?: number;
   debounceMs?: number;
@@ -24,7 +24,7 @@ type Props = {
 
 type SearchState = { status: 'idle' } | { status: 'loading' } | { status: 'error' } | { status: 'ready'; places: Place[] };
 
-export function PlaceSearchScreen({ target, api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS, debounceMs = 300 }: Props) {
+export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePlacesApi, api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS, debounceMs = 300 }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
@@ -35,6 +35,7 @@ export function PlaceSearchScreen({ target, api = placesApi, timeoutMs = REQUEST
   const [search, setSearch] = useState<SearchState>({ status: 'idle' });
   const [pickingId, setPickingId] = useState<string | null>(null);
   const [pickError, setPickError] = useState(false);
+  const [rejected, setRejected] = useState(false);
 
   const searchRequest = useRef<AbortController | null>(null);
   const pickRequest = useRef<AbortController | null>(null);
@@ -43,10 +44,7 @@ export function PlaceSearchScreen({ target, api = placesApi, timeoutMs = REQUEST
   const trimmed = query.trim();
 
   useEffect(() => {
-    if (trimmed === '') {
-      setSearch({ status: 'idle' });
-      return;
-    }
+    if (trimmed === '') return;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       searchRequest.current = controller;
@@ -84,10 +82,10 @@ export function PlaceSearchScreen({ target, api = placesApi, timeoutMs = REQUEST
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
-    else router.replace(BACK_FALLBACK_ROUTE);
-  }, [router]);
+    else router.replace(scheduleId === undefined ? '/setup/places' : '/setup/fill-places');
+  }, [router, scheduleId]);
 
-  /** 장소를 대상 자리에 넣고 돌아간다. 서버가 그 자리만 바꾼다. 서버가 거절(4xx)하면 같은 요청을 다시 보내지 않고 돌아가 2단계 화면이 최신 상태를 불러오게 한다. */
+  /** 해당 자리 또는 일정 하나만 저장한다. 일정이 거절되면 목록 확인을 안내한다. */
   const pick = async (place: Place) => {
     if (pickRequest.current) return;
     retryPick.current = () => void pick(place);
@@ -95,13 +93,20 @@ export function PlaceSearchScreen({ target, api = placesApi, timeoutMs = REQUEST
     pickRequest.current = controller;
     setPickingId(place.id);
     setPickError(false);
+    setRejected(false);
     let leave = false;
     try {
-      await requestWithTimeout((signal) => api.assignPlace(target, place.id, signal), timeoutMs, controller);
+      await requestWithTimeout<unknown>(
+        (signal) => scheduleId === undefined ? api.assignPlace(target!, place.id, signal) : scheduleApi.savePlace(scheduleId, { placeId: place.id }, signal),
+        timeoutMs, controller,
+      );
       leave = pickRequest.current === controller;
     } catch (error) {
       if (pickRequest.current === controller) {
-        if (isClientError(error)) leave = true;
+        if (isClientError(error)) {
+          if (scheduleId === undefined) leave = true;
+          else { retryPick.current = goBack; setPickError(true); setRejected(true); }
+        }
         else setPickError(true);
       }
     } finally {
@@ -113,7 +118,7 @@ export function PlaceSearchScreen({ target, api = placesApi, timeoutMs = REQUEST
     if (leave) goBack();
   };
 
-  const title = target === 'home' ? t.titleHome : target === 'work' ? t.titleWork : t.titleOther;
+  const title = scheduleId !== undefined ? t.titleSchedule : target === 'home' ? t.titleHome : target === 'work' ? t.titleWork : t.titleOther;
   const picking = pickingId !== null;
 
   return (
@@ -124,7 +129,7 @@ export function PlaceSearchScreen({ target, api = placesApi, timeoutMs = REQUEST
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <SetupHeader step={2} />
+        <SetupHeader step={scheduleId === undefined ? 2 : 3} />
         <Text accessibilityRole="header" style={[styles.title, font(600)]}>
           {title}
         </Text>
@@ -134,7 +139,7 @@ export function PlaceSearchScreen({ target, api = placesApi, timeoutMs = REQUEST
           editable={!picking}
           autoCorrect={false}
           maxLength={MAX_QUERY_LENGTH}
-          onChangeText={setQuery}
+          onChangeText={(value) => { setQuery(value); if (value.trim() !== trimmed) setSearch({ status: 'idle' }); }}
           placeholder={t.inputPlaceholder}
           placeholderTextColor={colors.unchecked}
           returnKeyType="search"
@@ -184,9 +189,9 @@ export function PlaceSearchScreen({ target, api = placesApi, timeoutMs = REQUEST
         ) : null}
         {pickError ? (
           <View style={styles.saveError} accessibilityLiveRegion="polite">
-            <Text style={[styles.errorText, font(500)]}>{t.saveFailed}</Text>
+            <Text style={[styles.errorText, font(500)]}>{rejected ? t.scheduleChanged : t.saveFailed}</Text>
             <Pressable accessibilityRole="button" onPress={() => retryPick.current?.()} style={styles.retry}>
-              <Text style={[styles.retryText, font(600)]}>{t.retry}</Text>
+              <Text style={[styles.retryText, font(600)]}>{rejected ? t.backToSchedules : t.retry}</Text>
             </Pressable>
           </View>
         ) : null}

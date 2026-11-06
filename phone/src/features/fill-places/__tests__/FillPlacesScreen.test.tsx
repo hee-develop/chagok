@@ -1,0 +1,101 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+import { HttpError } from '../../../api/request';
+import { FillPlacesScreen } from '../FillPlacesScreen';
+import type { SchedulePlacesApi, SetupSchedule } from '../schedulePlacesApi';
+
+const mockPush = jest.fn();
+jest.mock('expo-router', () => {
+  const { useEffect } = jest.requireActual('react');
+  return {
+    useRouter: () => ({ push: mockPush }),
+    useFocusEffect: (callback: () => void) => useEffect(callback, [callback]),
+  };
+});
+const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
+const empty: SetupSchedule = { id: 'lunch', title: '육전집 점심', start: '2026-11-06T04:00:00Z', end: '2026-11-06T05:00:00Z', place: null, locationText: null, noTravel: false };
+const resolved: SetupSchedule = { ...empty, id: 'game', title: 'KIA 직관', place: { name: '챔피언스필드', lat: 35.1, lng: 126.8 } };
+const makeApi = (overrides: Partial<SchedulePlacesApi> = {}) => ({
+  fetchSchedules: jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [empty, resolved] }),
+  savePlace: jest.fn().mockResolvedValue({ id: empty.id, place: null, locationText: null, noTravel: true }),
+  ...overrides,
+});
+const renderScreen = (api: SchedulePlacesApi, timeoutMs?: number) => render(<SafeAreaProvider initialMetrics={insets}><FillPlacesScreen api={api} timeoutMs={timeoutMs} /></SafeAreaProvider>);
+beforeEach(() => mockPush.mockReset());
+
+it('서버 일정으로 개수를 계산하고 장소가 있는 일정과 한국 시각도 보여 준다', async () => {
+  await renderScreen(makeApi());
+  expect(await screen.findByText('장소가 빈 일정이 1개 있어요')).toBeOnTheScreen();
+  expect(screen.getByText('3 / 4')).toBeOnTheScreen();
+  expect(screen.getAllByText('11월 6일 (금) 13:00')).toHaveLength(2);
+  expect(screen.getByText('✓ 챔피언스필드')).toBeOnTheScreen();
+  await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 장소 넣기' }));
+  expect(mockPush).toHaveBeenCalledWith({ pathname: '/setup/schedule-place-search', params: { scheduleId: 'lunch' } });
+});
+
+it('이동 없음을 서버에 저장한 뒤 개수를 줄이고 이미 채운 일정은 유지한다', async () => {
+  const api = makeApi();
+  await renderScreen(api);
+  await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 이동 없음' }));
+  expect(await screen.findByText('일정 장소를 모두 확인했어요')).toBeOnTheScreen();
+  expect(api.savePlace).toHaveBeenCalledWith('lunch', { noTravel: true }, expect.any(AbortSignal));
+  expect(screen.getByText('✓ 이동 없음')).toBeOnTheScreen();
+  expect(screen.getByText('✓ 챔피언스필드')).toBeOnTheScreen();
+  await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 장소 변경' }));
+  expect(mockPush).toHaveBeenCalledWith(expect.objectContaining({ params: { scheduleId: 'lunch' } }));
+});
+
+it('조회가 실패하면 개수를 만들지 않고 재시도하며, 빈 목록에서도 다음으로 갈 수 있다', async () => {
+  const fetchSchedules = jest.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ anchor: empty.start, schedules: [] });
+  await renderScreen(makeApi({ fetchSchedules }));
+  await screen.findByText('일정을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+  expect(screen.getByRole('button', { name: '다음' })).toBeDisabled();
+  await fireEvent.press(screen.getByText('다시 시도'));
+  await screen.findByText('선택한 캘린더에 확인할 일정이 없어요.');
+  await fireEvent.press(screen.getByText('다음'));
+  expect(mockPush).toHaveBeenCalledWith('/setup/talk');
+});
+
+it('저장 실패는 원래 상태를 유지하고 같은 연산만 재시도한다', async () => {
+  const savePlace = jest.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ id: empty.id, place: null, locationText: null, noTravel: true });
+  await renderScreen(makeApi({ savePlace }));
+  await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 이동 없음' }));
+  await screen.findByText('저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+  expect(screen.getByText('장소가 빈 일정이 1개 있어요')).toBeOnTheScreen();
+  await fireEvent.press(screen.getByText('다시 시도'));
+  await screen.findByText('일정 장소를 모두 확인했어요');
+  expect(savePlace).toHaveBeenCalledTimes(2);
+});
+
+it('저장 중에는 중복 저장과 화면 이동을 막고 화면 종료 시 취소한다', async () => {
+  const savePlace = jest.fn().mockReturnValue(new Promise(() => {}));
+  const view = await renderScreen(makeApi({ savePlace }));
+  await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 이동 없음' }));
+  await screen.findByRole('progressbar', { name: '저장하는 중' });
+  expect(screen.getByRole('button', { name: '다음' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '나중에 할게요' })).toBeDisabled();
+  await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 이동 없음' }));
+  expect(savePlace).toHaveBeenCalledTimes(1);
+  const signal = savePlace.mock.calls[0][2];
+  await view.unmount();
+  expect(signal.aborted).toBe(true);
+});
+
+it('4xx 거절은 재전송하지 않고 최신 목록을 불러온다', async () => {
+  const api = makeApi({ savePlace: jest.fn().mockRejectedValue(new HttpError(404, 'removed')) });
+  await renderScreen(api);
+  await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 이동 없음' }));
+  await waitFor(() => expect(api.fetchSchedules).toHaveBeenCalledTimes(2));
+  expect(api.savePlace).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText('다시 시도')).toBeNull();
+});
+
+it('응답이 없는 조회는 시간 제한 후 실패하고 나중에 진행해도 저장하지 않는다', async () => {
+  const api = makeApi({ fetchSchedules: jest.fn().mockReturnValue(new Promise(() => {})) });
+  await renderScreen(api, 20);
+  await screen.findByText('일정을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+  await fireEvent.press(screen.getByText('나중에 할게요'));
+  expect(mockPush).toHaveBeenCalledWith('/setup/talk');
+  expect(api.savePlace).not.toHaveBeenCalled();
+});

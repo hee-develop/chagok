@@ -104,7 +104,7 @@ describe('검색', () => {
     expect(screen.getByText(APT.name)).toBeOnTheScreen();
   });
 
-  it('입력을 멈추기 전에는 이전 결과를 지우지 않고, 검색을 시작할 때 로딩으로 바뀐다', async () => {
+  it('다른 검색어를 입력하면 이전 결과를 즉시 지우고 검색을 시작할 때 로딩으로 바뀐다', async () => {
     const searchPlaces = jest.fn().mockResolvedValueOnce([APT]).mockReturnValue(new Promise(() => {}));
     await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={80} />);
 
@@ -112,7 +112,7 @@ describe('검색', () => {
     expect(await screen.findByText(APT.name)).toBeOnTheScreen();
     await fireEvent.changeText(input(), '타워');
     expect(screen.queryByRole('progressbar')).toBeNull();
-    expect(screen.getByText(APT.name)).toBeOnTheScreen();
+    expect(screen.queryByText(APT.name)).toBeNull();
 
     expect(await screen.findByRole('progressbar', { name: '장소를 찾는 중' })).toBeOnTheScreen();
     expect(screen.queryByText(APT.name)).toBeNull();
@@ -283,9 +283,7 @@ describe('장소 고르기', () => {
   });
 
   it('저장 중에 취소하면 요청을 취소하고 돌아가며 다른 요청을 보내지 않는다', async () => {
-    let signal: AbortSignal | undefined;
-    const assignPlace = jest.fn().mockImplementation((_t: string, _id: string, s: AbortSignal) => {
-      signal = s;
+    const assignPlace = jest.fn().mockImplementation((_t: string, _id: string, _s: AbortSignal) => {
       return new Promise(() => {});
     });
     const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]), assignPlace }, { ...EMPTY, work: TOWER, revision: 2 });
@@ -336,5 +334,47 @@ describe('취소와 돌아가기', () => {
     await fireEvent.press(screen.getByText('취소'));
     expect(mockBack).not.toHaveBeenCalled();
     expect(mockReplace).toHaveBeenCalledWith('/setup/places');
+  });
+});
+
+
+describe('3단계 일정 장소 검색', () => {
+  it('선택한 일정에만 장소를 저장하고 3단계로 돌아간다', async () => {
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]) });
+    const scheduleApi = { fetchSchedules: jest.fn(), savePlace: jest.fn().mockResolvedValue({ id: 'lunch', place: APT, locationText: APT.name, noTravel: false }) };
+    await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={scheduleApi} debounceMs={0} />);
+    expect(screen.getByText('3 / 4')).toBeOnTheScreen();
+    await fireEvent.changeText(input(), '아파트');
+    await fireEvent.press(await screen.findByRole('button', { name: `${APT.name}, ${APT.address}` }));
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+    expect(scheduleApi.savePlace).toHaveBeenCalledWith('lunch', { placeId: APT.id }, expect.any(AbortSignal));
+    expect(api.assignPlace).not.toHaveBeenCalled();
+  });
+
+  it('저장 실패는 성공으로 이동하지 않고, 재시도가 같은 일정에만 적용된다', async () => {
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]) });
+    const savePlace = jest.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({});
+    await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={{ fetchSchedules: jest.fn(), savePlace }} debounceMs={0} />);
+    await fireEvent.changeText(input(), '아파트');
+    await fireEvent.press(await screen.findByRole('button', { name: `${APT.name}, ${APT.address}` }));
+    await screen.findByText(SAVE_FAILED);
+    expect(mockBack).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByText('다시 시도'));
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+    expect(savePlace).toHaveBeenCalledTimes(2);
+  });
+
+  it('선택 해제된 일정은 실패를 안내하고 목록으로 돌아가게 한다', async () => {
+    mockCanGoBack.mockReturnValue(false);
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]) });
+    const savePlace = jest.fn().mockRejectedValue(new HttpError(404, 'removed'));
+    await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={{ fetchSchedules: jest.fn(), savePlace }} debounceMs={0} />);
+    await fireEvent.changeText(input(), '아파트');
+    await fireEvent.press(await screen.findByRole('button', { name: `${APT.name}, ${APT.address}` }));
+    await screen.findByText('일정이 바뀌었어요. 목록에서 다시 확인해 주세요.');
+    expect(mockBack).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByText('일정 목록으로'));
+    expect(mockReplace).toHaveBeenCalledWith('/setup/fill-places');
+    expect(savePlace).toHaveBeenCalledTimes(1);
   });
 });

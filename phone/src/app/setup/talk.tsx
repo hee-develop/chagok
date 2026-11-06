@@ -5,17 +5,14 @@ import { strings } from '../../i18n/ko';
 import { SetupHeader } from '../../ui/SetupHeader';
 import { colors, useFont } from '../../ui/theme';
 
-export function FillPlacesPlaceholderScreen() {
+/** 다음 구현 대상인 4단계의 진입 화면. */
+export default function TalkRoute() {
   const insets = useSafeAreaInsets();
   const font = useFont();
-  return (
-    <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
-      <SetupHeader step={3} />
-      <Text accessibilityRole="header" style={[styles.title, font(600)]}>
-        {strings.fillPlaces.title}
-      </Text>
-    </View>
-  );
+  return <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
+    <SetupHeader step={4} />
+    <Text accessibilityRole="header" style={[styles.title, font(600)]}>{strings.talk.title}</Text>
+  </View>;
 }
 
 const styles = StyleSheet.create({
