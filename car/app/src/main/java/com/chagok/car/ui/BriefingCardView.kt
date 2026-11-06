@@ -44,9 +44,9 @@ class BriefingCardView(context: Context, private val d: DesignScale) : LinearLay
         val h = d.dimenInt(R.dimen.space_4xl)
         val v = d.dimenInt(R.dimen.space_3xl)
         setPadding(h, v, h, v)
-        // shadow-card는 카드에만. Dark 0 24 60 rgba(0,0,0,.5), Light 0 16 40 rgba(17,17,17,.18)에 가깝게 elevation으로 낸다.
+        // shadow-card는 카드에만. 0 24 60 rgba(0,0,0,.5)에 가깝게 elevation으로 낸다.
         elevation = d.dimen(R.dimen.shadow_card_dy)
-        outlineSpotShadowColor = if (isNight()) Color.argb(128, 0, 0, 0) else Color.argb(46, 17, 17, 17)
+        outlineSpotShadowColor = Color.argb(128, 0, 0, 0)
         outlineAmbientShadowColor = outlineSpotShadowColor
 
         addView(
@@ -61,10 +61,6 @@ class BriefingCardView(context: Context, private val d: DesignScale) : LinearLay
         )
         addView(body, LayoutParams(-1, 0, 1f))
     }
-
-    private fun isNight() =
-        (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-            android.content.res.Configuration.UI_MODE_NIGHT_YES
 
     private fun gap() = d.dimenInt(R.dimen.space_xl)
 

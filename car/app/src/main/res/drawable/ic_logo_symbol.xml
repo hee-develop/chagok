@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 曲 달력 심볼. preview.html의 인라인 SVG(viewBox 100x100, 선 10)를 옮긴 것. ink 색이라 테마를 따른다. -->
+<!-- 曲 달력 심볼. preview.html의 인라인 SVG(viewBox 100x100, 선 10)를 옮긴 것. 색은 ink 토큰을 쓴다. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="100dp"
     android:height="100dp"
