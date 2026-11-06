@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createApp } from '../src/app.js';
-import { loadDayFixture, loadMockCalendars } from '../src/fixtures.js';
+import type { createApp } from '../src/app.js';
+import { fixture, newApp } from './helpers.js';
 
-const calendars = loadMockCalendars();
-const fixture = loadDayFixture(undefined, calendars);
-const app = createApp(fixture, calendars);
+const app = newApp();
 
 describe('GET /health', () => {
   it('200과 { ok: true }를 돌려준다', async () => {
@@ -98,11 +96,11 @@ describe('GET /schedules/today 캘린더 선택 반영', () => {
     });
 
   it('저장 전에는 기본 선택 캘린더의 일정만 내려준다(KIA 구독 일정 제외)', async () => {
-    expect(await ids(createApp(fixture, calendars))).toEqual(['gwangju-allday', 'gwangju-lunch', 'gwangju-kia', 'gwangju-kongmul']);
+    expect(await ids(newApp())).toEqual(['gwangju-allday', 'gwangju-lunch', 'gwangju-kia', 'gwangju-kongmul']);
   });
 
   it('KIA 캘린더를 더해 저장하면 KIA vs 두산이 포함된다', async () => {
-    const a = createApp(fixture, calendars);
+    const a = newApp();
     expect((await select(a, ['mock-my', 'mock-work', 'mock-family', 'mock-kia'])).status).toBe(200);
     const list = await ids(a);
     expect(list).toContain('gwangju-kia-doosan');
@@ -115,20 +113,20 @@ describe('GET /schedules/today 캘린더 선택 반영', () => {
   });
 
   it('저장한 캘린더의 일정만 내려준다', async () => {
-    const a = createApp(fixture, calendars);
+    const a = newApp();
     await select(a, ['mock-kia']);
     expect(await ids(a)).toEqual(['gwangju-kia-doosan']);
   });
 
   it('일정이 없는 캘린더만 고르면 빈 목록이다', async () => {
-    const a = createApp(fixture, calendars);
+    const a = newApp();
     await select(a, ['mock-holidays']);
     expect(await ids(a)).toEqual([]);
   });
 
   it('앱 인스턴스마다 선택을 따로 가진다', async () => {
-    const a = createApp(fixture, calendars);
+    const a = newApp();
     await select(a, ['mock-kia']);
-    expect(await ids(createApp(fixture, calendars))).toHaveLength(4);
+    expect(await ids(newApp())).toHaveLength(4);
   });
 });

@@ -26,3 +26,21 @@ export type MockCalendar = {
   color: string;
   defaultSelected: boolean;
 };
+
+export type MockPlace = {
+  id: string;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  /** 가상으로 만든 장소. 화면과 API 응답에는 내보내지 않는다. */
+  fictional?: boolean;
+};
+
+export type PlaceSuggestion = MockPlace & { hint: string };
+
+/** 장소 검색 대상 목록과 '캘린더에서 자주 나온 곳' 추천. */
+export type PlacesCatalog = {
+  places: MockPlace[];
+  suggestions: PlaceSuggestion[];
+};

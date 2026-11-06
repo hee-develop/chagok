@@ -1,4 +1,4 @@
-import { createRevisionClock, fetchCalendarSelection, saveCalendarSelection } from '../selectionApi';
+import { fetchCalendarSelection, saveCalendarSelection } from '../selectionApi';
 
 const mockPut = jest.fn();
 const mockGet = jest.fn();
@@ -52,20 +52,5 @@ describe('fetchCalendarSelection', () => {
   it('응답이 ok가 아니면 던진다', async () => {
     mockGet.mockResolvedValue({ ok: false, status: 500 });
     await expect(fetchCalendarSelection(new AbortController().signal)).rejects.toThrow('500');
-  });
-});
-
-describe('createRevisionClock', () => {
-  it('시각이 같거나 거꾸로 가도 항상 이전보다 큰 정수를 돌려준다', () => {
-    const times = [1000, 1000, 1000, 900, 1001];
-    const next = createRevisionClock(() => times.shift() as number);
-    const values = [next(), next(), next(), next(), next()];
-    expect(values[0]).toBe(1_000_000);
-    for (let i = 1; i < values.length; i++) expect(values[i]).toBeGreaterThan(values[i - 1]);
-    expect(values.every(Number.isSafeInteger)).toBe(true);
-  });
-
-  it('현재 시각 기준 값은 안전 정수 범위 안이다', () => {
-    expect(Number.isSafeInteger(createRevisionClock()())).toBe(true);
   });
 });

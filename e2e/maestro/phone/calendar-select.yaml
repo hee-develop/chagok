@@ -38,7 +38,7 @@ appId: ${APP_ID}
 
 - tapOn: '캘린더 4개 연결하기'
 - extendedWaitUntil:
-    visible: '자주 가는 곳'
+    visible: '자주 가는 곳을 알려주세요'
     timeout: 15000
 - assertVisible: '2 / 4'
 - takeScreenshot: 03-places

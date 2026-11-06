@@ -5,14 +5,14 @@ import { strings } from '../../i18n/ko';
 import { SetupHeader } from '../../ui/SetupHeader';
 import { colors, useFont } from '../../ui/theme';
 
-export function PlacesPlaceholderScreen() {
+export function FillPlacesPlaceholderScreen() {
   const insets = useSafeAreaInsets();
   const font = useFont();
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
-      <SetupHeader step={2} />
+      <SetupHeader step={3} />
       <Text accessibilityRole="header" style={[styles.title, font(600)]}>
-        {strings.places.title}
+        {strings.fillPlaces.title}
       </Text>
     </View>
   );

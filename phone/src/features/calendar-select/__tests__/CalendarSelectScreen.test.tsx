@@ -6,7 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { FontsLoadedContext } from '../../../ui/theme';
 import { CalendarSelectScreen } from '../CalendarSelectScreen';
 import { MOCK_CALENDARS, type CalendarSource } from '../calendarSource';
-import { REQUEST_TIMEOUT_MS } from '../selectionApi';
+import { REQUEST_TIMEOUT_MS } from '../../../api/request';
 
 const mockPush = jest.fn();
 jest.mock('expo-router', () => ({
