@@ -1,0 +1,54 @@
+# 1단계 캘린더 고르기. scripts/e2e-phone.sh 가 아래 env를 넣어 실행한다.
+#   APP_ID      Expo Go 번들 ID (Android host.exp.exponent)
+#   EXPO_URL    Metro 접속 주소 (exp://...)
+#   SERVER_URL  호스트에서 본 서버 주소
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+- openLink: ${EXPO_URL}
+
+# Expo Go 첫 실행 안내와 개발자 메뉴가 뜨면 닫는다.
+- runFlow:
+    when:
+      visible: 'Continue'
+    commands:
+      - tapOn: 'Continue'
+- runFlow:
+    when:
+      visible: 'Go home'
+    commands:
+      - back
+
+- extendedWaitUntil:
+    visible: '캘린더를 골라 주세요'
+    timeout: 120000
+- assertVisible: '1 / 4'
+- assertVisible: '캘린더 3개 연결하기'
+- takeScreenshot: 01-initial
+- runScript:
+    file: assert-schedules.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT_KIA: 'false'
+
+- tapOn: 'KIA 타이거즈 경기'
+- assertVisible: '캘린더 4개 연결하기'
+- takeScreenshot: 02-kia-selected
+
+- tapOn: '캘린더 4개 연결하기'
+- extendedWaitUntil:
+    visible: '자주 가는 곳'
+    timeout: 15000
+- assertVisible: '2 / 4'
+- takeScreenshot: 03-places
+
+- runScript:
+    file: assert-selection.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+- runScript:
+    file: assert-schedules.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT_KIA: 'true'

@@ -1,9 +1,17 @@
 import { isAbsolute } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_FIXTURE_URL, loadDayFixture, parseDayFixture, resolveFixtureLocation } from '../src/fixtures.js';
+import {
+  DEFAULT_FIXTURE_URL,
+  loadDayFixture,
+  loadMockCalendars,
+  parseDayFixture,
+  parseMockCalendars,
+  resolveFixtureLocation,
+} from '../src/fixtures.js';
 
 const schedule = {
   id: 's1',
+  calendarId: 'mock-my',
   title: '점심',
   startOffsetMinutes: 0,
   endOffsetMinutes: 60,
@@ -54,6 +62,44 @@ describe('parseDayFixture 값 검증', () => {
   it('경계값(±7일, end == start)은 통과한다', () => {
     const edge = { ...schedule, id: 'e', startOffsetMinutes: -7 * 24 * 60, endOffsetMinutes: -7 * 24 * 60 };
     expect(parseDayFixture({ id: 'd', name: 'n', schedules: [edge, { ...schedule, endOffsetMinutes: 7 * 24 * 60 }] })).toBeTruthy();
+  });
+});
+
+describe('calendarId 검증', () => {
+  it.each([
+    ['calendarId 없음', { ...schedule, calendarId: undefined }],
+    ['calendarId가 숫자', { ...schedule, calendarId: 1 }],
+  ])('%s이면 거부한다', (_name, bad) => {
+    expect(() => parseDayFixture(day(bad))).toThrow(/픽스처 일정 형식/);
+  });
+
+  it('목 캘린더에 없는 calendarId면 거부한다', () => {
+    expect(() => parseDayFixture(day({ ...schedule, calendarId: 'nope' }))).toThrow(/calendarId/);
+  });
+
+  it('기본 픽스처의 모든 일정 calendarId가 목 캘린더에 있다', () => {
+    const ids = new Set(loadMockCalendars().map((c) => c.id));
+    for (const s of loadDayFixture().schedules) expect(ids.has(s.calendarId)).toBe(true);
+  });
+});
+
+describe('parseMockCalendars', () => {
+  const cal = { id: 'a', name: 'n', account: 'x', color: '#000000', defaultSelected: true };
+
+  it('기본 목 캘린더는 6개이고 기본 선택은 3개다', () => {
+    const list = loadMockCalendars();
+    expect(list).toHaveLength(6);
+    expect(list.filter((c) => c.defaultSelected).map((c) => c.id)).toEqual(['mock-my', 'mock-work', 'mock-family']);
+  });
+
+  it.each([
+    ['calendars 없음', {}],
+    ['빈 배열', { calendars: [] }],
+    ['id가 빈 문자열', { calendars: [{ ...cal, id: '' }] }],
+    ['defaultSelected가 문자열', { calendars: [{ ...cal, defaultSelected: 'yes' }] }],
+    ['id 중복', { calendars: [cal, cal] }],
+  ])('%s이면 거부한다', (_name, bad) => {
+    expect(() => parseMockCalendars(bad)).toThrow(/목 캘린더/);
   });
 });
 

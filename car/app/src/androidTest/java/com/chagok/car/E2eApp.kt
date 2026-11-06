@@ -55,7 +55,7 @@ class E2eApp : ChagokApp() {
         val host = SessionHost(
             this,
             clock = DemoClock(Clock.fixed(NOW, ZoneId.of("Asia/Seoul"))),
-            fetcher = ScheduleFetcher { at -> FixtureResponses.response(fixtureJson(), at) },
+            fetcher = ScheduleFetcher { at -> FixtureResponses.response(fixtureJson(), at, calendarsJson()) },
             adapters = { post, onSpeaking, onIgnitionSupport ->
                 speaker = FakeSpeaker(onSpeaking)
                 Adapters(FakeTravel(post), speaker, FakeSignals(onIgnitionSupport))
@@ -72,8 +72,11 @@ class E2eApp : ChagokApp() {
         lateinit var fakeSpeaker: FakeSpeaker
             private set
 
-        private fun fixtureJson(): String =
-            InstrumentationRegistry.getInstrumentation().context.assets.open("schedules/gwangju-day.json")
-                .bufferedReader().use { it.readText() }
+        private fun fixtureJson(): String = asset("schedules/gwangju-day.json")
+
+        private fun calendarsJson(): String = asset("calendars/mock-device.json")
+
+        private fun asset(path: String): String =
+            InstrumentationRegistry.getInstrumentation().context.assets.open(path).bufferedReader().use { it.readText() }
     }
 }

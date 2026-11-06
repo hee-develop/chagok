@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
-import type { DayFixture } from './fixture-types.js';
+import type { DayFixture, MockCalendar } from './fixture-types.js';
+import { createCalendarsRoute, createSelectionStore, effectiveSelectedIds, type SelectionStore } from './routes/calendars.js';
 
 const ISO_8601 =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-](\d{2}):(\d{2}))$/;
@@ -28,30 +29,38 @@ function parseAt(value: string): Date | null {
 const MINUTE_MS = 60_000;
 
 // RPC 타입 추론을 위해 라우트는 반드시 체이닝으로 정의한다.
-export const createApp = (fixture: DayFixture) =>
+export const createApp = (
+  fixture: DayFixture,
+  calendars: MockCalendar[],
+  store: SelectionStore = createSelectionStore(),
+) =>
   new Hono()
     .get('/health', (c) => c.json({ ok: true as const }))
+    .route('/calendars', createCalendarsRoute(calendars, store))
     .get('/schedules/today', (c) => {
       const raw = c.req.query('at');
       const anchor = raw === undefined ? new Date() : parseAt(raw);
       if (anchor === null) {
         return c.json({ error: 'at은 ISO8601 시각이어야 합니다' }, 400);
       }
+      const selected = new Set(effectiveSelectedIds(calendars, store));
       const shift = (minutes: number) => new Date(anchor.getTime() + minutes * MINUTE_MS).toISOString();
       return c.json(
         {
           anchor: anchor.toISOString(),
-          schedules: fixture.schedules.map((s) => ({
-            id: s.id,
-            title: s.title,
-            start: shift(s.startOffsetMinutes),
-            end: shift(s.endOffsetMinutes),
-            allDay: s.allDay,
-            locationText: s.locationText,
-            place: s.place,
-            memo: s.memo,
-            attendees: s.attendees,
-          })),
+          schedules: fixture.schedules
+            .filter((s) => selected.has(s.calendarId))
+            .map((s) => ({
+              id: s.id,
+              title: s.title,
+              start: shift(s.startOffsetMinutes),
+              end: shift(s.endOffsetMinutes),
+              allDay: s.allDay,
+              locationText: s.locationText,
+              place: s.place,
+              memo: s.memo,
+              attendees: s.attendees,
+            })),
         },
         200,
       );

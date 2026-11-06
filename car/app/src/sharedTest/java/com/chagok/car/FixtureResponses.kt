@@ -6,14 +6,28 @@ import java.time.Duration
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
-/** 픽스처(fixtures/schedules 아래 JSON)로 서버의 `GET /schedules/today` 응답 본문을 만든다. 서버 라우트와 같은 규칙(시각 = at + 오프셋). */
+/**
+ * 픽스처(fixtures/schedules 아래 JSON)로 서버의 `GET /schedules/today` 응답 본문을 만든다.
+ * 서버 라우트와 같은 규칙을 쓴다: 시각 = at + 오프셋, 일정은 저장된 선택이 없을 때의 기본 선택(fixtures/calendars/mock-device.json의
+ * defaultSelected) 캘린더 것만 담는다.
+ */
 object FixtureResponses {
-    fun response(fixtureJson: String, anchor: Instant): String {
+    /** JVM 단위 테스트에서는 테스트 리소스에서 읽는다. 계측 테스트는 assets에서 읽어 직접 넘긴다. */
+    fun defaultCalendarsJson(): String =
+        checkNotNull(FixtureResponses::class.java.classLoader?.getResourceAsStream("calendars/mock-device.json")) {
+            "목 캘린더 픽스처 없음: calendars/mock-device.json"
+        }.bufferedReader().use { it.readText() }
+
+    fun response(fixtureJson: String, anchor: Instant, calendarsJson: String = defaultCalendarsJson()): String {
         val fixture = JSONObject(fixtureJson)
+        val calendars = JSONObject(calendarsJson).getJSONArray("calendars")
+        val selected = (0 until calendars.length()).map { calendars.getJSONObject(it) }
+            .filter { it.getBoolean("defaultSelected") }.map { it.getString("id") }.toSet()
         val items = fixture.getJSONArray("schedules")
         val schedules = JSONArray()
         for (i in 0 until items.length()) {
             val item = items.getJSONObject(i)
+            if (item.getString("calendarId") !in selected) continue
             schedules.put(
                 JSONObject()
                     .put("id", item.getString("id"))
