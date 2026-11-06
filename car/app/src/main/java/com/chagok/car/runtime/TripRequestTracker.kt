@@ -19,6 +19,9 @@ class TripRequestTracker(val timeout: Duration) {
     private var failed = false
     private var pending: Pending? = null
 
+    /** 내비에 연결돼 있고 연결이 실패하지 않았는가. 길안내 요청은 이때만 보낸다. */
+    val ready: Boolean get() = synchronized(lock) { connected && !failed }
+
     /** 새 요청을 등록한다. 이전 요청이 남아 있으면 덮어쓴다(세션은 마지막 ID만 기다린다). */
     fun request(id: Int, place: Place): Step = synchronized(lock) {
         when {

@@ -1,0 +1,105 @@
+# 출발 제안 → 길안내 E2E. 서버가 떠 있고 debug 앱이 설치된 에뮬레이터에서 돈다(scripts/e2e-car.sh가 서버와 설치를 맡는다).
+# 내비 결과와 들은 말은 debug 빌드의 chagok-debug://signal 주소로 넣는다.
+#   now: 데모 시계·일정 기준 시각, trip: 소요 시간(초), route: 길안내 요청 결과(ok·fail), listen=off: 실제 STT를 열지 않음,
+#   heard: 들은 말(퍼센트 인코딩, 세션이 처리하면 "들은 말 처리: <말>" 토스트가 뜬다). 응=%EC%9D%91, 잠깐만=%EC%9E%A0%EA%B9%90%EB%A7%8C, 광주 육전집=%EA%B4%91%EC%A3%BC%20%EC%9C%A1%EC%A0%84%EC%A7%91
+# 대상 일정은 픽스처의 '육전집 점심'(13:00, 장면 시각 09:20 KST). 소요 3시간 20분(12000초)이면 출발 제안, 4시간(14400초)이면 늦음, 30분(1800초)이면 여유가 많아 목적지 묻기다.
+# 스크린샷은 ${SHOT_DIR} 아래에 남긴다. 기기 시간대는 Asia/Seoul 이어야 한다(스크립트가 맞춘다).
+appId: com.chagok.car
+name: 출발 제안 길안내
+env:
+  SHOT_DIR: e2e/output/car
+---
+- launchApp
+
+# 1. 출발 제안 카드: 주 버튼 "응, 출발"과 보조 버튼 "잠깐만", 음성 힌트
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&enter=true
+- extendedWaitUntil:
+    visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
+    timeout: 20000
+- assertVisible: "응, 출발"
+- assertVisible: "잠깐만"
+- assertVisible: "“응”이라고 말해도 돼요"
+- assertVisible: ".*메모에.*이 있어요.*출발할까요.*"
+- assertNotVisible: ".*챙기셨어요.*"
+- takeScreenshot: ${SHOT_DIR}/01-depart-offer
+
+# 2. "잠깐만"이라고 말하면 보류: 카드가 남고, 듣기가 닫혀 뒤이은 "응"은 무시된다
+- openLink: chagok-debug://signal?heard=%EC%9E%A0%EA%B9%90%EB%A7%8C
+- assertVisible: "응, 출발"
+- openLink: chagok-debug://signal?heard=%EC%9D%91
+- extendedWaitUntil:
+    visible: "들은 말 처리: 응"
+    timeout: 5000
+- assertVisible: "응, 출발"
+- assertNotVisible: "길안내를 시작할게요."
+- takeScreenshot: ${SHOT_DIR}/02-hold
+
+# 3. 보류한 뒤 주 버튼으로 수락 → 길안내 시작 안내
+- tapOn: "응, 출발"
+- extendedWaitUntil:
+    visible: "길안내를 시작할게요."
+    timeout: 5000
+- assertNotVisible: "응, 출발"
+- takeScreenshot: ${SHOT_DIR}/03-route-started
+# 결과 한 줄은 10초 뒤 사라진다
+- extendedWaitUntil:
+    notVisible: "길안내를 시작할게요."
+    timeout: 15000
+- takeScreenshot: ${SHOT_DIR}/03b-result-gone
+
+# 4. 다시 첫 탑승 → "응"이라고 말하는데 내비가 경로 요청을 받지 못하면 실패 안내
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&trip=12000&route=fail&listen=off&gear=P&enter=true
+- extendedWaitUntil:
+    visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
+    timeout: 20000
+- openLink: chagok-debug://signal?heard=%EC%9D%91
+- extendedWaitUntil:
+    visible: "길안내를 시작하지 못했어요."
+    timeout: 5000
+- assertNotVisible: "응, 출발"
+- takeScreenshot: ${SHOT_DIR}/04-route-failed
+
+# 5. 소요 시간 4시간이면 늦음: 늦는다고 알린 뒤 출발 제안과 같이 묻고, 수락하기 전에는 길안내를 시작하지 않는다
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&trip=14400&route=ok&listen=off&gear=P&enter=true
+- extendedWaitUntil:
+    visible: ".*도착이에요.*"
+    timeout: 20000
+- assertVisible: "출발할까요?"
+- assertVisible: "응, 출발"
+- assertVisible: "잠깐만"
+- assertVisible: "“응”이라고 말해도 돼요"
+- assertNotVisible: "길안내를 시작할게요."
+- takeScreenshot: ${SHOT_DIR}/05-late-ask
+- openLink: chagok-debug://signal?heard=%EC%9D%91
+- extendedWaitUntil:
+    visible: "길안내를 시작할게요."
+    timeout: 5000
+- assertNotVisible: "응, 출발"
+- takeScreenshot: ${SHOT_DIR}/05b-late-accepted
+
+# 6. 소요 30분이면 여유가 많아 목적지를 묻는다: 제안 장소가 후보. 장소 이름으로 고른다
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&trip=1800&route=ok&listen=off&gear=P&enter=true
+- extendedWaitUntil:
+    visible: ".*어디로 갈까요.*"
+    timeout: 20000
+- assertVisible: "광주 육전집으로"
+- assertVisible: "그냥 갈게"
+- takeScreenshot: ${SHOT_DIR}/06-ask-destination
+- openLink: chagok-debug://signal?heard=%EA%B4%91%EC%A3%BC%20%EC%9C%A1%EC%A0%84%EC%A7%91
+- extendedWaitUntil:
+    visible: "길안내를 시작할게요."
+    timeout: 5000
+- assertNotVisible: "광주 육전집으로"
+- takeScreenshot: ${SHOT_DIR}/07-candidate-route-started
+
+# 7. 거절: "그냥 갈게" 버튼으로 카드만 접는다
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&trip=1800&route=ok&listen=off&gear=P&enter=true
+- extendedWaitUntil:
+    visible: ".*어디로 갈까요.*"
+    timeout: 20000
+- tapOn: "그냥 갈게"
+- extendedWaitUntil:
+    notVisible: ".*어디로 갈까요.*"
+    timeout: 5000
+- assertNotVisible: "길안내를 시작할게요."
+- takeScreenshot: ${SHOT_DIR}/08-just-go

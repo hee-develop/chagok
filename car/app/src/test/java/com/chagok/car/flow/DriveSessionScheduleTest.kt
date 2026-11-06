@@ -79,10 +79,10 @@ class DriveSessionScheduleTest {
         assertTrue(session.handle(Event.ScheduleLoaded(1)).has<Effect.RequestTravelTime>())
     }
 
-    @Test fun `받는 동안에도 기어 제한 닫기 Suspend는 바로 처리한다`() {
+    @Test fun `받는 동안에도 기어 제한 버튼 Suspend는 바로 처리한다`() {
         boardWithCard()
         session.handle(Event.ScheduleLoading(1))
-        val closed = session.handle(Event.CloseRequested)
+        val closed = session.handle(Event.PrimaryPressed)
         assertTrue(closed.has<Effect.StopVoice>())
         assertEquals(Effect.CollapseCard(false), closed.one<Effect.CollapseCard>())
         session.handle(Event.GearChanged(Gear.DRIVE))
@@ -255,12 +255,23 @@ class DriveSessionScheduleTest {
         assertTrue(out.none { it is Effect.RequestTravelTime })
     }
 
+    @Test fun `일정 안내 카드는 보조 버튼 닫기로만 접고 주 버튼과 음성은 무시한다`() {
+        givenNoSchedule()
+        session.handle(Event.Boarded)
+        refreshCycle(1)
+        assertEquals(emptyList<Effect>(), session.handle(Event.PrimaryPressed))
+        assertEquals(emptyList<Effect>(), session.handle(Event.Heard("응")))
+        val closed = session.handle(Event.SecondaryPressed)
+        assertTrue(closed.has<Effect.StopVoice>())
+        assertEquals(Effect.CollapseCard(false), closed.one<Effect.CollapseCard>())
+    }
+
     @Test fun `일정 안내는 그날 한 번만 말하고 이후 앱 진입은 조용하다`() {
         givenNoSchedule()
         session.handle(Event.AppEntered)
         assertTrue(refreshCycle(1).has<Effect.Speak>())
         // 안내를 닫고 내비 화면에서 돌아오듯 앱에 다시 들어온다. 받기는 다시 시도하지만 말하거나 띄우지 않는다.
-        session.handle(Event.CloseRequested)
+        session.handle(Event.SecondaryPressed)
         val again = session.handle(Event.AppEntered)
         assertTrue(again.has<Effect.RefreshSchedules>())
         val after = refreshCycle(2)
@@ -272,7 +283,7 @@ class DriveSessionScheduleTest {
         givenNoSchedule()
         session.handle(Event.Boarded)
         refreshCycle(1)
-        session.handle(Event.CloseRequested)
+        session.handle(Event.SecondaryPressed)
         clock.now += Duration.ofDays(1)
         session.handle(Event.Boarded)
         assertTrue(refreshCycle(2).has<Effect.Speak>())
@@ -295,7 +306,7 @@ class DriveSessionScheduleTest {
         givenNoSchedule()
         session.handle(Event.AppEntered)
         refreshCycle(1)
-        session.handle(Event.CloseRequested)
+        session.handle(Event.SecondaryPressed)
 
         source.schedules = listOf(meeting)
         source.origin = ScheduleOrigin.FRESH

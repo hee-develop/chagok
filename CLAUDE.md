@@ -21,6 +21,12 @@ Pleos Connect(현대차그룹 AAOS 기반 인포테인먼트) 차량 앱 사이�
 - 목 캘린더는 `fixtures/calendars/mock-device.json`이 단일 출처입니다(폰 앱·서버 공용). 일정 픽스처를 바꾸면 차량 테스트 도우미(`FixtureResponses`)가 같은 기본 선택 규칙을 따릅니다.
 - 서버 라우트는 `server/src/routes/`에 파일별로 두고 `app.ts`에서 `.route()`로 체이닝 연결해 RPC 타입 추론을 유지합니다.
 
+## 차량 앱 구현 현황
+
+- 탑승 브리핑, 출발 제안 → 길안내(수락·보류·거절·듣기 8초·늦게 탐도 출발 제안과 같이 묻기·후보 고르기)까지 들어가 있습니다.
+- 아직 없음(다음 기능): 주행 중 다음 일정 칩, 도착 판단·하차 카드, 위치, 장소 키워드 검색, 재탑승 한 줄.
+- debug 빌드의 `chagok-debug://signal`로 소요 시간(`trip`)·경로 요청 결과(`route`)·들은 말(`heard`)을 주입해 회사망에서도 E2E가 돕니다. 실제 내비와 음성 인식은 `docs/sdk-check.md`의 수동 확인 목록입니다.
+
 ## Pleos 설계 가이드 점검
 
 차량 앱(`car/`) 코드는 [Pleos Connect 앱 설계 가이드](https://document.pleos.ai/docs/pleos-only/vehicle-app-planning-guide/intro)와 [앱 개발 가이드](https://document.pleos.ai/docs/pleos-only/vehicle-app-developer-guide/intro)를 따라야 합니다. 준수 여부는 `pleos-guide-checker` 에이전트로 점검합니다.

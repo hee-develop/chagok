@@ -11,9 +11,13 @@ object Rules {
     val QUICK_STOP: Duration = Duration.ofMinutes(10)
     val ASK_DESTINATION_LEAD: Duration = Duration.ofMinutes(60)
     val LATE_THRESHOLD: Duration = Duration.ofMinutes(5)
+    val LISTEN_WINDOW: Duration = Duration.ofSeconds(8)
     val CARD_TIMEOUT: Duration = Duration.ofSeconds(30)
+    val RESULT_VISIBLE: Duration = Duration.ofSeconds(10)
     const val MEMO_READ_MAX_CHARS = 30
+    const val MAX_REPROMPTS = 1
 
     // 가안
     val DEPARTURE_BUFFER: Duration = Duration.ofMinutes(10)
+    const val CHATTER_OVER_WORDS = 4
 }

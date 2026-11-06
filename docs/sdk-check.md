@@ -61,3 +61,23 @@
 - `NaviHelper.requestRoute`는 `pleos.car.permission.NAVI_ROUTE_SEARCH` 권한이 있어야 동작했다(`NAVI_ROUTE`만으로는 부족). 매니페스트에 둘 다 선언한다.
 - 이 에뮬레이터(user 빌드)에서는 `inject-vhal-event`로 기어를 바꿀 수 없다. 기어·시동 전환은 디버그 버튼([탑승] 등)이나 단위 테스트로 확인한다.
 
+
+## 출발 제안 → 길안내 (2026-11-06 구현, 회사망 안에서는 주입으로만 확인)
+
+- 권한: `pleos.car.permission.STT_SERVICE`를 더했다. 에뮬레이터 `pm list permissions -f`로 확인한 등급은 NAVI_ROUTE·NAVI_ROUTE_SEARCH·TTS_SERVICE·STT_SERVICE 모두 normal이라 런타임 동의(PermissionGate·권한 설명 카드)는 켜지 않았다.
+- 마이크(`RECORD_AUDIO`, dangerous): 넣지 않았다. STT는 CAAS 서비스(`ai.pleos.playground.caas`)가 녹음하고, SpeechToText AAR 매니페스트에도 RECORD_AUDIO가 없다. 2026-10-29 진단에서 이 권한 없이 `request()` 뒤 마이크가 열렸다(로그 실측). 실기기·회사망 밖에서 인식이 안 되면 그때 필요 여부를 다시 본다.
+- 경로 시작 이벤트: 결과 안내는 `requestRoute`를 내비에 보냈는지(`RouteRequestResult`)로 정한다. `onRouteStarted`(칩 도착 예정)와 `onRouteCancelled`(칩·도착 판정 정리)는 이번 기능의 결과 안내에 쓰이지 않아 다음 기능(주행 중 칩, 도착 판단)에서 넣는다.
+
+### 미확인 — 수동 확인 필요 (회사망 밖, 실제 에뮬레이터·실차)
+
+| 항목 | 확인할 것 | 상태 |
+| --- | --- | --- |
+| 실제 내비 경로 시작 | 카드에서 "응" 또는 [응, 출발] → 내비 앱이 해당 장소로 안내를 시작하는가. `requestRoute`가 요청만 전달하고 시작 여부는 이벤트로 오므로, 요청이 성공했는데 내비가 시작하지 않는 경우(내비 서버 연결 실패 등)를 앱이 알 수 없다 | 미확인 |
+| 실제 음성 인식 | 카드를 읽은 뒤 "응", "잠깐만", "아니", 장소 이름을 말하면 `Event.Heard`로 들어와 판별되는가. 에뮬레이터는 마이크 입력을 켠 상태에서, 서버 모드가 아닌 ON_DEVICE로 | 미확인 |
+| 듣기 8초 | 앱 타이머로 8초 뒤 `stop()` → 결과(부분 결과 포함)가 한 번만 전달되는가, `onEndedRecognition` 콜백이 오는가 | 미확인 |
+| 듣기 중 오디오 포커스 | 말할 때 잡은 포커스(USAGE_ASSISTANT, MAY_DUCK)를 듣는 동안에도 쥐는가(듣기 종료·결과 전달·중단 때 반납). 듣는 중 다른 앱이 가져가면(LOSS·LOSS_TRANSIENT) 듣기가 즉시 멈추고 결과를 알리지 않는가 | 미확인 |
+| 주행 중 Suspend | 시동 OFF 등 Suspend 때 STT가 중단되는가 | 미확인 |
+| `requestRoute` 실패 | 내비에 연결된 뒤 요청이 예외 없이 전달되는가, 연결 전(시작·재시작 직후)에는 앱이 요청하지 않고 실패로 안내하는가 | 미확인 |
+| 듣는 중 표시 | 음성을 받는 중임을 화면에 알리는 표시. 프로토타입에 듣는 중 표시와 문구가 없어 만들지 않았다. 카드 머리 파형(VoiceIndicator)은 말하는 동안만 움직인다 | 미확인 |
+
+debug 빌드는 `chagok-debug://signal?trip=<초>&route=ok|fail&listen=off&heard=<들은 말>`로 소요 시간·경로 요청 결과·들은 말을 주입한다(자동 E2E용). 위 항목을 사람이 확인할 때는 `trip=real&route=real&listen=real`로 주입을 풀고 실제 내비·STT를 쓴다.

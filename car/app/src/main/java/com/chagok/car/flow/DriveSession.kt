@@ -1,5 +1,6 @@
 package com.chagok.car.flow
 
+import com.chagok.car.domain.AskReason
 import com.chagok.car.domain.BoardingDecider
 import com.chagok.car.domain.BoardingDecision
 import com.chagok.car.domain.BoardingKind
@@ -7,6 +8,8 @@ import com.chagok.car.domain.BoardingLog
 import com.chagok.car.domain.DayPlan
 import com.chagok.car.domain.Gear
 import com.chagok.car.domain.Ignition
+import com.chagok.car.domain.Intent
+import com.chagok.car.domain.IntentMatcher
 import com.chagok.car.domain.Motion
 import com.chagok.car.domain.Place
 import com.chagok.car.domain.Question
@@ -45,8 +48,20 @@ sealed interface Event {
     /** 소요 시간 응답. 3초 안에 못 받았거나 실패하면 null(타임아웃은 어댑터가 건다). */
     data class TravelTimeResult(val requestId: Int, val travelTime: Duration?) : Event
 
-    /** 카드의 닫기 버튼 */
-    data object CloseRequested : Event
+    /** [Effect.StartRoute] 호출 결과. 요청을 내비에 보내지 못했으면 ok=false. */
+    data class RouteRequestResult(val ok: Boolean) : Event
+
+    /** STT 결과. 아무것도 못 들었으면 빈 문자열. */
+    data class Heard(val text: String) : Event
+
+    /** 결과 한 줄을 보인 지 [Rules.RESULT_VISIBLE]이 지났다. */
+    data class ResultTimedOut(val timerId: Int) : Event
+
+    /** 카드의 주 버튼 */
+    data object PrimaryPressed : Event
+
+    /** 카드의 보조 버튼 */
+    data object SecondaryPressed : Event
     data class CardTimedOut(val timerId: Int) : Event
 
     /** 데모 초기화: 일정 상태와 BoardingLog를 비운다. */
@@ -76,9 +91,17 @@ sealed interface Effect {
     /** [instant]면 애니메이션 없이 바로 접는다(주행 제한·시동 끔·교체). 아니면 퇴장 애니메이션 400ms. */
     data class CollapseCard(val instant: Boolean = false) : Effect
 
-    data class Speak(val text: String) : Effect
 
-    /** 말하기를 멈추고 포커스를 반납한다. */
+    /** 카드를 접은 뒤에도 남기는 결과 한 줄. 빈 문자열이면 지운다. */
+    data class ShowResult(val text: String) : Effect
+
+    /** [delay] 뒤에 [Event.ResultTimedOut]을 넣는다. */
+    data class ScheduleResultTimeout(val timerId: Int, val delay: Duration) : Effect
+
+    /** [thenListen]이면 말이 끝난 뒤 [Rules.LISTEN_WINDOW] 동안 듣고 결과를 [Event.Heard]로 넣는다. */
+    data class Speak(val text: String, val thenListen: Boolean) : Effect
+
+    /** 말하기와 듣기를 멈추고 포커스를 반납한다. */
     data object StopVoice : Effect
 
     /** Suspend 진입: 어댑터 stop()/release(). 이 Effect 앞에 StopVoice와 Save가 먼저 나온다. */
@@ -87,6 +110,9 @@ sealed interface Effect {
     /** Suspend 해제: 어댑터를 다시 켠다. 오디오 포커스나 재생은 되찾지 않는다. */
     data object ExitSuspend : Effect
     data class RequestTravelTime(val requestId: Int, val place: Place) : Effect
+
+    /** [place]로 길안내를 요청한다. 실행한 쪽은 요청을 보냈는지를 [Event.RouteRequestResult]로 알린다. */
+    data class StartRoute(val place: Place) : Effect
     data class Save(val snapshot: Snapshot) : Effect
     data class ScheduleCardTimeout(val timerId: Int, val delay: Duration) : Effect
 
@@ -98,7 +124,7 @@ sealed interface Effect {
 }
 
 /**
- * 탑승 브리핑의 흐름 제어(정책서 3~7장). Android를 쓰지 않고 이벤트 → Effect 목록으로만 동작한다.
+ * 탑승 브리핑과 출발 제안 → 길안내의 흐름 제어(정책서 3~7장). Android를 쓰지 않고 이벤트 → Effect 목록으로만 동작한다.
  * 모든 호출은 한 스레드(메인)에서 해야 한다.
  */
 class DriveSession(
@@ -146,14 +172,24 @@ class DriveSession(
 
     private var pending: PendingBoarding? = null
     private var card: CardState? = null
+    private var acceptedRoute = false
     private var seq = 0
+
+    /** 결과 한 줄을 보이고 있으면 그 타이머 ID, 아니면 null */
+    private var resultTimerId: Int? = null
 
     private class PendingBoarding(val requestId: Int, val kind: BoardingKind, val targetId: String)
 
     private class CardState(
         val view: CardContent,
+        /** 질문 카드의 질문. 일정 안내 카드는 null */
         val question: Question?,
-        val timerId: Int,
+        var timerId: Int,
+        /** 듣기가 열려 있는가. 질문 카드가 말을 마치면 듣고, 결과를 받으면 닫는다(다시 물을 때만 다시 연다). */
+        var voiceOpen: Boolean = false,
+        var reprompts: Int = 0,
+        /** 알아듣지 못함·대안 없음 같은 안내 한 줄 */
+        var notice: String? = null,
         /** 일정을 불러오지 못했다는 안내 카드인가 */
         val isScheduleNotice: Boolean = false,
     )
@@ -214,7 +250,11 @@ class DriveSession(
                 enforceDriving(out)
             }
             is Event.TravelTimeResult -> onTravelTime(event, out)
-            Event.CloseRequested -> if (card != null) closeCard(out)
+            is Event.RouteRequestResult -> onRouteResult(event.ok, out)
+            is Event.ResultTimedOut -> if (resultTimerId == event.timerId) clearResult(out)
+            is Event.Heard -> onHeard(event.text, out)
+            Event.PrimaryPressed -> onButton(primary = true, out)
+            Event.SecondaryPressed -> onButton(primary = false, out)
             is Event.CardTimedOut -> if (card?.timerId == event.timerId) closeCard(out)
             Event.Reset -> onReset(out)
             is Event.ScheduleLoading, is Event.ScheduleLoaded -> if (loadedNow) onSchedulesLoaded(out)
@@ -245,8 +285,8 @@ class DriveSession(
     /** 말은 정차 중에만 한다(6장). Suspend 중에도 하지 않는다. */
     private fun canSpeak() = !suspended && motion() == Motion.STOPPED
 
-    private fun speak(out: MutableList<Effect>, text: String) {
-        if (canSpeak()) out += Effect.Speak(text)
+    private fun speak(out: MutableList<Effect>, text: String, thenListen: Boolean) {
+        if (canSpeak()) out += Effect.Speak(text, thenListen)
     }
 
     private fun onIgnition(new: Ignition, out: MutableList<Effect>) {
@@ -271,7 +311,9 @@ class DriveSession(
         if (suspended) return
         suspended = true
         pending = null
+        acceptedRoute = false
         heldBoarding = false
+        clearResult(out)
         if (card != null) closeCard(out, instant = true) else out += Effect.StopVoice
         forceSave = true
         enterSuspend = true
@@ -335,10 +377,11 @@ class DriveSession(
 
     private fun showScheduleNotice(out: MutableList<Effect>) {
         val view = Phrases.scheduleUnavailableCard()
+        resultTimerId = null
         val timerId = ++seq
         card = CardState(view, null, timerId, isScheduleNotice = true)
         out += Effect.ShowCard(view)
-        speak(out, Phrases.spoken(view))
+        speak(out, Phrases.spoken(view), thenListen = false)
         out += Effect.ScheduleCardTimeout(timerId, Rules.CARD_TIMEOUT)
     }
 
@@ -362,11 +405,15 @@ class DriveSession(
 
         val view = Phrases.card(decision, now(), zone)
         val timerId = ++seq
-        card = CardState(view, question, timerId)
-        out += Effect.ShowCard(view)
-        speak(out, Phrases.spoken(view))
+        val state = CardState(view, question, timerId, voiceOpen = true)
+        card = state
+        resultTimerId = null
+        out += Effect.ShowCard(view(state))
+        speak(out, Phrases.spoken(view), thenListen = true)
         out += Effect.ScheduleCardTimeout(timerId, Rules.CARD_TIMEOUT)
     }
+
+    private fun view(state: CardState): CardContent = state.view.copy(notice = state.notice)
 
     private fun onGear(newGear: Gear, out: MutableList<Effect>) {
         val previous = gear
@@ -391,6 +438,7 @@ class DriveSession(
         }
         pending = null
         heldBoarding = false
+        clearResult(out)
         if (card != null) {
             // 주행 제한으로 접을 때는 애니메이션 없이 바로 접는다.
             closeCard(out, instant = true)
@@ -407,15 +455,123 @@ class DriveSession(
         out += Effect.CollapseCard(instant)
     }
 
+    private fun onButton(primary: Boolean, out: MutableList<Effect>) {
+        val state = card ?: return
+        if (state.isScheduleNotice) {
+            if (!primary) closeCard(out)
+            return
+        }
+        val question = state.question ?: return
+        // 수락은 [accept]가 음성을 멈춘다.
+        if (!primary) out += Effect.StopVoice
+        when {
+            primary -> accept(state, out)
+            // 출발 제안·늦게 탐의 보조 버튼은 "잠깐만"(보류), 목적지 묻기의 보조 버튼은 "그냥 갈게"(거절)
+            question is Question.Depart || question is Question.DepartLate -> hold(state, out)
+            else -> reject(out)
+        }
+    }
+
+    private fun onHeard(text: String, out: MutableList<Effect>) {
+        val state = card ?: return
+        if (!state.voiceOpen) return
+        state.voiceOpen = false
+        val question = state.question
+        val candidates = (question as? Question.AskDestination)
+            ?.takeIf { it.reason == AskReason.PLENTY_OF_TIME }
+            ?.suggested?.place?.name?.let { listOf(it) }
+            .orEmpty()
+        // 수락("응")과 후보 고르기(이름·순서)는 같은 결과(제안 장소로 길안내)다.
+        val acceptPick = if (candidates.isNotEmpty()) 0 else null
+        when (val intent = IntentMatcher.match(text, candidates, acceptPick)) {
+            Intent.Accept ->
+                // 후보가 없는 목적지 묻기에서 "응"은 갈 곳을 정하지 못한 말이다.
+                if (question is Question.AskDestination && candidates.isEmpty()) unrecognized(state, out) else accept(state, out)
+            is Intent.Pick -> if (intent.index == acceptPick) accept(state, out) else unrecognized(state, out)
+            Intent.Reject -> reject(out)
+            Intent.Hold -> hold(state, out)
+            Intent.Alternative -> {
+                state.notice = Phrases.NO_ALTERNATIVE
+                out += Effect.ShowCard(view(state))
+                speak(out, Phrases.NO_ALTERNATIVE, thenListen = false)
+            }
+            Intent.Unrecognized -> unrecognized(state, out)
+            Intent.Chatter, Intent.Silence -> Unit
+        }
+    }
+
+    private fun unrecognized(state: CardState, out: MutableList<Effect>) {
+        if (state.reprompts < Rules.MAX_REPROMPTS) {
+            state.reprompts++
+            state.voiceOpen = true
+            speak(out, Phrases.ASK_AGAIN, thenListen = true)
+        } else {
+            state.notice = Phrases.USE_SCREEN
+            out += Effect.ShowCard(view(state))
+            speak(out, Phrases.USE_SCREEN, thenListen = false)
+        }
+    }
+
+    /** 보류: 카드를 둔 채 30초를 다시 센다. 말하던 것과 듣기는 멈춘다. */
+    private fun hold(state: CardState, out: MutableList<Effect>) {
+        state.voiceOpen = false
+        state.timerId = ++seq
+        out += Effect.ScheduleCardTimeout(state.timerId, Rules.CARD_TIMEOUT)
+    }
+
+    private fun reject(out: MutableList<Effect>) {
+        card = null
+        out += Effect.CollapseCard()
+    }
+
+    private fun accept(state: CardState, out: MutableList<Effect>) {
+        val place = when (val question = state.question) {
+            is Question.Depart -> question.target.place
+            is Question.DepartLate -> question.target.place
+            is Question.AskDestination ->
+                if (question.reason == AskReason.PLENTY_OF_TIME) question.suggested?.place else null
+            null -> null
+        }
+        card = null
+        out += Effect.StopVoice
+        out += Effect.CollapseCard()
+        if (place == null) return
+        acceptedRoute = true
+        out += Effect.StartRoute(place)
+    }
+
+    /** 길안내 요청 결과를 알린다. 정차 중일 때만 결과 한 줄을 보이고 말하며, 한 줄은 [Rules.RESULT_VISIBLE] 뒤 지운다. */
+    private fun onRouteResult(ok: Boolean, out: MutableList<Effect>) {
+        if (!acceptedRoute) return
+        acceptedRoute = false
+        if (!canSpeak()) return
+        val text = if (ok) Phrases.ROUTE_STARTED else Phrases.ROUTE_FAILED
+        val timerId = ++seq
+        resultTimerId = timerId
+        out += Effect.ShowResult(text)
+        out += Effect.ScheduleResultTimeout(timerId, Rules.RESULT_VISIBLE)
+        speak(out, text, thenListen = false)
+    }
+
+    /** 보이던 결과 한 줄을 지운다. 보이는 것이 없으면 아무것도 내지 않는다. */
+    private fun clearResult(out: MutableList<Effect>) {
+        if (resultTimerId == null) return
+        resultTimerId = null
+        out += Effect.ShowResult("")
+    }
+
     private fun onReset(out: MutableList<Effect>) {
         log = BoardingLog()
         statuses = emptyMap()
         statusDate = today()
         pending = null
+        acceptedRoute = false
         heldBoarding = false
         noticeSpokenOn = null
         drivenSincePark = false
         if (card != null) closeCard(out, instant = true) else out += Effect.StopVoice
+        resultTimerId = null
+        out += Effect.ShowResult("")
     }
 
     /** 저장은 매 이벤트 끝에 바뀐 것만 내보낸다. Suspend 진입 때는 바뀌지 않았어도 저장한다. */
