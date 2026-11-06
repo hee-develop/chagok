@@ -1,5 +1,5 @@
-import { PlacesPlaceholderScreen } from '../../features/setup/PlacesPlaceholderScreen';
+import { PlacesScreen } from '../../features/places/PlacesScreen';
 
 export default function PlacesRoute() {
-  return <PlacesPlaceholderScreen />;
+  return <PlacesScreen />;
 }

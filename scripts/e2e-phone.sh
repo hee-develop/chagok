@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 폰 앱 E2E (Android 기준): 서버와 Metro를 띄우고 Expo Go에서 Maestro flow를 실행한다.
+# 폰 앱 E2E (Android 기준): 서버와 Metro를 띄우고 Expo Go에서 Maestro flow(calendar-select, places)를 차례로 실행한다.
 # 사용법: scripts/e2e-phone.sh
 #
 # 환경 변수
@@ -9,7 +9,9 @@
 #   E2E_ANDROID_PORT  에뮬레이터 포트 (기본 5556). 5554는 다른 작업이 쓰므로 건드리지 않는다
 #   E2E_SHOT_DIR      스크린샷 저장 폴더 (기본 <루트>/.e2e-shots/phone). <루트>/.e2e-shots/ 아래여야 한다
 #   E2E_KEEP_DEVICES  1이면 스크립트가 띄운 에뮬레이터를 끝나도 끄지 않는다
-# 서버는 127.0.0.1에만 바인딩한다. 에뮬레이터의 10.0.2.2는 호스트 루프백으로 연결된다.
+# 서버는 127.0.0.1에만 바인딩한다. 기기의 127.0.0.1:<포트>를 adb reverse로 호스트의 Metro·서버 포트에 이어,
+# 앱은 exp://127.0.0.1:<Metro>와 http://127.0.0.1:<서버>로 접속한다.
+# 에뮬레이터가 이미 떠 있어 쓰는 경우에도 이 스크립트가 만든 reverse 규칙만 끝나면 지운다.
 set -uo pipefail
 set -m # 백그라운드 작업을 각자 프로세스 그룹으로 띄워 그룹 단위로 정리한다
 
@@ -51,6 +53,7 @@ mkdir -p "$LOG_DIR"
 SERVER_PID=""
 METRO_PID=""
 EMULATOR_PID=""
+REVERSED_PORTS=""
 
 # 프로세스 그룹 전체에 TERM, 남아 있으면 KILL
 kill_group() {
@@ -67,6 +70,10 @@ kill_group() {
 cleanup() {
   kill_group "$METRO_PID"
   kill_group "$SERVER_PID"
+  # 이 스크립트가 만든 reverse 규칙만 지운다(다른 포트의 규칙은 그대로 둔다)
+  for port in $REVERSED_PORTS; do
+    "$ADB" -s "$SERIAL" reverse --remove "tcp:$port" >/dev/null 2>&1 || true
+  done
   # 이 스크립트가 직접 띄운 에뮬레이터만 끈다
   if [ -n "$EMULATOR_PID" ] && [ "${E2E_KEEP_DEVICES:-0}" != "1" ]; then
     "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
@@ -160,11 +167,22 @@ start_server() {
 
 start_metro() {
   port_in_use "$METRO_PORT" && { echo "포트 $METRO_PORT 사용 중. E2E_METRO_PORT로 바꿔 주세요." >&2; return 1; }
-  (cd "$ROOT/phone" && CI=1 EXPO_NO_TELEMETRY=1 EXPO_PUBLIC_API_URL="http://10.0.2.2:$SERVER_PORT" \
+  (cd "$ROOT/phone" && CI=1 EXPO_NO_TELEMETRY=1 EXPO_PUBLIC_API_URL="http://127.0.0.1:$SERVER_PORT" \
     exec "$ROOT/phone/node_modules/.bin/expo" start --port "$METRO_PORT" --clear) \
     >"$LOG_DIR/metro.log" 2>&1 &
   METRO_PID=$!
   wait_for "Metro 기동" 120 curl -sf "http://127.0.0.1:$METRO_PORT/status"
+}
+
+# 기기의 127.0.0.1:<포트>를 호스트 포트에 잇는다. 같은 포트가 이미 reverse돼 있으면 남의 규칙이므로 쓰지 않는다.
+reverse_port() {
+  local port="$1"
+  if "$ADB" -s "$SERIAL" reverse --list 2>/dev/null | grep -q "tcp:$port "; then
+    echo "$SERIAL 에 tcp:$port reverse 규칙이 이미 있습니다. 이전 실행이 남긴 규칙이면 'adb -s $SERIAL reverse --remove tcp:$port'로 지우고, 다른 작업이 쓰는 포트면 E2E 포트를 바꿔 주세요." >&2
+    return 1
+  fi
+  "$ADB" -s "$SERIAL" reverse "tcp:$port" "tcp:$port" >/dev/null || return 1
+  REVERSED_PORTS="$REVERSED_PORTS $port"
 }
 
 ensure_emulator || exit 1
@@ -172,14 +190,31 @@ install_expo_go || exit 1
 rm -rf "$SHOT_DIR"; mkdir -p "$SHOT_DIR"
 start_server || exit 1
 start_metro || exit 1
+reverse_port "$METRO_PORT" || exit 1
+reverse_port "$SERVER_PORT" || exit 1
 
-echo "== Maestro 실행 (기기 $SERIAL)"
-"$MAESTRO" --device "$SERIAL" test "$ROOT/e2e/maestro/phone/calendar-select.yaml" \
-  -e APP_ID="host.exp.exponent" \
-  -e EXPO_URL="exp://10.0.2.2:$METRO_PORT?__expo_disable_fab=1" \
-  -e SERVER_URL="http://127.0.0.1:$SERVER_PORT" \
-  --test-output-dir "$SHOT_DIR"
-code=$?
+# flow 이름 -> 앱을 여는 주소. places는 1단계를 거치지 않고 2단계 화면으로 바로 들어간다.
+FLOWS="calendar-select places"
+expo_url() { # expo_url <경로>
+  echo "exp://127.0.0.1:$METRO_PORT${1}?__expo_disable_fab=1"
+}
+
+code=0
+for flow in $FLOWS; do
+  case "$flow" in
+    places) url="$(expo_url /--/setup/places)" ;;
+    *) url="$(expo_url "")" ;;
+  esac
+  echo "== Maestro 실행: $flow (기기 $SERIAL)"
+  "$MAESTRO" --device "$SERIAL" test "$ROOT/e2e/maestro/phone/$flow.yaml" \
+    -e APP_ID="host.exp.exponent" \
+    -e EXPO_URL="$url" \
+    -e SERVER_URL="http://127.0.0.1:$SERVER_PORT" \
+    --test-output-dir "$SHOT_DIR/$flow"
+  flow_code=$?
+  [ "$flow_code" = 0 ] && echo "$flow: 통과" || echo "$flow: 실패"
+  [ "$flow_code" = 0 ] || code=$flow_code
+done
 
 echo
 [ "$code" = 0 ] && echo "android: 통과" || echo "android: 실패"

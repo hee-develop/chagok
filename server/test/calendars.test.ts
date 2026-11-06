@@ -1,14 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createApp } from '../src/app.js';
-import { loadDayFixture, loadMockCalendars } from '../src/fixtures.js';
-import { MAX_BODY_BYTES, MAX_ID_LENGTH, MAX_SELECTED_IDS } from '../src/routes/calendars.js';
+import type { createApp } from '../src/app.js';
+import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../src/limits.js';
+import { MAX_SELECTED_IDS } from '../src/routes/calendars.js';
+import { newApp } from './helpers.js';
 
-const calendars = loadMockCalendars();
-const fixture = loadDayFixture(undefined, calendars);
 let app: ReturnType<typeof createApp>;
 
 beforeEach(() => {
-  app = createApp(fixture, calendars);
+  app = newApp();
 });
 
 const put = (body: unknown) =>

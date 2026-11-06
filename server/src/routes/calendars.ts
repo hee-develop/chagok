@@ -2,10 +2,9 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import type { MockCalendar } from '../fixture-types.js';
+import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
 
-export const MAX_BODY_BYTES = 64 * 1024;
 export const MAX_SELECTED_IDS = 50;
-export const MAX_ID_LENGTH = 100;
 
 export type SavedSelection = { selectedIds: string[]; savedAt: string; revision: number };
 

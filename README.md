@@ -32,6 +32,7 @@ pnpm typecheck         # 서버와 폰 앱 타입체크
 
 - 목 캘린더 6개는 `fixtures/calendars/mock-device.json` 한 파일이 단일 출처이고, 폰 앱과 서버가 같은 파일을 읽습니다.
 - `PUT /calendars/selection`은 `{ selectedIds, revision }`을 받아 저장하고(`GET`으로 조회), `GET /schedules/today`는 저장된 선택(없으면 `defaultSelected`) 캘린더의 일정만 내려줍니다. 일정의 `calendarId`는 `fixtures/schedules/gwangju-day.json`에 있습니다.
+- 장소는 `fixtures/places/mock-places.json`(검색 대상)과 `suggestions.json`('캘린더에서 자주 나온 곳' 고정 추천)이 단일 출처입니다. `GET /places/search?q=`(이름·주소 부분 일치, 최대 10개, q 50자 상한, 빈 q는 400), `GET /places/suggestions`, `GET /places/favorites`(`{ home, work, others, revision }`), `PUT /places/favorites/home`·`/work`(`{ placeId|null }`), `POST /places/favorites/others`(`{ placeId }`)를 둡니다. 쓰기 요청은 자리 하나만 바꾸고 전체 상태를 돌려주며, 같은 장소가 다른 자리에 있으면 서버가 옮깁니다. others 최대 20, 이미 추가한 장소·모르는 id는 400이고 `revision`은 서버가 올립니다. 저장은 폰→서버까지이고 차량 앱은 아직 읽지 않습니다.
 - `revision`은 폰이 보내는 단조 증가 정수이고, 서버는 저장된 값보다 작은 요청을 저장하지 않고 현재 저장값을 200으로 돌려줍니다. 저장 중 '나중에 할게요'로 취소한 요청도 서버에는 이미 반영됐을 수 있습니다.
 
 ## 폰 앱
@@ -45,16 +46,17 @@ pnpm typecheck         # 서버와 폰 앱 타입체크
 pnpm e2e:phone         # Android E2E (아래)
 ```
 
-서버 주소는 `EXPO_PUBLIC_API_URL`로 바꿀 수 있고, 없으면 `http://localhost:8787`을 씁니다. Android 에뮬레이터에서는 호스트가 `10.0.2.2`입니다.
+서버 주소는 `EXPO_PUBLIC_API_URL`로 바꿀 수 있고, 없으면 `http://localhost:8787`을 씁니다. Android 에뮬레이터에서는 `adb reverse tcp:8787 tcp:8787`로 기기의 `127.0.0.1:8787`을 호스트에 이은 뒤 `EXPO_PUBLIC_API_URL=http://127.0.0.1:8787`을 씁니다(Expo Go가 `10.0.2.2`에 붙지 못하는 경우가 있었습니다).
 
-라우트는 `phone/src/app/`(Expo Router)에 있고, 첫 설정 1단계는 `src/features/calendar-select/`입니다. 캘린더 데이터는 `CalendarSource` 인터페이스의 목 구현이며, 고른 결과는 서버에 저장하고 화면을 다시 열면 서버에서 복원합니다. 폰 앱은 Android·iOS 네이티브만 대상으로 하며 웹 타깃은 없습니다(`.pnpmfile.cjs`가 `react-dom` peer를 제거합니다).
+라우트는 `phone/src/app/`(Expo Router)에 있고, 첫 설정 1단계는 `src/features/calendar-select/`, 2단계 '자주 가는 곳'(`setup/places`, 장소 검색 `setup/place-search`)은 `src/features/places/`입니다. 3단계(`setup/fill-places`)는 아직 제목만 있는 자리 화면입니다. 요청 10초 제한(`requestWithTimeout`)은 `src/api/request.ts`를 두 기능이 같이 쓰고, revision 시계는 캘린더만 씁니다(2단계의 revision은 서버가 매깁니다). 캘린더 데이터는 `CalendarSource` 인터페이스의 목 구현이며, 고른 결과는 서버에 저장하고 화면을 다시 열면 서버에서 복원합니다. 폰 앱은 Android·iOS 네이티브만 대상으로 하며 웹 타깃은 없습니다(`.pnpmfile.cjs`가 `react-dom` peer를 제거합니다).
 
 ### E2E (Android)
 
-`pnpm e2e:phone`은 AVD `Pixel_10_Pro_XL`을 `-port 5556`(`emulator-5556`)으로 띄우고(이미 떠 있으면 그대로 사용), Expo Go를 설치한 뒤 서버(기본 8788)와 Metro(기본 8082)를 띄워 `e2e/maestro/phone/calendar-select.yaml`을 실행합니다. 끝나면 서버·Metro와 스크립트가 띄운 에뮬레이터를 정리합니다. `emulator-5554`(Pleos 차량 에뮬레이터)는 건드리지 않습니다.
+`pnpm e2e:phone`은 AVD `Pixel_10_Pro_XL`을 `-port 5556`(`emulator-5556`)으로 띄우고(이미 떠 있으면 그대로 사용), Expo Go를 설치한 뒤 서버(기본 8788)와 Metro(기본 8082)를 띄웁니다. 기기의 `127.0.0.1`에 두 포트를 `adb reverse`로 잇고 앱은 `exp://127.0.0.1:<Metro>`, `EXPO_PUBLIC_API_URL=http://127.0.0.1:<서버>`로 접속합니다. 이어서 `e2e/maestro/phone/calendar-select.yaml`, `places.yaml`(2단계 화면으로 딥링크해 들어감)을 차례로 실행합니다. 끝나면 서버·Metro·이 스크립트가 만든 reverse 규칙·스크립트가 띄운 에뮬레이터를 정리합니다. 다른 작업이 쓰는 에뮬레이터·포트와 겹치지 않게 `E2E_AVD`, `E2E_ANDROID_PORT`, `E2E_METRO_PORT`, `E2E_SERVER_PORT`로 바꿔 돌릴 수 있습니다(reverse 규칙이 이미 있는 포트는 쓰지 않고 멈춥니다). `emulator-5554`(Pleos 차량 에뮬레이터)는 건드리지 않습니다.
 
-- 스크린샷: `.e2e-shots/phone/` (`E2E_SHOT_DIR`로 변경. 저장소 루트 아래만 허용)
+- 스크린샷: `.e2e-shots/phone/<flow 이름>/` (`E2E_SHOT_DIR`로 변경. 저장소 루트 아래만 허용)
 - flow는 KIA 선택 저장 전후로 `GET /schedules/today`에 `KIA vs 두산`이 없다가 생기는지도 확인합니다
+- places flow는 서버의 `GET /places/favorites`로 집·추가 장소 저장도 확인합니다. Maestro `assertVisible`·`tapOn` 글자는 정규식 전체 일치라 `[ ] ( ) +`는 `\`로 막습니다
 - Maestro는 `~/.maestro/bin/maestro`를 씁니다(`MAESTRO`로 변경)
 - 포트·AVD 등은 `scripts/e2e-phone.sh` 상단 주석 참고
 

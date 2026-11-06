@@ -1,0 +1,18 @@
+{
+  "places": [
+    { "id": "mock-yukjeon", "name": "광주 육전집", "address": "광주 서구 상무중앙로 1", "lat": 35.1595, "lng": 126.8526, "fictional": true },
+    { "id": "mock-champions-field", "name": "광주-기아 챔피언스필드", "address": "광주 북구 서림로 10", "lat": 35.1681, "lng": 126.8888 },
+    { "id": "mock-kongmul", "name": "단골 콩물집", "address": "광주 동구 예시로 5", "lat": 35.146, "lng": 126.922, "fictional": true },
+    { "id": "mock-gym", "name": "체육관", "address": "광주 서구 운동로 7", "lat": 35.1527, "lng": 126.8483, "fictional": true },
+    { "id": "mock-home-apt", "name": "예시 아파트 101동", "address": "광주 북구 샘플로 12", "lat": 35.1743, "lng": 126.9121, "fictional": true },
+    { "id": "mock-home-villa", "name": "샘플 빌라 2층", "address": "광주 광산구 예시길 34", "lat": 35.1398, "lng": 126.7937, "fictional": true },
+    { "id": "mock-home-officetel", "name": "예시 오피스텔 802호", "address": "서울 마포구 샘플대로 56", "lat": 37.5563, "lng": 126.9236, "fictional": true },
+    { "id": "mock-work-tower", "name": "예시타워", "address": "서울 강남구 테헤란로 100", "lat": 37.5012, "lng": 127.0396, "fictional": true },
+    { "id": "mock-work-center", "name": "샘플 비즈니스센터", "address": "서울 영등포구 여의대로 24", "lat": 37.5256, "lng": 126.9258, "fictional": true },
+    { "id": "mock-work-gwangju", "name": "광주 예시 업무지구", "address": "광주 서구 상무대로 800", "lat": 35.1531, "lng": 126.8514, "fictional": true },
+    { "id": "mock-library", "name": "광주 시립도서관", "address": "광주 남구 책길 3", "lat": 35.1329, "lng": 126.9025, "fictional": true },
+    { "id": "mock-park", "name": "광주 중앙공원", "address": "광주 서구 공원로 1", "lat": 35.1496, "lng": 126.8602, "fictional": true },
+    { "id": "mock-station", "name": "광주송정역", "address": "광주 광산구 상무대로 201", "lat": 35.1378, "lng": 126.7912 },
+    { "id": "mock-market", "name": "예시 전통시장", "address": "광주 동구 시장길 9", "lat": 35.1465, "lng": 126.9234, "fictional": true }
+  ]
+}

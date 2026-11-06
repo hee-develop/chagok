@@ -1,0 +1,6 @@
+{
+  "suggestions": [
+    { "id": "mock-gym", "name": "체육관", "address": "광주 서구 운동로 7", "lat": 35.1527, "lng": 126.8483, "fictional": true, "hint": "화요일 저녁마다" },
+    { "id": "mock-champions-field", "name": "광주-기아 챔피언스필드", "address": "광주 북구 서림로 10", "lat": 35.1681, "lng": 126.8888, "hint": "직관 일정에 자주 나와요" }
+  ]
+}

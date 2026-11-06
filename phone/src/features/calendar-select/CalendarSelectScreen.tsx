@@ -4,15 +4,14 @@ import { AccessibilityInfo, ActivityIndicator, Pressable, ScrollView, StyleSheet
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Rect } from 'react-native-svg';
 
+import { createRevisionClock, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
 import { strings } from '../../i18n/ko';
 import { SetupHeader } from '../../ui/SetupHeader';
 import { colors, useFont } from '../../ui/theme';
 import { CalendarRow } from './CalendarRow';
 import { mockCalendarSource, type CalendarSource, type DeviceCalendar } from './calendarSource';
 import {
-  createRevisionClock,
   fetchCalendarSelection,
-  REQUEST_TIMEOUT_MS,
   saveCalendarSelection,
   type FetchSelection,
   type SaveSelection,
@@ -28,14 +27,6 @@ type Props = {
 type LoadState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; calendars: DeviceCalendar[] };
 
 const NEXT_ROUTE = '/setup/places';
-
-/** signal이 abort되면 reject하는 Promise. 요청 구현이 signal을 무시해도 시간 제한이 걸리도록 경쟁시킨다. */
-function whenAborted(signal: AbortSignal): Promise<never> {
-  return new Promise((_, reject) => {
-    if (signal.aborted) reject(new Error('aborted'));
-    signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
-  });
-}
 
 export function CalendarSelectScreen({
   source = mockCalendarSource,
@@ -60,11 +51,9 @@ export function CalendarSelectScreen({
   const loadCalendars = useCallback(() => {
     stopLoading.current?.();
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const controller = new AbortController();
     stopLoading.current = () => {
       cancelled = true;
-      clearTimeout(timer);
       controller.abort();
     };
     setLoad({ status: 'loading' });
@@ -77,16 +66,13 @@ export function CalendarSelectScreen({
         if (!cancelled) setLoad({ status: 'error' });
         return;
       }
-      timer = setTimeout(() => controller.abort(), timeoutMs);
       let saved: string[] | null;
       try {
-        saved = await Promise.race([restore(controller.signal), whenAborted(controller.signal)]);
+        saved = await requestWithTimeout(restore, timeoutMs, controller);
       } catch {
-        clearTimeout(timer);
         if (!cancelled) setLoad({ status: 'error' });
         return;
       }
-      clearTimeout(timer);
       if (cancelled) return;
       const known = new Set(calendars.map((c) => c.id));
       setSelectedIds(saved ? saved.filter((id) => known.has(id)) : calendars.filter((c) => c.defaultSelected).map((c) => c.id));
@@ -118,17 +104,15 @@ export function CalendarSelectScreen({
     if (load.status !== 'ready' || saveRequest.current || selectedIds.length === 0) return;
     const controller = new AbortController();
     saveRequest.current = controller;
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     setSaving(true);
     setSaveError(false);
     try {
-      await Promise.race([save(selectedIds, revisions.current(), controller.signal), whenAborted(controller.signal)]);
+      await requestWithTimeout((signal) => save(selectedIds, revisions.current(), signal), timeoutMs, controller);
       if (saveRequest.current !== controller) return;
       router.push(NEXT_ROUTE);
     } catch {
       if (saveRequest.current === controller) setSaveError(true);
     } finally {
-      clearTimeout(timer);
       if (saveRequest.current === controller) {
         saveRequest.current = null;
         setSaving(false);
