@@ -76,7 +76,7 @@ if [ "${E2E_FRESH_INSTALL:-}" = "1" ]; then
   adb uninstall com.chagok.car >/dev/null 2>&1 || true
 fi
 echo "== debug 앱 설치"
-(cd "$ROOT/car" && ./gradlew :app:installDebug -q)
+(cd "$ROOT/car" && ./gradlew :app:installDebug -q -Pchagok.serverPort="$PORT")
 
 echo "== 서버 시작 (포트 $PORT)"
 mkdir -p "$RUN_DIR"

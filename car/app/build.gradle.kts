@@ -28,8 +28,11 @@ android {
 
     buildTypes {
         debug {
-            // 에뮬레이터에서 PC의 서버(pnpm server:dev)에 붙는 주소
-            buildConfigField("String", "SERVER_URL", "\"http://10.0.2.2:8787\"")
+            // 에뮬레이터에서 PC의 서버(pnpm server:dev)에 붙는 주소. 포트는 -Pchagok.serverPort=<포트>로 바꿀 수 있다(기본 8787).
+            val serverPortValue = (project.findProperty("chagok.serverPort") as String?) ?: "8787"
+            val serverPort = serverPortValue.toIntOrNull()?.takeIf { it in 1..65535 }
+                ?: throw GradleException("chagok.serverPort는 1~65535 사이 숫자여야 합니다: $serverPortValue")
+            buildConfigField("String", "SERVER_URL", "\"http://10.0.2.2:$serverPort\"")
         }
         release {
             isMinifyEnabled = false
