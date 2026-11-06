@@ -13,6 +13,7 @@
     { "id": "mock-library", "name": "광주 시립도서관", "address": "광주 남구 책길 3", "lat": 35.1329, "lng": 126.9025, "fictional": true },
     { "id": "mock-park", "name": "광주 중앙공원", "address": "광주 서구 공원로 1", "lat": 35.1496, "lng": 126.8602, "fictional": true },
     { "id": "mock-station", "name": "광주송정역", "address": "광주 광산구 상무대로 201", "lat": 35.1378, "lng": 126.7912 },
+    { "id": "mock-dentist", "name": "예시치과의원", "address": "광주 서구 샘플로 21", "lat": 35.1512, "lng": 126.8559, "fictional": true },
     { "id": "mock-market", "name": "예시 전통시장", "address": "광주 동구 시장길 9", "lat": 35.1465, "lng": 126.9234, "fictional": true }
   ]
 }

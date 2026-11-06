@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# 폰 앱 E2E (Android 기준): 서버와 Metro를 띄우고 Expo Go에서 Maestro flow(calendar-select, places)를 차례로 실행한다.
+# 폰 앱 E2E (Android 기준): 서버와 Metro를 띄우고 Expo Go에서 Maestro flow(calendar-select, places, fill-places)를 차례로 실행한다.
 # 사용법: scripts/e2e-phone.sh
 #
 # 환경 변수
+#   E2E_FLOWS         실행할 flow 이름 (기본 "calendar-select places fill-places")
+#   E2E_FIXTURE_PATH  서버가 읽을 일정 파일 (기본 fixtures/schedules/gwangju-day.json)
 #   E2E_SERVER_PORT   서버 포트 (기본 8788)
 #   E2E_METRO_PORT    Metro 포트 (기본 8082)
 #   E2E_AVD           Android AVD 이름 (기본 Pixel_10_Pro_XL)
@@ -27,6 +29,14 @@ MAESTRO="${MAESTRO:-$HOME/.maestro/bin/maestro}"
 SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 ADB="$SDK/platform-tools/adb"
 EMULATOR="$SDK/emulator/emulator"
+
+FLOWS="${E2E_FLOWS:-calendar-select places fill-places}"
+for flow in $FLOWS; do
+  case "$flow" in
+    calendar-select|places|fill-places) ;;
+    *) echo "알 수 없는 flow입니다: $flow (calendar-select, places, fill-places만 가능)" >&2; exit 2 ;;
+  esac
+done
 
 if [ "$ANDROID_PORT" = "5554" ]; then
   echo "5554는 Pleos 차량 에뮬레이터 포트입니다. E2E_ANDROID_PORT를 바꿔 주세요." >&2
@@ -54,6 +64,8 @@ SERVER_PID=""
 METRO_PID=""
 EMULATOR_PID=""
 REVERSED_PORTS=""
+HANDWRITING_BEFORE=""
+HANDWRITING_CHANGED=0
 
 # 프로세스 그룹 전체에 TERM, 남아 있으면 KILL
 kill_group() {
@@ -74,6 +86,14 @@ cleanup() {
   for port in $REVERSED_PORTS; do
     "$ADB" -s "$SERIAL" reverse --remove "tcp:$port" >/dev/null 2>&1 || true
   done
+  # 테스트 중 끈 필기 입력을 원래 설정으로 돌린다.
+  if [ "$HANDWRITING_CHANGED" = 1 ]; then
+    if [ "$HANDWRITING_BEFORE" = null ]; then
+      "$ADB" -s "$SERIAL" shell settings delete secure stylus_handwriting_enabled >/dev/null 2>&1 || true
+    else
+      "$ADB" -s "$SERIAL" shell settings put secure stylus_handwriting_enabled "$HANDWRITING_BEFORE" >/dev/null 2>&1 || true
+    fi
+  fi
   # 이 스크립트가 직접 띄운 에뮬레이터만 끈다
   if [ -n "$EMULATOR_PID" ] && [ "${E2E_KEEP_DEVICES:-0}" != "1" ]; then
     "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
@@ -159,7 +179,7 @@ install_expo_go() {
 start_server() {
   port_in_use "$SERVER_PORT" && { echo "포트 $SERVER_PORT 사용 중. E2E_SERVER_PORT로 바꿔 주세요." >&2; return 1; }
   # watch 없이 한 번만 띄운다. pnpm을 거치지 않고 tsx를 직접 실행해 그룹 정리가 확실하다.
-  (cd "$ROOT/server" && PORT="$SERVER_PORT" exec "$ROOT/server/node_modules/.bin/tsx" src/index.ts) \
+  (cd "$ROOT/server" && PORT="$SERVER_PORT" FIXTURE_PATH="${E2E_FIXTURE_PATH:-}" exec "$ROOT/server/node_modules/.bin/tsx" src/index.ts) \
     >"$LOG_DIR/server.log" 2>&1 &
   SERVER_PID=$!
   wait_for "서버 기동" 30 curl -sf "http://127.0.0.1:$SERVER_PORT/health"
@@ -187,6 +207,10 @@ reverse_port() {
 
 ensure_emulator || exit 1
 install_expo_go || exit 1
+# 첫 검색 포커스에서 Gboard 필기 입력 튜토리얼이 UI를 가리는 것을 막는다.
+HANDWRITING_BEFORE="$("$ADB" -s "$SERIAL" shell settings get secure stylus_handwriting_enabled | tr -d '\r')" || exit 1
+HANDWRITING_CHANGED=1
+"$ADB" -s "$SERIAL" shell settings put secure stylus_handwriting_enabled 0 || exit 1
 rm -rf "$SHOT_DIR"; mkdir -p "$SHOT_DIR"
 start_server || exit 1
 start_metro || exit 1
@@ -194,7 +218,6 @@ reverse_port "$METRO_PORT" || exit 1
 reverse_port "$SERVER_PORT" || exit 1
 
 # flow 이름 -> 앱을 여는 주소. places는 1단계를 거치지 않고 2단계 화면으로 바로 들어간다.
-FLOWS="calendar-select places"
 expo_url() { # expo_url <경로>
   echo "exp://127.0.0.1:$METRO_PORT${1}?__expo_disable_fab=1"
 }
@@ -202,6 +225,7 @@ expo_url() { # expo_url <경로>
 code=0
 for flow in $FLOWS; do
   case "$flow" in
+    fill-places) url="$(expo_url /--/setup/fill-places)" ;;
     places) url="$(expo_url /--/setup/places)" ;;
     *) url="$(expo_url "")" ;;
   esac

@@ -61,6 +61,30 @@
       "place": { "name": "광주-기아 챔피언스필드", "lat": 35.1681, "lng": 126.8888 },
       "memo": null,
       "attendees": []
+    },
+    {
+      "id": "gwangju-friend",
+      "calendarId": "mock-my",
+      "title": "친구 약속",
+      "startOffsetMinutes": 780,
+      "endOffsetMinutes": 840,
+      "allDay": false,
+      "locationText": null,
+      "place": null,
+      "memo": null,
+      "attendees": []
+    },
+    {
+      "id": "gwangju-dentist",
+      "calendarId": "mock-my",
+      "title": "치과",
+      "startOffsetMinutes": 3220,
+      "endOffsetMinutes": 3280,
+      "allDay": false,
+      "locationText": null,
+      "place": null,
+      "memo": null,
+      "attendees": []
     }
   ],
   "favorites": [

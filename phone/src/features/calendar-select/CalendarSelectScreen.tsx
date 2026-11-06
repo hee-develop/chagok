@@ -81,6 +81,7 @@ export function CalendarSelectScreen({
   }, [source, restore, timeoutMs]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadCalendars();
     return () => stopLoading.current?.();
   }, [loadCalendars]);

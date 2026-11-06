@@ -4,12 +4,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
  * 픽스처(fixtures/schedules 아래 JSON)로 서버의 `GET /schedules/today` 응답 본문을 만든다.
  * 서버 라우트와 같은 규칙을 쓴다: 시각 = at + 오프셋, 일정은 저장된 선택이 없을 때의 기본 선택(fixtures/calendars/mock-device.json의
- * defaultSelected) 캘린더 것만 담는다.
+ * defaultSelected) 캘린더 것만 담는다. 또 anchor와 같은 서울 날짜에 시작하는 일정, 전날 시작해 anchor 시각에 아직 안 끝난 일정만 담는다.
  */
 object FixtureResponses {
     /** JVM 단위 테스트에서는 테스트 리소스에서 읽는다. 계측 테스트는 assets에서 읽어 직접 넘긴다. */
@@ -28,6 +29,7 @@ object FixtureResponses {
         for (i in 0 until items.length()) {
             val item = items.getJSONObject(i)
             if (item.getString("calendarId") !in selected) continue
+            if (!isToday(anchor, item.getLong("startOffsetMinutes"), item.getLong("endOffsetMinutes"))) continue
             schedules.put(
                 JSONObject()
                     .put("id", item.getString("id"))
@@ -42,6 +44,15 @@ object FixtureResponses {
             )
         }
         return JSONObject().put("anchor", iso(anchor, 0)).put("schedules", schedules).toString()
+    }
+
+    private val seoul = ZoneId.of("Asia/Seoul")
+
+    private fun isToday(anchor: Instant, startOffsetMinutes: Long, endOffsetMinutes: Long): Boolean {
+        val today = anchor.atZone(seoul).toLocalDate()
+        val start = anchor + Duration.ofMinutes(startOffsetMinutes)
+        val startDate = start.atZone(seoul).toLocalDate()
+        return startDate == today || (startDate.isBefore(today) && (anchor + Duration.ofMinutes(endOffsetMinutes)).isAfter(anchor))
     }
 
     private fun iso(anchor: Instant, offsetMinutes: Long): String =

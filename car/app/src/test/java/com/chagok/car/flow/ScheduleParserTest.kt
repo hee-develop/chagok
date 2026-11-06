@@ -56,7 +56,7 @@ class ScheduleParserTest {
 
     @Test fun `광주 직관 하루 픽스처를 anchor 기준으로 파싱한다`() {
         val schedules = ScheduleParser.parse(FixtureResponses.response(fixture, anchor))
-        assertEquals(listOf("광주 직관", "육전집 점심", "KIA 직관", "콩물 픽업"), schedules.map { it.title })
+        assertEquals(listOf("광주 직관", "육전집 점심", "KIA 직관", "콩물 픽업", "친구 약속"), schedules.map { it.title })
 
         val allDay = schedules[0]
         assertTrue(allDay.allDay)

@@ -1,5 +1,5 @@
-import { FillPlacesPlaceholderScreen } from '../../features/setup/FillPlacesPlaceholderScreen';
+import { FillPlacesScreen } from '../../features/fill-places/FillPlacesScreen';
 
 export default function FillPlacesRoute() {
-  return <FillPlacesPlaceholderScreen />;
+  return <FillPlacesScreen />;
 }

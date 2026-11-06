@@ -5,17 +5,14 @@ import { strings } from '../../i18n/ko';
 import { SetupHeader } from '../../ui/SetupHeader';
 import { colors, useFont } from '../../ui/theme';
 
-export function FillPlacesPlaceholderScreen() {
+/** 첫 설정 4단계 화면. */
+export function TalkScreen() {
   const insets = useSafeAreaInsets();
   const font = useFont();
-  return (
-    <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
-      <SetupHeader step={3} />
-      <Text accessibilityRole="header" style={[styles.title, font(600)]}>
-        {strings.fillPlaces.title}
-      </Text>
-    </View>
-  );
+  return <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
+    <SetupHeader step={4} />
+    <Text accessibilityRole="header" style={[styles.title, font(600)]}>{strings.talk.title}</Text>
+  </View>;
 }
 
 const styles = StyleSheet.create({

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { DayFixture, MockCalendar, MockPlace, PlaceSuggestion, PlacesCatalog } from './fixture-types.js';
+import type { DayFixture, MockCalendar, MockPlace, PlaceSuggestion, PlacesCatalog, RememberedPlace } from './fixture-types.js';
 
 export type { DayFixture, MockCalendar, PlaceFixture, ScheduleFixture } from './fixture-types.js';
 
@@ -128,6 +128,7 @@ export function parseDayFixture(value: unknown, calendars: MockCalendar[] = load
 /** 저장소 루트 fixtures/places/ 아래의 장소 검색 대상 목록과 추천. */
 export const MOCK_PLACES_URL = new URL('../../fixtures/places/mock-places.json', import.meta.url);
 export const PLACE_SUGGESTIONS_URL = new URL('../../fixtures/places/suggestions.json', import.meta.url);
+export const REMEMBERED_PLACES_URL = new URL('../../fixtures/places/remembered.json', import.meta.url);
 
 function isMockPlace(v: unknown): v is MockPlace {
   const p = v as Record<string, unknown> | null;
@@ -150,7 +151,7 @@ function isMockPlace(v: unknown): v is MockPlace {
  * 목 장소 목록과 추천을 검증한다. 같은 목록 안에서 id가 겹치면 안 되고,
  * 두 목록에 같은 id가 있으면 이름·주소·좌표가 같아야 한다(같은 장소를 가리킨다).
  */
-export function parsePlacesCatalog(placesValue: unknown, suggestionsValue: unknown): PlacesCatalog {
+export function parsePlacesCatalog(placesValue: unknown, suggestionsValue: unknown, rememberedValue: unknown = { remembered: [] }): PlacesCatalog {
   const places = (placesValue as { places?: unknown } | null)?.places;
   const suggestions = (suggestionsValue as { suggestions?: unknown } | null)?.suggestions;
   if (!Array.isArray(places) || places.length === 0) {
@@ -177,12 +178,25 @@ export function parsePlacesCatalog(placesValue: unknown, suggestionsValue: unkno
       throw new Error(`목 장소와 추천의 같은 id가 다른 장소를 가리킵니다: ${JSON.stringify(s.id)}`);
     }
   }
-  return { places: places as MockPlace[], suggestions: suggestions as PlaceSuggestion[] };
+  const remembered = (rememberedValue as { remembered?: unknown } | null)?.remembered;
+  if (!Array.isArray(remembered)) {
+    throw new Error('기억한 장소 형식이 올바르지 않습니다: remembered 배열이 필요합니다');
+  }
+  const titles = new Set<string>();
+  for (const r of remembered) {
+    const ok = typeof r?.title === 'string' && r.title !== '' && typeof r.placeId === 'string';
+    if (!ok) throw new Error(`기억한 장소 항목 형식이 올바르지 않습니다: ${JSON.stringify(r)}`);
+    if (titles.has(r.title)) throw new Error(`기억한 장소 제목이 중복되었습니다: ${JSON.stringify(r.title)}`);
+    titles.add(r.title);
+    if (!byId.has(r.placeId)) throw new Error(`기억한 장소 id가 목 장소에 없습니다: ${JSON.stringify(r.placeId)}`);
+  }
+  return { places: places as MockPlace[], suggestions: suggestions as PlaceSuggestion[], remembered: remembered as RememberedPlace[] };
 }
 
 export function loadPlacesCatalog(
   placesLocation: URL | string = MOCK_PLACES_URL,
   suggestionsLocation: URL | string = PLACE_SUGGESTIONS_URL,
+  rememberedLocation: URL | string = REMEMBERED_PLACES_URL,
 ): PlacesCatalog {
   const read = (location: URL | string, what: string): unknown => {
     try {
@@ -191,5 +205,5 @@ export function loadPlacesCatalog(
       throw new Error(`${what}을 읽을 수 없습니다(${String(location)}): ${(e as Error).message}`);
     }
   };
-  return parsePlacesCatalog(read(placesLocation, '목 장소'), read(suggestionsLocation, '장소 추천'));
+  return parsePlacesCatalog(read(placesLocation, '목 장소'), read(suggestionsLocation, '장소 추천'), read(rememberedLocation, '기억한 장소'));
 }

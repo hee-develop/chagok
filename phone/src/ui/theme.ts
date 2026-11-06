@@ -14,6 +14,8 @@ export const colors = {
   primary: '#111111',
   primaryDisabled: '#9a9a9a',
   error: '#b3261e',
+  warning: '#8a5200',
+  tint: '#11111112',
 } as const;
 
 export type FontWeight = 400 | 500 | 600 | 700;

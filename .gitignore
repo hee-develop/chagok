@@ -15,6 +15,7 @@ captures/
 
 # JS 워크스페이스 (루트/server)
 node_modules/
+.pnpm-store/
 server/dist/
 .env
 .env.*

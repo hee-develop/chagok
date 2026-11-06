@@ -15,11 +15,12 @@ Pleos Connect(현대차그룹 AAOS 기반 인포테인먼트) 차량 앱 사이�
 ## 폰 앱·서버(JS)
 
 - 설치는 루트에서 `pnpm install`. Expo 패키지는 `pnpm exec expo install`로 추가하고, 라우트는 `phone/src/app/`(Expo Router)에 둡니다.
-- 확인: `pnpm typecheck`, `pnpm server:test`, `pnpm phone:test`. E2E는 `pnpm e2e:phone`(Maestro, Expo Go).
+- 확인: `pnpm typecheck`, `pnpm server:test`, `pnpm phone:test`, `pnpm --filter @chagok/phone lint --max-warnings 0`. E2E는 `pnpm e2e:phone`(Maestro, Expo Go).
 - 검증은 Android 기준입니다. Android 에뮬레이터는 `Pixel_10_Pro_XL`을 `-port 5556`으로 쓰고, `emulator-5554`(Pleos 차량 에뮬레이터)는 건드리지 않습니다. adb는 항상 `-s`로 기기를 지정합니다.
 - 웹 타깃을 다시 넣을 때는 `.pnpmfile.cjs` 훅을 지우고 다시 설치한다(react-dom이 자동 설치되는 버전이 SDK 58의 react와 맞지 않아 훅으로 제거해 두었다).
 - Android 에뮬레이터의 Expo Go가 `10.0.2.2`에 붙지 못하는 경우가 있어, E2E는 `adb reverse`로 Metro·서버 포트를 기기 `127.0.0.1`에 잇고 `exp://127.0.0.1:<metro>`, `EXPO_PUBLIC_API_URL=http://127.0.0.1:<server>`를 씁니다(`scripts/e2e-phone.sh`). 이미 떠 있는 에뮬레이터·포트를 건드리지 않게 `E2E_AVD`·`E2E_ANDROID_PORT`·`E2E_METRO_PORT`·`E2E_SERVER_PORT`로 바꿔 돌립니다.
 - 장소 목 데이터(검색 대상·추천)는 `fixtures/places/`가 단일 출처입니다(서버만 읽음). 폰 앱의 요청 10초 제한은 `phone/src/api/request.ts`의 `requestWithTimeout`을 캘린더와 2단계가 같이 씁니다. 캘린더 저장만 폰이 보내는 revision(`createRevisionClock`)을 쓰고, 2단계(자주 가는 곳)의 revision은 서버가 매기며 폰은 비교하지 않습니다. 오래된 응답은 저장을 한 번에 하나만 두고, 새 조회가 시작되면 이전 조회를 취소하고, 응답을 화면에 반영하기 전에 그 요청의 controller가 아직 현재 것인지 확인해서 막습니다.
+- 첫 설정 3단계(`phone/src/features/fill-places/`)는 `GET /schedules/places`, `PUT /schedules/:id/place`로 일정별 장소 보정·이동 없음을 저장한다. 원본 캘린더를 수정하지 않으며, 보정은 `/schedules/today`에 반영하고 이동 없음은 차량 응답에서 뺀다. 4단계는 제목만 있는 자리 화면이다. 일정 제목으로 기억한 장소(`fixtures/places/remembered.json`)는 `GET /schedules/places`의 `suggestion`으로 내려 '여기 맞아요'가 기존 `PUT`으로 저장한다. 계약은 `docs/fill-places.md`를 따른다.
 - 목 캘린더는 `fixtures/calendars/mock-device.json`이 단일 출처입니다(폰 앱·서버 공용). 일정 픽스처를 바꾸면 차량 테스트 도우미(`FixtureResponses`)가 같은 기본 선택 규칙을 따릅니다.
 - 서버 라우트는 `server/src/routes/`에 파일별로 두고 `app.ts`에서 `.route()`로 체이닝 연결해 RPC 타입 추론을 유지합니다.
 
