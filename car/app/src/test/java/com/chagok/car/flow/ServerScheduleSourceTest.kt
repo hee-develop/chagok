@@ -54,7 +54,7 @@ class ServerScheduleSourceTest {
         assertTrue(done)
         assertEquals(ScheduleOrigin.FRESH, source.snapshot().origin)
         assertEquals(listOf(anchor), asked)
-        assertEquals(4, source.snapshot().schedules.size)
+        assertEquals(5, source.snapshot().schedules.size)
         assertEquals(today, copies.copy?.date)
     }
 
@@ -72,7 +72,7 @@ class ServerScheduleSourceTest {
         val source = source({ error("서버 꺼짐") }, copies)
         source.refresh {}
         assertEquals(ScheduleOrigin.STORED, source.snapshot().origin)
-        assertEquals(4, source.snapshot().schedules.size)
+        assertEquals(5, source.snapshot().schedules.size)
     }
 
     @Test fun `저장된 사본이 오늘 것이 아니면 쓰지 않는다`() {
@@ -93,12 +93,12 @@ class ServerScheduleSourceTest {
         var body = FixtureResponses.response(fixture, anchor)
         val source = source({ body })
         source.refresh {}
-        assertEquals(4, source.snapshot().schedules.size)
+        assertEquals(5, source.snapshot().schedules.size)
 
         body = "<html>오류</html>"
         source.refresh {}
         assertEquals(ScheduleOrigin.STORED, source.snapshot().origin)
-        assertEquals(4, source.snapshot().schedules.size)
+        assertEquals(5, source.snapshot().schedules.size)
     }
 
     @Test fun `서버가 빈 일정을 주면 FRESH이고 비어 있다`() {
@@ -184,7 +184,7 @@ class ServerScheduleSourceTest {
         val port = serve(200, FixtureResponses.response(fixture, anchor))
         val body = HttpScheduleFetcher("http://127.0.0.1:$port").fetch(anchor)
         assertEquals("GET /schedules/today?at=2026-11-06T00%3A20%3A00Z HTTP/1.1", requestLine)
-        assertEquals(4, ScheduleParser.parse(body).size)
+        assertEquals(5, ScheduleParser.parse(body).size)
     }
 
     @Test fun `실패 로그에는 예외 클래스 이름과 HTTP 상태만 남고 메시지와 본문은 남지 않는다`() {

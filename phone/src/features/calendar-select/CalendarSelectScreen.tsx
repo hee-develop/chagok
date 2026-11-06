@@ -81,7 +81,6 @@ export function CalendarSelectScreen({
   }, [source, restore, timeoutMs]);
 
   useEffect(() => {
-    // 서버 조회를 시작하고 로딩 상태로 전환하는 기존 초기화 흐름이다.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadCalendars();
     return () => stopLoading.current?.();

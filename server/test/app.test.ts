@@ -23,7 +23,7 @@ describe('GET /schedules/today', () => {
       schedules: { id: string; title: string; start: string; end: string; allDay: boolean; place: unknown; memo: string | null }[];
     };
     expect(body.anchor).toBe('2026-11-06T00:20:00.000Z');
-    expect(body.schedules.map((x) => x.id)).toEqual(['gwangju-allday', 'gwangju-lunch', 'gwangju-kia', 'gwangju-kongmul']);
+    expect(body.schedules.map((x) => x.id)).toEqual(['gwangju-allday', 'gwangju-lunch', 'gwangju-kia', 'gwangju-kongmul', 'gwangju-friend']);
 
     const lunch = body.schedules.find((s) => s.id === 'gwangju-lunch');
     expect(lunch).toMatchObject({
@@ -96,7 +96,7 @@ describe('GET /schedules/today 캘린더 선택 반영', () => {
     });
 
   it('저장 전에는 기본 선택 캘린더의 일정만 내려준다(KIA 구독 일정 제외)', async () => {
-    expect(await ids(newApp())).toEqual(['gwangju-allday', 'gwangju-lunch', 'gwangju-kia', 'gwangju-kongmul']);
+    expect(await ids(newApp())).toEqual(['gwangju-allday', 'gwangju-lunch', 'gwangju-kia', 'gwangju-kongmul', 'gwangju-friend']);
   });
 
   it('KIA 캘린더를 더해 저장하면 KIA vs 두산이 포함된다', async () => {
@@ -104,7 +104,7 @@ describe('GET /schedules/today 캘린더 선택 반영', () => {
     expect((await select(a, ['mock-my', 'mock-work', 'mock-family', 'mock-kia'])).status).toBe(200);
     const list = await ids(a);
     expect(list).toContain('gwangju-kia-doosan');
-    expect(list).toHaveLength(5);
+    expect(list).toHaveLength(6);
     const res = await a.request(`/schedules/today?at=${at}`);
     const doosan = ((await res.json()) as { schedules: { id: string; title: string; start: string; locationText: string }[] }).schedules.find(
       (x) => x.id === 'gwangju-kia-doosan',
@@ -127,6 +127,6 @@ describe('GET /schedules/today 캘린더 선택 반영', () => {
   it('앱 인스턴스마다 선택을 따로 가진다', async () => {
     const a = newApp();
     await select(a, ['mock-kia']);
-    expect(await ids(newApp())).toHaveLength(4);
+    expect(await ids(newApp())).toHaveLength(5);
   });
 });

@@ -4,7 +4,7 @@
 #
 # 환경 변수
 #   E2E_FLOWS         실행할 flow 이름 (기본 "calendar-select places fill-places")
-#   E2E_FIXTURE_PATH  검증용 일정 (기본 fixtures/schedules/fill-places-day.json)
+#   E2E_FIXTURE_PATH  서버가 읽을 일정 파일 (기본 fixtures/schedules/gwangju-day.json)
 #   E2E_SERVER_PORT   서버 포트 (기본 8788)
 #   E2E_METRO_PORT    Metro 포트 (기본 8082)
 #   E2E_AVD           Android AVD 이름 (기본 Pixel_10_Pro_XL)
@@ -29,6 +29,14 @@ MAESTRO="${MAESTRO:-$HOME/.maestro/bin/maestro}"
 SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 ADB="$SDK/platform-tools/adb"
 EMULATOR="$SDK/emulator/emulator"
+
+FLOWS="${E2E_FLOWS:-calendar-select places fill-places}"
+for flow in $FLOWS; do
+  case "$flow" in
+    calendar-select|places|fill-places) ;;
+    *) echo "알 수 없는 flow입니다: $flow (calendar-select, places, fill-places만 가능)" >&2; exit 2 ;;
+  esac
+done
 
 if [ "$ANDROID_PORT" = "5554" ]; then
   echo "5554는 Pleos 차량 에뮬레이터 포트입니다. E2E_ANDROID_PORT를 바꿔 주세요." >&2
@@ -171,7 +179,7 @@ install_expo_go() {
 start_server() {
   port_in_use "$SERVER_PORT" && { echo "포트 $SERVER_PORT 사용 중. E2E_SERVER_PORT로 바꿔 주세요." >&2; return 1; }
   # watch 없이 한 번만 띄운다. pnpm을 거치지 않고 tsx를 직접 실행해 그룹 정리가 확실하다.
-  (cd "$ROOT/server" && PORT="$SERVER_PORT" FIXTURE_PATH="${E2E_FIXTURE_PATH:-fixtures/schedules/fill-places-day.json}" exec "$ROOT/server/node_modules/.bin/tsx" src/index.ts) \
+  (cd "$ROOT/server" && PORT="$SERVER_PORT" FIXTURE_PATH="${E2E_FIXTURE_PATH:-}" exec "$ROOT/server/node_modules/.bin/tsx" src/index.ts) \
     >"$LOG_DIR/server.log" 2>&1 &
   SERVER_PID=$!
   wait_for "서버 기동" 30 curl -sf "http://127.0.0.1:$SERVER_PORT/health"
@@ -210,7 +218,6 @@ reverse_port "$METRO_PORT" || exit 1
 reverse_port "$SERVER_PORT" || exit 1
 
 # flow 이름 -> 앱을 여는 주소. places는 1단계를 거치지 않고 2단계 화면으로 바로 들어간다.
-FLOWS="${E2E_FLOWS:-calendar-select places fill-places}"
 expo_url() { # expo_url <경로>
   echo "exp://127.0.0.1:$METRO_PORT${1}?__expo_disable_fab=1"
 }

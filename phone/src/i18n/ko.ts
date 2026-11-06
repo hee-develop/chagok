@@ -66,6 +66,8 @@ export const ko = {
     noSchedules: '선택한 캘린더에 확인할 일정이 없어요.',
     missing: '장소 없음',
     noTravel: '이동 없음',
+    rememberedHint: (title: string) => `지난번 '${title}' 일정`,
+    rememberedConfirm: '여기 맞아요',
     add: '장소 넣기',
     change: '장소 변경',
     next: '다음',

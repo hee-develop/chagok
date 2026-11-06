@@ -19,31 +19,33 @@ appId: ${APP_ID}
     timeout: 120000
 - assertVisible: '3 / 4'
 - assertVisible: '육전집 점심'
-- takeScreenshot: 01-missing
-- tapOn: '육전집 점심 장소 넣기'
-- extendedWaitUntil:
-    visible: '일정 장소 찾기'
-    timeout: 15000
-- inputText: '육전'
-- extendedWaitUntil:
-    visible: '.*광주 육전집.*'
-    timeout: 15000
-- takeScreenshot: 02-search
-- tapOn: '.*광주 육전집.*'
-- extendedWaitUntil:
-    visible: '장소가 빈 일정이 1개 있어요'
-    timeout: 15000
 - assertVisible: '✓ 광주 육전집'
-- takeScreenshot: 03-saved
+- takeScreenshot: 01-missing
 - scrollUntilVisible:
-    element: '치과 이동 없음'
+    element: '친구 약속 이동 없음'
     direction: DOWN
     timeout: 20000
-- tapOn: '치과 이동 없음'
+- tapOn: '친구 약속 이동 없음'
 - extendedWaitUntil:
     visible: '✓ 이동 없음'
     timeout: 15000
-- takeScreenshot: 04-no-travel
+- takeScreenshot: 02-no-travel
+- scrollUntilVisible:
+    element: '장소가 빈 일정이 1개 있어요'
+    direction: UP
+    timeout: 20000
+- scrollUntilVisible:
+    element: '치과 여기 맞아요'
+    direction: DOWN
+    timeout: 20000
+- assertVisible: ".*지난번 '치과' 일정.*"
+- assertVisible: '예시치과의원'
+- takeScreenshot: 03-remembered
+- tapOn: '치과 여기 맞아요'
+- extendedWaitUntil:
+    visible: '✓ 예시치과의원'
+    timeout: 15000
+- takeScreenshot: 04-confirmed
 - scrollUntilVisible:
     element: '일정 장소를 모두 확인했어요'
     direction: UP
@@ -52,22 +54,48 @@ appId: ${APP_ID}
     file: assert-schedule-places.js
     env:
       SERVER_URL: ${SERVER_URL}
+      STAGE: no-travel
+- scrollUntilVisible:
+    element: '친구 약속 장소 변경'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '친구 약속 장소 변경'
+- extendedWaitUntil:
+    visible: '일정 장소 찾기'
+    timeout: 15000
+- inputText: '육전'
+- extendedWaitUntil:
+    visible: '.*광주 육전집.*'
+    timeout: 15000
+- takeScreenshot: 05-search
+- tapOn: '.*광주 육전집.*'
+- extendedWaitUntil:
+    notVisible: '✓ 이동 없음'
+    timeout: 15000
+- extendedWaitUntil:
+    visible: '✓ 광주 육전집'
+    timeout: 15000
+- takeScreenshot: 06-changed
+- runScript:
+    file: assert-schedule-places.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      STAGE: changed
 - tapOn: '다음'
 - extendedWaitUntil:
     visible: '말 거는 방법'
     timeout: 15000
 - assertVisible: '4 / 4'
-- takeScreenshot: 05-next
+- takeScreenshot: 07-next
 - back
 - extendedWaitUntil:
-    visible: '일정 장소를 모두 확인했어요'
+    visible: '나중에 할게요'
     timeout: 15000
-- assertVisible: '✓ 광주 육전집'
 - scrollUntilVisible:
-    element: '✓ 이동 없음'
+    element: '✓ 예시치과의원'
     direction: DOWN
     timeout: 20000
-- takeScreenshot: 06-restored
+- takeScreenshot: 08-restored
 - tapOn: '나중에 할게요'
 - extendedWaitUntil:
     visible: '말 거는 방법'

@@ -1,13 +1,13 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isClientError, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
 import { strings } from '../../i18n/ko';
 import { SetupHeader } from '../../ui/SetupHeader';
 import { colors, useFont } from '../../ui/theme';
-import { schedulePlacesApi, type SchedulePlacesApi, type SetupSchedule } from './schedulePlacesApi';
+import { schedulePlacesApi, type SchedulePlaceChange, type SchedulePlacesApi, type SetupSchedule } from './schedulePlacesApi';
 
 type LoadState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; schedules: SetupSchedule[] };
 
@@ -53,18 +53,22 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
     pending?.abort();
   }, []);
 
-  const markNoTravel = async (id: string) => {
+  useEffect(() => {
+    if (saveIssue) AccessibilityInfo.announceForAccessibility(saveIssue === 'reload' ? strings.placeSearch.scheduleChanged : t.saveFailed);
+  }, [saveIssue, t.saveFailed]);
+
+  const save = async (id: string, change: SchedulePlaceChange) => {
     if (saveRequest.current) return;
     // 조회를 끝내기 전에 저장 응답이 오면 이전 조회가 덮어쓰지 않도록 취소한다.
     loadRequest.current?.abort();
     loadRequest.current = null;
     const controller = new AbortController();
     saveRequest.current = controller;
-    retryLast.current = () => void markNoTravel(id);
+    retryLast.current = () => void save(id, change);
     setSavingId(id);
     setSaveIssue(null);
     try {
-      const updated = await requestWithTimeout((signal) => api.savePlace(id, { noTravel: true }, signal), timeoutMs, controller);
+      const updated = await requestWithTimeout((signal) => api.savePlace(id, change, signal), timeoutMs, controller);
       if (saveRequest.current === controller) setLoad((prev) => prev.status === 'ready'
         ? { status: 'ready', schedules: prev.schedules.map((s) => s.id === updated.id ? { ...s, ...updated } : s) } : prev);
     } catch (error) {
@@ -110,6 +114,19 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
               <Text style={[styles.date, font(400)]}>{dateFormat.format(new Date(schedule.start))}</Text>
               <Text style={[styles.scheduleTitle, font(600)]}>{schedule.title}</Text>
             </View>
+            {!schedule.place && !schedule.noTravel && schedule.suggestion ? (
+              <View style={styles.remembered}>
+                <View style={styles.rememberedText}>
+                  <Text style={[styles.rememberedHint, font(400)]}>{t.rememberedHint(schedule.title)}</Text>
+                  <Text style={[styles.rememberedName, font(600)]}>{schedule.suggestion.name}</Text>
+                </View>
+                <Pressable accessibilityRole="button" accessibilityLabel={`${schedule.title} ${t.rememberedConfirm}`}
+                  accessibilityState={{ disabled: saving }} disabled={saving} style={styles.confirm}
+                  onPress={() => void save(schedule.id, { placeId: schedule.suggestion!.placeId })}>
+                  <Text style={[styles.confirmText, font(600)]}>{t.rememberedConfirm}</Text>
+                </Pressable>
+              </View>
+            ) : null}
             <View style={styles.actions}>
               {schedule.place || schedule.noTravel ? <>
                 <Text style={[styles.place, font(500)]}>{schedule.noTravel ? `✓ ${t.noTravel}` : `✓ ${schedule.place!.name}`}</Text>
@@ -121,7 +138,7 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
               </> : <>
                 <Text style={[styles.missing, font(400)]}>{t.missing}</Text>
                 <Pressable accessibilityRole="button" accessibilityLabel={`${schedule.title} ${t.noTravel}`} accessibilityState={{ disabled: saving }}
-                  disabled={saving} onPress={() => void markNoTravel(schedule.id)} style={styles.textButton}>
+                  disabled={saving} onPress={() => void save(schedule.id, { noTravel: true })} style={styles.textButton}>
                   <Text style={[styles.secondaryText, font(400)]}>{t.noTravel}</Text>
                 </Pressable>
                 <Pressable accessibilityRole="button" accessibilityLabel={`${schedule.title} ${t.add}`}
@@ -137,7 +154,7 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 32) }]}>
         {saving ? <View accessible accessibilityRole="progressbar" accessibilityLabel={t.saving}><ActivityIndicator color={colors.text} /></View> : null}
         {saveIssue ? <View accessibilityLiveRegion="polite" style={styles.status}>
-          <Text style={[styles.error, font(500)]}>{t.saveFailed}</Text>
+          <Text style={[styles.error, font(500)]}>{saveIssue === 'reload' ? strings.placeSearch.scheduleChanged : t.saveFailed}</Text>
           {saveIssue === 'retry' ? <Pressable accessibilityRole="button" onPress={() => retryLast.current?.()} style={styles.textButton}>
             <Text style={[styles.secondaryText, font(600)]}>{t.retry}</Text>
           </Pressable> : null}
@@ -166,7 +183,13 @@ const styles = StyleSheet.create({
   date: { fontSize: 14, color: colors.textMuted },
   scheduleTitle: { fontSize: 17, color: colors.text },
   place: { flex: 1, fontSize: 15, color: colors.textStrong },
-  missing: { fontSize: 14, color: '#8a5200', flexGrow: 1 },
+  missing: { fontSize: 14, color: colors.warning, flexGrow: 1 },
+  remembered: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, backgroundColor: colors.tint },
+  rememberedText: { flex: 1, gap: 2 },
+  rememberedHint: { fontSize: 13, color: colors.text },
+  rememberedName: { fontSize: 15, color: colors.text },
+  confirm: { minHeight: 44, paddingHorizontal: 16, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  confirmText: { fontSize: 15, color: colors.onPrimary },
   actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 },
   textButton: { minHeight: 44, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { fontSize: 15, color: colors.textMuted },

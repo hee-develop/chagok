@@ -126,6 +126,24 @@ describe('GET /places/search', () => {
   });
 });
 
+describe('기억한 장소 픽스처', () => {
+  const p = { id: 'a', name: 'A', address: 'x', lat: 1, lng: 2 };
+  it('기본 픽스처는 치과를 목 장소에 잇는다', () => {
+    expect(catalog.remembered).toEqual([{ title: '치과', placeId: 'mock-dentist' }]);
+    expect(catalog.places.find((x) => x.id === 'mock-dentist')?.name).toBe('예시치과의원');
+  });
+
+  it('형식이 틀리거나 제목이 겹치거나 모르는 장소를 가리키면 거절한다', () => {
+    const parse = (remembered: unknown) => parsePlacesCatalog({ places: [p] }, { suggestions: [] }, remembered);
+    expect(parse({ remembered: [{ title: 'T', placeId: 'a' }] }).remembered).toHaveLength(1);
+    expect(() => parse({})).toThrow('형식');
+    expect(() => parse({ remembered: [{ title: '', placeId: 'a' }] })).toThrow('형식');
+    expect(() => parse({ remembered: [{ title: 'T', placeId: 1 }] })).toThrow('형식');
+    expect(() => parse({ remembered: [{ title: 'T', placeId: 'a' }, { title: 'T', placeId: 'a' }] })).toThrow('중복');
+    expect(() => parse({ remembered: [{ title: 'T', placeId: 'zzz' }] })).toThrow('목 장소에 없습니다');
+  });
+});
+
 describe('GET /places/suggestions', () => {
   it('추천 두 곳을 보조 문구·좌표와 함께 돌려준다', async () => {
     const res = await app.request('/places/suggestions');

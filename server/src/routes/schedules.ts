@@ -30,6 +30,11 @@ function parseAt(value: string): Date | null {
 }
 
 const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+const SEOUL_OFFSET_MS = 9 * 60 * MINUTE_MS;
+
+/** Asia/Seoul 기준 날짜 번호(1970-01-01 = 0). */
+const seoulDay = (ms: number) => Math.floor((ms + SEOUL_OFFSET_MS) / DAY_MS);
 
 /** 캘린더 원본과 분리한 일정별 보정값. 라우트 인스턴스 수명 동안만 보관한다. */
 type Override = { placeId: string | null; noTravel: boolean };
@@ -38,6 +43,7 @@ type PlaceChange = { placeId: string | null } | { noTravel: true };
 export const createSchedulesRoute = (fixture: DayFixture, calendars: MockCalendar[], selection: SelectionStore, catalog: PlacesCatalog) => {
   const overrides = new Map<string, Override>();
   const places = new Map([...catalog.places, ...catalog.suggestions].map((p) => [p.id, p]));
+  const remembered = new Map(catalog.remembered.map((r) => [r.title, places.get(r.placeId)!]));
   const selectedSchedules = () => {
     const selected = new Set(effectiveSelectedIds(calendars, selection));
     return fixture.schedules.filter((s) => selected.has(s.calendarId));
@@ -51,6 +57,13 @@ export const createSchedulesRoute = (fixture: DayFixture, calendars: MockCalenda
       place: override?.noTravel ? null : p ? { name: p.name, lat: p.lat, lng: p.lng } : s.place,
       noTravel: override?.noTravel ?? false,
     };
+  };
+  /** 시작이 anchor와 같은 서울 날짜이거나, 전날 시작해 anchor 시각에 아직 끝나지 않은 일정. */
+  const isToday = (s: ScheduleFixture, anchor: Date) => {
+    const start = anchor.getTime() + s.startOffsetMinutes * MINUTE_MS;
+    const end = anchor.getTime() + s.endOffsetMinutes * MINUTE_MS;
+    const day = seoulDay(anchor.getTime());
+    return seoulDay(start) === day || (seoulDay(start) < day && end > anchor.getTime());
   };
   const anchorValidator = validator('query', (value: { at?: string | string[] }, c) => {
     const anchor = value.at === undefined ? new Date() : typeof value.at === 'string' ? parseAt(value.at) : null;
@@ -67,7 +80,7 @@ export const createSchedulesRoute = (fixture: DayFixture, calendars: MockCalenda
       const anchor = at === undefined ? new Date() : parseAt(at)!;
       return c.json({
         anchor: anchor.toISOString(),
-        schedules: selectedSchedules().filter((s) => !view(s).noTravel).map((s) => {
+        schedules: selectedSchedules().filter((s) => !view(s).noTravel && isToday(s, anchor)).map((s) => {
           const { noTravel: _, ...place } = view(s);
           return { ...place, title: s.title, ...times(s, anchor), allDay: s.allDay, memo: s.memo, attendees: s.attendees };
         }),
@@ -79,7 +92,11 @@ export const createSchedulesRoute = (fixture: DayFixture, calendars: MockCalenda
       return c.json({
         anchor: anchor.toISOString(),
         schedules: selectedSchedules().filter((s) => !s.allDay).sort((a, b) => a.startOffsetMinutes - b.startOffsetMinutes)
-          .map((s) => ({ ...view(s), title: s.title, ...times(s, anchor) })),
+          .map((s) => {
+            const v = view(s);
+            const known = v.place || v.noTravel ? undefined : remembered.get(s.title);
+            return { ...v, title: s.title, ...times(s, anchor), suggestion: known ? { placeId: known.id, name: known.name } : null };
+          }),
       }, 200);
     })
     .put('/:id/place', bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => c.json({ error: '본문이 너무 큽니다' }, 413) }),

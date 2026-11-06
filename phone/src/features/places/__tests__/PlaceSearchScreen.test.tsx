@@ -104,7 +104,7 @@ describe('검색', () => {
     expect(screen.getByText(APT.name)).toBeOnTheScreen();
   });
 
-  it('다른 검색어를 입력하면 이전 결과를 즉시 지우고 검색을 시작할 때 로딩으로 바뀐다', async () => {
+  it('입력을 멈추기 전에는 이전 결과를 지우지 않고, 검색을 시작할 때 로딩으로 바뀐다', async () => {
     const searchPlaces = jest.fn().mockResolvedValueOnce([APT]).mockReturnValue(new Promise(() => {}));
     await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={80} />);
 
@@ -112,9 +112,21 @@ describe('검색', () => {
     expect(await screen.findByText(APT.name)).toBeOnTheScreen();
     await fireEvent.changeText(input(), '타워');
     expect(screen.queryByRole('progressbar')).toBeNull();
-    expect(screen.queryByText(APT.name)).toBeNull();
+    expect(screen.getByText(APT.name)).toBeOnTheScreen();
 
     expect(await screen.findByRole('progressbar', { name: '장소를 찾는 중' })).toBeOnTheScreen();
+    expect(screen.queryByText(APT.name)).toBeNull();
+  });
+
+  it('검색어를 모두 지웠다가 다시 입력하면 이전 결과를 다시 보이지 않는다', async () => {
+    const searchPlaces = jest.fn().mockResolvedValueOnce([APT]).mockReturnValue(new Promise(() => {}));
+    await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={80} />);
+
+    await fireEvent.changeText(input(), '아파트');
+    expect(await screen.findByText(APT.name)).toBeOnTheScreen();
+    await fireEvent.changeText(input(), '');
+    expect(screen.queryByText(APT.name)).toBeNull();
+    await fireEvent.changeText(input(), '타');
     expect(screen.queryByText(APT.name)).toBeNull();
   });
 

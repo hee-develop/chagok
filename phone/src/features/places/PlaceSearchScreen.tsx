@@ -32,7 +32,7 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
 
   const [query, setQuery] = useState('');
   const [attempt, setAttempt] = useState(0);
-  const [search, setSearch] = useState<SearchState>({ status: 'idle' });
+  const [searchState, setSearch] = useState<SearchState>({ status: 'idle' });
   const [pickingId, setPickingId] = useState<string | null>(null);
   const [pickError, setPickError] = useState(false);
   const [rejected, setRejected] = useState(false);
@@ -42,6 +42,7 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
   const retryPick = useRef<(() => void) | null>(null);
 
   const trimmed = query.trim();
+  const search: SearchState = trimmed === '' ? { status: 'idle' } : searchState;
 
   useEffect(() => {
     if (trimmed === '') return;
@@ -77,8 +78,8 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
   }, [search.status, t.searchFailed]);
 
   useEffect(() => {
-    if (pickError) AccessibilityInfo.announceForAccessibility(t.saveFailed);
-  }, [pickError, t.saveFailed]);
+    if (pickError) AccessibilityInfo.announceForAccessibility(rejected ? t.scheduleChanged : t.saveFailed);
+  }, [pickError, rejected, t.saveFailed, t.scheduleChanged]);
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -139,7 +140,10 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
           editable={!picking}
           autoCorrect={false}
           maxLength={MAX_QUERY_LENGTH}
-          onChangeText={(value) => { setQuery(value); if (value.trim() !== trimmed) setSearch({ status: 'idle' }); }}
+          onChangeText={(value) => {
+            if (value.trim() === '') setSearch({ status: 'idle' });
+            setQuery(value);
+          }}
           placeholder={t.inputPlaceholder}
           placeholderTextColor={colors.unchecked}
           returnKeyType="search"

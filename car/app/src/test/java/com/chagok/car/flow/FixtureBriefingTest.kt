@@ -2,6 +2,7 @@ package com.chagok.car.flow
 
 import com.chagok.car.FixtureFile
 import com.chagok.car.FixtureResponses
+import com.chagok.car.domain.AskReason
 import com.chagok.car.domain.BoardingDecider
 import com.chagok.car.domain.BoardingDecision
 import com.chagok.car.domain.BoardingKind
@@ -35,5 +36,16 @@ class FixtureBriefingTest {
             ),
             card.tiles,
         )
+    }
+
+    @Test fun `오늘 일정이 모두 끝난 뒤에 타면 다른 날 일정이 있어도 대상이 없다`() {
+        val fixture = FixtureFile.read("schedules/gwangju-day.json")
+        val schedules = ScheduleParser.parse(FixtureResponses.response(fixture, now))
+        assertEquals(listOf("광주 직관", "육전집 점심", "KIA 직관", "콩물 픽업", "친구 약속"), schedules.map { it.title })
+
+        val lateNight = Instant.parse("2026-11-06T14:50:00Z") // 23:50 KST
+        val decision = BoardingDecider.decide(lateNight, BoardingKind.AGAIN, DayPlan(schedules), planIsFallback = false, travelTime = null)
+
+        assertEquals(Question.AskDestination(AskReason.NO_SCHEDULE), (decision as BoardingDecision.Card).question)
     }
 }
