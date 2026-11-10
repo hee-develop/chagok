@@ -20,10 +20,16 @@ class BriefingCardView(context: Context, private val d: DesignScale) : LinearLay
     var onPrimary: () -> Unit = {}
     var onSecondary: () -> Unit = {}
 
+    /** 후보 타일의 줄을 눌렀다. 0부터 센 후보 번호 */
+    var onPick: (Int) -> Unit = {}
+
     private val voiceIndicator = VoiceIndicator(context, d)
     private val statusSlot = LinearLayout(context)
     private val body = LinearLayout(context).apply { orientation = VERTICAL }
     private var dismissBar: AutoDismissBar? = null
+
+    /** 지금 그린 카드의 목적지 후보 줄. 고정 높이 카드에서 내용이 넘치면 [onMeasure]가 이 줄들의 높이를 줄인다. */
+    private var candidateRows: List<View> = emptyList()
 
     /** 말하는 동안만 true. 파형이 움직인다. */
     var speaking: Boolean
@@ -118,6 +124,7 @@ class BriefingCardView(context: Context, private val d: DesignScale) : LinearLay
         if (card.primary != null || card.secondary != null || card.hints.isNotEmpty()) {
             body.addView(buttonRow(card), LayoutParams(-1, -2).apply { topMargin = gap() })
         }
+        candidateRows = body.descendants().filter { it.getTag(R.id.candidate_row) == true }
         if (card.autoDismiss != null) {
             val bar = AutoDismissBar(context, d)
             dismissBar = bar
@@ -128,11 +135,35 @@ class BriefingCardView(context: Context, private val d: DesignScale) : LinearLay
         }
     }
 
+    /**
+     * 후보 줄은 버튼 높이(candidate_row_h)로 먼저 재 보고, 고정 높이 카드의 내용이 넘치면 넘친 만큼을 줄 수로 나눠
+     * 줄 높이를 줄여(candidate_row_min_h까지) 다시 잰다. 두 줄 t-voice·안내 한 줄·후보 3줄이 함께 있어도 버튼 줄이 잘리지 않는다.
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val full = d.dimenInt(R.dimen.candidate_row_h)
+        candidateRows.forEach { it.minimumHeight = full }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        if (candidateRows.isEmpty()) return
+        val used = (0 until body.childCount).map { body.getChildAt(it) }.sumOf {
+            val lp = it.layoutParams as MarginLayoutParams
+            it.measuredHeight + lp.topMargin + lp.bottomMargin
+        }
+        val overflow = used - body.measuredHeight
+        if (overflow <= 0) return
+        val shrink = (overflow + candidateRows.size - 1) / candidateRows.size
+        val reduced = maxOf(d.dimenInt(R.dimen.candidate_row_min_h), full - shrink)
+        candidateRows.forEach { it.minimumHeight = reduced }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
+    private fun View.descendants(): List<View> =
+        if (this is ViewGroup) (0 until childCount).flatMap { listOf(getChildAt(it)) + getChildAt(it).descendants() } else emptyList()
+
     /** 2열 두 개 또는 한 줄 가득 하나. 사이 간격 space-l */
     private fun tileRow(tiles: List<TileView>): View = LinearLayout(context).apply {
         tiles.take(2).forEachIndexed { i, tile ->
             addView(
-                contextTile(context, d, tile),
+                contextTile(context, d, tile) { onPick(it) },
                 LayoutParams(0, -2, 1f).apply { if (i > 0) marginStart = d.dimenInt(R.dimen.space_l) },
             )
         }

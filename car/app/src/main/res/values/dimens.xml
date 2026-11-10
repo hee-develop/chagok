@@ -51,6 +51,11 @@
     <dimen name="care_tag_stroke">1.5dp</dimen>
     <dimen name="tile_gap">6dp</dimen>
     <dimen name="tile_care_gap">10dp</dimen>
+    <!-- 목적지 후보 한 줄(누를 수 있음). 버튼과 같은 높이로 그리고, 고정 높이 카드에 다 안 들어가면
+         BriefingCardView가 넘친 만큼 줄여 candidate_row_min_h까지 낮춘다(버튼 줄이 잘리지 않게). -->
+    <dimen name="candidate_row_h">68dp</dimen>
+    <dimen name="candidate_row_min_h">36dp</dimen>
+    <dimen name="candidate_number_w">28dp</dimen>
     <dimen name="hint_gap">2dp</dimen>
     <dimen name="card_enter_offset">90dp</dimen>
     <dimen name="ducking_icon">18dp</dimen>

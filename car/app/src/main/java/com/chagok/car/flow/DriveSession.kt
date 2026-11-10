@@ -1,11 +1,11 @@
 package com.chagok.car.flow
 
-import com.chagok.car.domain.AskReason
 import com.chagok.car.domain.BoardingDecider
 import com.chagok.car.domain.BoardingDecision
 import com.chagok.car.domain.BoardingKind
 import com.chagok.car.domain.BoardingLog
 import com.chagok.car.domain.DayPlan
+import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.Gear
 import com.chagok.car.domain.Ignition
 import com.chagok.car.domain.Intent
@@ -62,6 +62,9 @@ sealed interface Event {
 
     /** 카드의 보조 버튼 */
     data object SecondaryPressed : Event
+
+    /** 목적지 묻기 카드의 후보 줄을 눌렀다. [index]는 0부터 센 후보 번호다(0번은 주 버튼과 같다). */
+    data class CandidatePressed(val index: Int) : Event
     data class CardTimedOut(val timerId: Int) : Event
 
     /** 데모 초기화: 일정 상태와 BoardingLog를 비운다. */
@@ -143,6 +146,9 @@ class DriveSession(
     private var schedules: List<Schedule> = emptyList()
     private var origin = ScheduleOrigin.FRESH
 
+    /** 일정과 같은 응답에 실려 온 자주 가는 곳. 목적지 묻기 후보로 쓴다. */
+    private var favorites: List<Favorite> = emptyList()
+
     /**
      * 마지막으로 시작한 일정 받기의 세대. 이 세대의 완료만 받는다.
      * 세션이 다시 받기를 요청한 뒤 실행한 쪽이 세대를 알려 주기 전에는 [AWAITING_GENERATION]이라 어떤 완료도 받지 않는다.
@@ -213,6 +219,7 @@ class DriveSession(
         val snapshot = source.snapshot()
         schedules = snapshot.schedules
         origin = snapshot.origin
+        favorites = snapshot.favorites
         var loadedNow = false
         if (event is Event.ScheduleLoading) {
             // 세대는 늘기만 한다. 이미 받은 것보다 오래된 시작은 무시한다.
@@ -255,6 +262,7 @@ class DriveSession(
             is Event.Heard -> onHeard(event.text, out)
             Event.PrimaryPressed -> onButton(primary = true, out)
             Event.SecondaryPressed -> onButton(primary = false, out)
+            is Event.CandidatePressed -> onCandidate(event.index, out)
             is Event.CardTimedOut -> if (card?.timerId == event.timerId) closeCard(out)
             Event.Reset -> onReset(out)
             is Event.ScheduleLoading, is Event.ScheduleLoaded -> if (loadedNow) onSchedulesLoaded(out)
@@ -396,7 +404,9 @@ class DriveSession(
     }
 
     private fun decide(kind: BoardingKind, travelTime: Duration?, out: MutableList<Effect>) {
-        val decision = BoardingDecider.decide(now(), kind, plan(), planIsFallback = origin == ScheduleOrigin.STORED, travelTime = travelTime)
+        val decision = BoardingDecider.decide(
+            now(), kind, plan(), planIsFallback = origin == ScheduleOrigin.STORED, travelTime = travelTime, favorites = favorites,
+        )
         if (decision !is BoardingDecision.Card) return
         // 탑승은 카드를 실제로 띄울 때 기록한다. 판단 중에 D로 바뀌어 카드가 안 뜨면 그날 첫 탑승을 소진하지 않는다.
         log = log.boarded(now(), zone)
@@ -472,22 +482,28 @@ class DriveSession(
         }
     }
 
+    /** 후보 줄 누름. 목적지 묻기 카드의 후보 번호일 때만 그 후보로 길안내한다. */
+    private fun onCandidate(index: Int, out: MutableList<Effect>) {
+        val state = card ?: return
+        val question = state.question as? Question.AskDestination ?: return
+        if (index !in question.candidates.indices) return
+        accept(state, out, index)
+    }
+
     private fun onHeard(text: String, out: MutableList<Effect>) {
         val state = card ?: return
         if (!state.voiceOpen) return
         state.voiceOpen = false
         val question = state.question
-        val candidates = (question as? Question.AskDestination)
-            ?.takeIf { it.reason == AskReason.PLENTY_OF_TIME }
-            ?.suggested?.place?.name?.let { listOf(it) }
-            .orEmpty()
-        // 수락("응")과 후보 고르기(이름·순서)는 같은 결과(제안 장소로 길안내)다.
+        // 화면에 보인 후보 이름. 순서가 후보 번호다.
+        val candidates = (question as? Question.AskDestination)?.let { Phrases.candidateNames(it) }.orEmpty()
+        // 수락("응")은 1번 후보(주 버튼)를 고르는 것과 같은 결과다.
         val acceptPick = if (candidates.isNotEmpty()) 0 else null
         when (val intent = IntentMatcher.match(text, candidates, acceptPick)) {
             Intent.Accept ->
                 // 후보가 없는 목적지 묻기에서 "응"은 갈 곳을 정하지 못한 말이다.
                 if (question is Question.AskDestination && candidates.isEmpty()) unrecognized(state, out) else accept(state, out)
-            is Intent.Pick -> if (intent.index == acceptPick) accept(state, out) else unrecognized(state, out)
+            is Intent.Pick -> if (intent.index in candidates.indices) accept(state, out, intent.index) else unrecognized(state, out)
             Intent.Reject -> reject(out)
             Intent.Hold -> hold(state, out)
             Intent.Alternative -> {
@@ -524,12 +540,12 @@ class DriveSession(
         out += Effect.CollapseCard()
     }
 
-    private fun accept(state: CardState, out: MutableList<Effect>) {
+    /** 수락. 목적지 묻기는 [pick]번 후보로(주 버튼·"응"은 0번), 출발 제안·늦게 탐은 대상 일정 장소로 길안내한다. */
+    private fun accept(state: CardState, out: MutableList<Effect>, pick: Int = 0) {
         val place = when (val question = state.question) {
             is Question.Depart -> question.target.place
             is Question.DepartLate -> question.target.place
-            is Question.AskDestination ->
-                if (question.reason == AskReason.PLENTY_OF_TIME) question.suggested?.place else null
+            is Question.AskDestination -> question.candidates.getOrNull(pick)
             null -> null
         }
         card = null

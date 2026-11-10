@@ -28,7 +28,7 @@ object IntentMatcher {
         Intent.Hold to setOf("잠깐만", "이따가"),
     )
     private const val REJECT_PHRASE = "그냥갈게"
-    private val ORDINALS = listOf(listOf("첫번째", "첫째"), listOf("두번째", "둘째"))
+    private val ORDINALS = listOf(listOf("첫번째", "첫째"), listOf("두번째", "둘째"), listOf("세번째", "셋째"))
 
     /**
      * @param candidates 화면에 보인 후보 이름(장소 후보, 일정 겹침). 순서가 Pick.index다.
@@ -50,10 +50,11 @@ object IntentMatcher {
             if (REJECT_PHRASE in joined) add(Intent.Reject)
             if (stems.any { it.startsWith("다른") }) add(Intent.Alternative)
             ORDINALS.forEachIndexed { i, words -> if (words.any { it in joined }) add(Intent.Pick(i)) }
-            candidates.forEachIndexed { i, name ->
-                val key = name.lowercase().replace(PUNCTUATION, "").replace(WHITESPACE, "")
-                if (key.isNotEmpty() && key in joined) add(Intent.Pick(i))
-            }
+            // 한 후보 이름이 다른 후보 이름 안에 들어 있으면("집"과 "단골 콩물집") 둘 다 들렸을 때 긴 이름만 고른다.
+            val keys = candidates.map { it.lowercase().replace(PUNCTUATION, "").replace(WHITESPACE, "") }
+            val heard = keys.withIndex().filter { (_, key) -> key.isNotEmpty() && key in joined }
+            heard.filterNot { (i, key) -> heard.any { (j, other) -> j != i && other.length > key.length && key in other } }
+                .forEach { (i, _) -> add(Intent.Pick(i)) }
         }
         if (acceptPick != null && Intent.Accept in found) {
             val rest = found - Intent.Accept

@@ -75,6 +75,7 @@ class MainActivity : Activity() {
             visibility = View.GONE
             onPrimary = { host.post(Event.PrimaryPressed) }
             onSecondary = { host.post(Event.SecondaryPressed) }
+            onPick = { host.post(Event.CandidatePressed(it)) }
         }
         column.addView(card, cardParams())
 

@@ -1,6 +1,8 @@
 package com.chagok.car.flow
 
 import com.chagok.car.domain.BoardingLog
+import com.chagok.car.domain.Favorite
+import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.Gear
 import com.chagok.car.domain.Ignition
 import com.chagok.car.domain.LatLng
@@ -8,6 +10,7 @@ import com.chagok.car.domain.Place
 import com.chagok.car.domain.Rules
 import com.chagok.car.domain.Schedule
 import com.chagok.car.domain.ScheduleStatus
+import com.chagok.car.ui.TileView
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -30,6 +33,7 @@ class DriveSessionTest {
     private val start = Instant.parse("2026-12-03T00:00:00Z")
     private val clock = MutableClock(start)
     private lateinit var schedules: List<Schedule>
+    private var favorites: List<Favorite> = emptyList()
     private lateinit var session: DriveSession
 
     private val gangnam = Place("강남역", LatLng(37.4979, 127.0276))
@@ -55,7 +59,7 @@ class DriveSessionTest {
 
     /** @param gear 시작할 때의 기어. 앱을 켠 순간 이미 P단이면 '방금 P단에 넣음'이 아니다. null이면 기어를 아직 모름 */
     private fun newSession(restored: Snapshot? = null, gear: Gear? = Gear.PARK) {
-        session = DriveSession(clock, { ScheduleSnapshot(schedules) }, restored)
+        session = DriveSession(clock, { ScheduleSnapshot(schedules, favorites = favorites) }, restored)
         gear?.let { session.handle(Event.GearChanged(it)) }
     }
 
@@ -772,5 +776,73 @@ class DriveSessionTest {
         newSession()
         boardWithCard()
         assertEquals(Effect.CollapseCard(instant = false), session.handle(Event.PrimaryPressed).one<Effect.CollapseCard>())
+    }
+
+    private val home = Favorite(FavoriteKind.HOME, Place("예시 아파트", LatLng(37.55, 126.92)))
+    private val work = Favorite(FavoriteKind.WORK, Place("예시타워", LatLng(37.50, 127.04)))
+    private val station = Favorite(FavoriteKind.OTHER, Place("서울역", LatLng(37.55, 126.97)), "서울 중구 한강대로 405")
+
+    /** 일정이 없는 날 자주 가는 곳을 둔 채 탑승한다. 대상 일정이 없어 소요 시간을 묻지 않고 바로 카드를 띄운다. */
+    private fun boardOnEmptyDay(vararg places: Favorite): List<Effect> {
+        schedules = emptyList()
+        favorites = places.toList()
+        newSession()
+        return session.handle(Event.Boarded)
+    }
+
+    private fun candidateNames(effects: List<Effect>) =
+        (effects.one<Effect.ShowCard>().card.tiles.single() as TileView.Candidates).rows.map { it.name }
+
+    @Test
+    fun 일정이_없는_날_자주_가는_곳을_후보로_보이고_주_버튼은_1번_후보로_길안내한다() {
+        val out = boardOnEmptyDay(home, work, station)
+        val card = out.one<Effect.ShowCard>().card
+        assertEquals("어디로 갈까요?", card.voice)
+        assertEquals("집으로", card.primary)
+        assertEquals(listOf("집", "회사", "서울역"), candidateNames(out))
+        assertTrue(out.one<Effect.Speak>().thenListen)
+        assertEquals(home.place, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place)
+    }
+
+    @Test
+    fun 후보_줄을_누르면_그_후보로_길안내하고_없는_번호는_무시한다() {
+        boardOnEmptyDay(home, work)
+        assertEquals(emptyList<Effect>(), session.handle(Event.CandidatePressed(2)))
+        val out = session.handle(Event.CandidatePressed(1))
+        assertEquals(work.place, out.one<Effect.StartRoute>().place)
+        assertTrue(out.has<Effect.CollapseCard>())
+        // 카드가 접힌 뒤의 누름은 무시한다.
+        assertEquals(emptyList<Effect>(), session.handle(Event.CandidatePressed(0)))
+    }
+
+    @Test
+    fun 후보는_이름이나_순서로_말해_고르고_응은_1번_후보다() {
+        boardOnEmptyDay(home, work, station)
+        assertEquals(work.place, session.handle(Event.Heard("회사로 가자")).one<Effect.StartRoute>().place)
+        boardOnEmptyDay(home, work, station)
+        assertEquals(station.place, session.handle(Event.Heard("세 번째")).one<Effect.StartRoute>().place)
+        boardOnEmptyDay(home, work, station)
+        assertEquals(home.place, session.handle(Event.Heard("응")).one<Effect.StartRoute>().place)
+    }
+
+    @Test
+    fun 자주_가는_곳이_없는_날은_후보_없이_묻고_응은_다시_묻는다() {
+        val card = boardOnEmptyDay().one<Effect.ShowCard>().card
+        assertNull(card.primary)
+        assertTrue(card.tiles.isEmpty())
+        val out = session.handle(Event.Heard("응"))
+        assertTrue(!out.has<Effect.StartRoute>())
+        assertEquals(Phrases.ASK_AGAIN, out.one<Effect.Speak>().text)
+    }
+
+    @Test
+    fun 여유가_많은_날은_일정_장소_뒤에_자주_가는_곳이_붙고_같은_곳은_빠진다() {
+        schedules = listOf(schedule("c", "저녁 약속", 300, cityHall))
+        favorites = listOf(Favorite(FavoriteKind.WORK, cityHall), home)
+        newSession()
+        val out = boardWithCard(travel = Duration.ofMinutes(30))
+        assertEquals(listOf("서울시청", "집"), candidateNames(out))
+        assertEquals("서울시청으로", out.one<Effect.ShowCard>().card.primary)
+        assertEquals(home.place, session.handle(Event.CandidatePressed(1)).one<Effect.StartRoute>().place)
     }
 }

@@ -26,6 +26,6 @@ export const createApp = ({
     .get('/health', (c) => c.json({ ok: true as const }))
     .route('/calendars', createCalendarsRoute(calendars, store))
     .route('/places', createPlacesRoute(places, favorites))
-    .route('/schedules', createSchedulesRoute(fixture, calendars, store, places));
+    .route('/schedules', createSchedulesRoute(fixture, calendars, store, places, favorites));
 
 export type AppType = ReturnType<typeof createApp>;

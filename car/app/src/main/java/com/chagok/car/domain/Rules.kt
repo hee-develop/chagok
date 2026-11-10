@@ -20,4 +20,7 @@ object Rules {
     // 가안
     val DEPARTURE_BUFFER: Duration = Duration.ofMinutes(10)
     const val CHATTER_OVER_WORDS = 4
+
+    /** '어디로 갈까요?' 카드의 후보 수(일정 장소 포함). 음성으로는 이름이나 '첫/두/세 번째'로 고른다. */
+    const val MAX_DESTINATION_CANDIDATES = 3
 }

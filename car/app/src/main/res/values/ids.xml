@@ -4,4 +4,6 @@
     <item name="card_fade" type="id" />
     <!-- BriefingCardView의 뷰 ID(계측 테스트가 카드 위치를 찾는다) -->
     <item name="briefing_card" type="id" />
+    <!-- 목적지 후보 줄 표식(BriefingCardView가 넘칠 때 줄 높이를 줄인다) -->
+    <item name="candidate_row" type="id" />
 </resources>

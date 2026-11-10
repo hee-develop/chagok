@@ -2,6 +2,8 @@ package com.chagok.car.flow
 
 import com.chagok.car.FixtureFile
 import com.chagok.car.FixtureResponses
+import com.chagok.car.domain.Favorite
+import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.LatLng
 import com.chagok.car.domain.Place
 import org.json.JSONObject
@@ -80,5 +82,30 @@ class ScheduleParserTest {
         assertEquals("gwangju-day", root.getString("id"))
         assertTrue(root.has("favorites"))
         assertTrue(root.has("vehicle"))
+    }
+
+    @Test fun `자주 가는 곳을 읽고 없거나 모르는 자리는 빈 목록과 OTHER로 본다`() {
+        val body = """
+            {"anchor":"2026-11-06T00:20:00.000Z","schedules":[],"favorites":[
+              {"kind":"home","name":"예시 아파트 101동","address":"광주 북구 샘플로 12","lat":35.1743,"lng":126.9121},
+              {"kind":"work","name":"광주 예시 업무지구","address":"광주 서구 상무대로 800","lat":35.1531,"lng":126.8514},
+              {"kind":"other","name":"광주송정역","address":null,"lat":35.1378,"lng":126.7912},
+              {"kind":"gym","name":"체육관","lat":35.1527,"lng":126.8483}
+            ]}
+        """.trimIndent()
+        val day = ScheduleParser.parseDay(body)
+        assertEquals(
+            listOf(
+                Favorite(FavoriteKind.HOME, Place("예시 아파트 101동", LatLng(35.1743, 126.9121)), "광주 북구 샘플로 12"),
+                Favorite(FavoriteKind.WORK, Place("광주 예시 업무지구", LatLng(35.1531, 126.8514)), "광주 서구 상무대로 800"),
+                Favorite(FavoriteKind.OTHER, Place("광주송정역", LatLng(35.1378, 126.7912)), null),
+                Favorite(FavoriteKind.OTHER, Place("체육관", LatLng(35.1527, 126.8483)), null),
+            ),
+            day.favorites,
+        )
+        // 기능 전에 저장한 사본처럼 favorites가 없으면 빈 목록
+        assertEquals(emptyList<Favorite>(), ScheduleParser.parseDay("""{"schedules":[]}""").favorites)
+        // 자주 가는 곳 형식이 어긋나면 응답 전체를 실패로 본다(일정과 같은 규칙)
+        assertTrue(runCatching { ScheduleParser.parseDay("""{"schedules":[],"favorites":[{"kind":"home"}]}""") }.isFailure)
     }
 }

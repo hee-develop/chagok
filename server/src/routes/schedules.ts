@@ -4,6 +4,7 @@ import { validator } from 'hono/validator';
 import type { DayFixture, MockCalendar, PlacesCatalog, ScheduleFixture } from '../fixture-types.js';
 import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
 import { effectiveSelectedIds, type SelectionStore } from './calendars.js';
+import type { FavoritesStore } from './places.js';
 
 const ISO_8601 =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-](\d{2}):(\d{2}))$/;
@@ -40,9 +41,34 @@ const seoulDay = (ms: number) => Math.floor((ms + SEOUL_OFFSET_MS) / DAY_MS);
 type Override = { placeId: string | null; noTravel: boolean };
 type PlaceChange = { placeId: string | null } | { noTravel: true };
 
-export const createSchedulesRoute = (fixture: DayFixture, calendars: MockCalendar[], selection: SelectionStore, catalog: PlacesCatalog) => {
+/** 자주 가는 곳의 자리. 차량은 home·work를 '집'·'회사'로 부른다. */
+export type FavoriteKind = 'home' | 'work' | 'other';
+
+export const createSchedulesRoute = (
+  fixture: DayFixture,
+  calendars: MockCalendar[],
+  selection: SelectionStore,
+  catalog: PlacesCatalog,
+  favorites: FavoritesStore,
+) => {
   const overrides = new Map<string, Override>();
   const places = new Map([...catalog.places, ...catalog.suggestions].map((p) => [p.id, p]));
+  /**
+   * 차량 '어디로 갈까요?' 후보로 쓰는 자주 가는 곳. 집 → 회사 → 추가한 순서이고, 일정 선택·날짜와 무관하다.
+   * 저장소는 목 장소 id만 받으므로 모두 풀린다. 고르는 개수와 상황은 차량 앱이 정한다.
+   */
+  const favoritePlaces = () => {
+    const saved = favorites.get();
+    const slots: { kind: FavoriteKind; id: string }[] = [
+      ...(saved.home === null ? [] : [{ kind: 'home' as const, id: saved.home }]),
+      ...(saved.work === null ? [] : [{ kind: 'work' as const, id: saved.work }]),
+      ...saved.others.map((id) => ({ kind: 'other' as const, id })),
+    ];
+    return slots.map(({ kind, id }) => {
+      const p = places.get(id)!;
+      return { kind, name: p.name, address: p.address, lat: p.lat, lng: p.lng };
+    });
+  };
   const remembered = new Map(catalog.remembered.map((r) => [r.title, places.get(r.placeId)!]));
   const selectedSchedules = () => {
     const selected = new Set(effectiveSelectedIds(calendars, selection));
@@ -84,6 +110,7 @@ export const createSchedulesRoute = (fixture: DayFixture, calendars: MockCalenda
           const { noTravel: _, ...place } = view(s);
           return { ...place, title: s.title, ...times(s, anchor), allDay: s.allDay, memo: s.memo, attendees: s.attendees };
         }),
+        favorites: favoritePlaces(),
       }, 200);
     })
     .get('/places', anchorValidator, (c) => {

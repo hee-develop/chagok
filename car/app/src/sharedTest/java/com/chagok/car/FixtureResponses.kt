@@ -19,7 +19,13 @@ object FixtureResponses {
             "목 캘린더 픽스처 없음: calendars/mock-device.json"
         }.bufferedReader().use { it.readText() }
 
-    fun response(fixtureJson: String, anchor: Instant, calendarsJson: String = defaultCalendarsJson()): String {
+    /** @param favorites 서버 favorites와 같은 형식의 자주 가는 곳. 기본은 저장한 곳이 없는 빈 목록 */
+    fun response(
+        fixtureJson: String,
+        anchor: Instant,
+        calendarsJson: String = defaultCalendarsJson(),
+        favorites: JSONArray = JSONArray(),
+    ): String {
         val fixture = JSONObject(fixtureJson)
         val calendars = JSONObject(calendarsJson).getJSONArray("calendars")
         val selected = (0 until calendars.length()).map { calendars.getJSONObject(it) }
@@ -43,7 +49,7 @@ object FixtureResponses {
                     .put("attendees", item.getJSONArray("attendees")),
             )
         }
-        return JSONObject().put("anchor", iso(anchor, 0)).put("schedules", schedules).toString()
+        return JSONObject().put("anchor", iso(anchor, 0)).put("schedules", schedules).put("favorites", favorites).toString()
     }
 
     private val seoul = ZoneId.of("Asia/Seoul")
