@@ -1,6 +1,7 @@
 package com.chagok.car.domain
 
 import com.chagok.car.flow.Phrases
+import com.chagok.car.ui.CandidateRow
 import com.chagok.car.ui.TileRow
 import com.chagok.car.ui.TileView
 import org.junit.Assert.assertEquals
@@ -206,5 +207,38 @@ class PhrasesTest {
         assertEquals(listOf("유니폼", "응원봉", "티켓"), Phrases.careItems("유니폼·응원봉·티켓"))
         assertEquals(listOf("우산", "지갑"), Phrases.careItems("우산, 지갑"))
         assertEquals(listOf("도시락"), Phrases.careItems("도시락"))
+    }
+
+    private val home = Favorite(FavoriteKind.HOME, Place("예시 아파트 101동", LatLng(0.0, 0.0)))
+    private val work = Favorite(FavoriteKind.WORK, Place("광주 예시 업무지구", LatLng(0.0, 0.0)))
+    private val station = Favorite(FavoriteKind.OTHER, Place("광주송정역", LatLng(0.0, 0.0)), "광주 광산구 상무대로 201")
+
+    @Test fun `일정 없음에 자주 가는 곳이 있으면 후보 타일과 1번 후보 버튼`() {
+        val q = Question.AskDestination(AskReason.NO_SCHEDULE, favorites = listOf(home, work, station))
+        val c = card(briefing(Briefing.Level.FULL, null, emptyList()), q, "09:00")
+        assertEquals("어디로 갈까요?", c.voice)
+        val rows = listOf(CandidateRow("집", "예시 아파트 101동"), CandidateRow("회사", "광주 예시 업무지구"), CandidateRow("광주송정역", "광주 광산구 상무대로 201"))
+        assertEquals(listOf<TileView>(TileView.Candidates("자주 가는 곳", rows)), c.tiles)
+        assertEquals("집으로", c.primary)
+        assertEquals("그냥 갈게", c.secondary)
+        assertEquals(listOf("“응”이라고 말해도 돼요", "출발하면 자동으로 접혀요"), c.hints)
+        assertEquals(listOf("집", "회사", "광주송정역"), Phrases.candidateNames(q))
+    }
+
+    @Test fun `여유가 많을 때 자주 가는 곳이 붙으면 일정 장소를 1번 줄로 둔 후보 타일`() {
+        val meeting = sched("m", "육전집 점심", "13:30", place = "광주 육전집")
+        val q = Question.AskDestination(AskReason.PLENTY_OF_TIME, meeting, at("12:50"), listOf(work))
+        val c = card(briefing(Briefing.Level.FULL, meeting), q, "09:00")
+        assertEquals("어디로 갈까요? 1시 30분 육전집 점심은 12시 50분에 출발하면 돼요.", c.voice)
+        val rows = listOf(CandidateRow("광주 육전집", "13:30 육전집 점심"), CandidateRow("회사", "광주 예시 업무지구"))
+        assertEquals(listOf<TileView>(TileView.Candidates("갈 곳", rows)), c.tiles)
+        assertEquals("광주 육전집으로", c.primary)
+        assertEquals(listOf("광주 육전집", "회사"), Phrases.candidateNames(q))
+        assertEquals(q.candidates.size, Phrases.candidateNames(q).size)
+    }
+
+    @Test fun `장소 모름은 후보 이름이 없다`() {
+        val noPlace = sched("c", "치과", "13:00")
+        assertEquals(emptyList<String>(), Phrases.candidateNames(Question.AskDestination(AskReason.PLACE_UNKNOWN, noPlace, favorites = listOf(home))))
     }
 }

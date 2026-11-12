@@ -1,5 +1,6 @@
 package com.chagok.car.flow
 
+import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.Schedule
 
 /** [ScheduleSource.schedules]가 어떤 데이터인지. */
@@ -14,10 +15,11 @@ enum class ScheduleOrigin {
     FRESH,
 }
 
-/** 어느 한 순간의 오늘 일정과 그 출처. 둘은 항상 같은 순간의 값이다. */
+/** 어느 한 순간의 오늘 일정과 그 출처, 같은 응답에 실려 온 자주 가는 곳. 모두 같은 순간의 값이다. */
 data class ScheduleSnapshot(
     val schedules: List<Schedule>,
     val origin: ScheduleOrigin = ScheduleOrigin.FRESH,
+    val favorites: List<Favorite> = emptyList(),
 )
 
 /** 오늘 일정을 주는 곳. */

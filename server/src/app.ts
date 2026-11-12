@@ -40,6 +40,6 @@ export const createApp = ({
     .route('/calendars', createCalendarsRoute(calendars, store))
     .route('/places', createPlacesRoute(places, favorites))
     .route('/events', createEventsRoute(events, { now, isLoopback, loopbackOnly: eventsLoopbackOnly }))
-    .route('/schedules', createSchedulesRoute(fixture, calendars, store, places, events, now));
+    .route('/schedules', createSchedulesRoute(fixture, calendars, store, places, events, favorites, now));
 
 export type AppType = ReturnType<typeof createApp>;

@@ -15,12 +15,25 @@ sealed interface Question {
     /**
      * "어디로 갈까요?" suggested는 후보에 올릴 대상 일정(여유 많음·장소 없음일 때).
      * departBy는 여유 많음일 때 "{출발 시각}에 출발하면 돼요"에 쓰는 출발해야 할 시각.
+     * favorites는 후보로 함께 보일 자주 가는 곳(일정 없음·여유 많음일 때만, 개수는 이미 줄여 둠).
      */
     data class AskDestination(
         val reason: AskReason,
         val suggested: Schedule? = null,
         val departBy: Instant? = null,
-    ) : Question
+        val favorites: List<Favorite> = emptyList(),
+    ) : Question {
+        /**
+         * 화면·음성 후보 장소. 순서가 후보 번호다. 여유 많음이면 대상 일정 장소가 1번이고 자주 가는 곳이 뒤에 붙는다.
+         * 장소 모름은 후보가 없다. 1번이 주 버튼이고 "응"이 고르는 곳이다.
+         */
+        val candidates: List<Place>
+            get() = when (reason) {
+                AskReason.PLENTY_OF_TIME -> listOfNotNull(suggested?.place) + favorites.map { it.place }
+                AskReason.NO_SCHEDULE -> favorites.map { it.place }
+                AskReason.PLACE_UNKNOWN -> emptyList()
+            }
+    }
 
     /** 출발 제안. arrival은 지금 출발하면 도착할 시각(소요 시간을 알 때만). */
     data class Depart(val target: Schedule, val arrival: Instant? = null) : Question
@@ -80,6 +93,7 @@ object BoardingDecider {
      * @param travelTime `plan.skipOverdue(now).target()`까지 내비 예상 소요 시간. 모르면 null.
      *   모르면 0으로 보고 늦음의 하한만 판단한다(`now - start > LATE_THRESHOLD`면 늦게 탐).
      *   60분 여유 판단(PLENTY_OF_TIME)은 소요 시간을 알 때만 한다.
+     * @param favorites 자주 가는 곳(집 → 회사 → 추가한 순서). 일정 없음·여유 많음의 목적지 묻기 후보로 붙인다.
      */
     fun decide(
         now: Instant,
@@ -87,6 +101,7 @@ object BoardingDecider {
         plan: DayPlan?,
         planIsFallback: Boolean,
         travelTime: Duration?,
+        favorites: List<Favorite> = emptyList(),
     ): BoardingDecision {
         if (kind == BoardingKind.QUICK_STOP) return BoardingDecision.StaySilent
 
@@ -101,17 +116,21 @@ object BoardingDecider {
             memo = if (kind == BoardingKind.FIRST) MemoNote.of(target?.memo) else MemoNote.None,
             fromFallback = plan != null && planIsFallback,
         )
-        return BoardingDecision.Card(briefing, question(now, target, travelTime))
+        return BoardingDecision.Card(briefing, question(now, target, travelTime, favorites))
     }
 
-    private fun question(now: Instant, target: Schedule?, travelTime: Duration?): Question {
-        if (target == null) return Question.AskDestination(AskReason.NO_SCHEDULE)
+    private fun question(now: Instant, target: Schedule?, travelTime: Duration?, favorites: List<Favorite>): Question {
+        if (target == null) {
+            return Question.AskDestination(AskReason.NO_SCHEDULE, favorites = favorites.take(Rules.MAX_DESTINATION_CANDIDATES))
+        }
         if (target.place == null) return Question.AskDestination(AskReason.PLACE_UNKNOWN, target)
         // 소요 시간을 모르면 0으로 보고 늦음의 하한만 본다. 여유(60분) 판단은 소요 시간을 알 때만 한다.
         if (travelTime != null) {
             val departBy = target.start - travelTime - Rules.DEPARTURE_BUFFER
             if (Duration.between(now, departBy) > Rules.ASK_DESTINATION_LEAD) {
-                return Question.AskDestination(AskReason.PLENTY_OF_TIME, target, departBy)
+                // 일정 장소와 같은 곳은 자주 가는 곳에서 빼고, 일정 장소 한 자리를 남겨 둔다.
+                val others = favorites.filterNot { samePlace(it.place, target.place) }.take(Rules.MAX_DESTINATION_CANDIDATES - 1)
+                return Question.AskDestination(AskReason.PLENTY_OF_TIME, target, departBy, others)
             }
         }
         val arrival = travelTime?.let { now + it }
@@ -119,4 +138,7 @@ object BoardingDecider {
         if (lateBy > Rules.LATE_THRESHOLD) return Question.DepartLate(target, lateBy, arrival)
         return Question.Depart(target, arrival)
     }
+
+    /** 이름이나 좌표가 같으면 같은 곳으로 본다(일정 장소와 자주 가는 곳은 출처가 달라 이름 표기가 다를 수 있다). */
+    private fun samePlace(a: Place, b: Place) = a.name == b.name || a.position == b.position
 }

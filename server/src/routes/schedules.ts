@@ -6,10 +6,14 @@ import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
 import { MINUTE_MS, parseAt, seoulDay } from '../time.js';
 import { effectiveSelectedIds, type SelectionStore } from './calendars.js';
 import type { EventsStore } from './events.js';
+import type { FavoritesStore } from './places.js';
 
 /** 캘린더 원본과 분리한 일정별 보정값. 라우트 인스턴스 수명 동안만 보관한다. */
 type Override = { placeId: string | null; noTravel: boolean };
 type PlaceChange = { placeId: string | null } | { noTravel: true };
+
+/** 자주 가는 곳의 자리. 차량은 home·work를 '집'·'회사'로 부른다. */
+export type FavoriteKind = 'home' | 'work' | 'other';
 
 /** 폰이 보낸 일정과 픽스처 일정을 같은 모양으로 다루기 위한 행. 시각은 UTC 밀리초. */
 type Row = {
@@ -40,10 +44,27 @@ export const createSchedulesRoute = (
   selection: SelectionStore,
   catalog: PlacesCatalog,
   events: EventsStore,
+  favorites: FavoritesStore,
   now: () => Date = () => new Date(),
 ) => {
   const overrides = new Map<string, Override>();
   const places = new Map([...catalog.places, ...catalog.suggestions].map((p) => [p.id, p]));
+  /**
+   * 차량 '어디로 갈까요?' 후보로 쓰는 자주 가는 곳. 집 → 회사 → 추가한 순서이고, 일정 선택·날짜와 무관하다.
+   * 저장소는 목 장소 id만 받으므로 모두 풀린다. 고르는 개수와 상황은 차량 앱이 정한다.
+   */
+  const favoritePlaces = () => {
+    const saved = favorites.get();
+    const slots: { kind: FavoriteKind; id: string }[] = [
+      ...(saved.home === null ? [] : [{ kind: 'home' as const, id: saved.home }]),
+      ...(saved.work === null ? [] : [{ kind: 'work' as const, id: saved.work }]),
+      ...saved.others.map((id) => ({ kind: 'other' as const, id })),
+    ];
+    return slots.map(({ kind, id }) => {
+      const p = places.get(id)!;
+      return { kind, name: p.name, address: p.address, lat: p.lat, lng: p.lng };
+    });
+  };
   const remembered = new Map(catalog.remembered.map((r) => [r.title, places.get(r.placeId)!]));
   const toPlace = (p: MockPlace): PlaceFixture => ({ name: p.name, lat: p.lat, lng: p.lng });
   const namedPlaces = [...places.values()].map((p) => ({ p, name: normalize(p.name) }));
@@ -143,6 +164,7 @@ export const createSchedulesRoute = (
           const { noTravel: _, ...place } = view(s);
           return { ...place, title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, attendees: s.attendees };
         }),
+        favorites: favoritePlaces(),
       }, 200);
     })
     .get('/places', anchorValidator, (c) => {

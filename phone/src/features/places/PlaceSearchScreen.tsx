@@ -152,11 +152,11 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
         />
 
         {search.status === 'loading' ? (
-          <View accessible accessibilityRole="progressbar" accessibilityLabel={t.searching} style={styles.statusBox}>
+          <View key="loading" accessible accessibilityRole="progressbar" accessibilityLabel={t.searching} style={styles.statusBox}>
             <ActivityIndicator color={colors.text} />
           </View>
         ) : search.status === 'error' ? (
-          <View style={styles.statusBox}>
+          <View key="error" style={styles.statusBox}>
             <Text style={[styles.errorText, font(500)]}>{t.searchFailed}</Text>
             <Pressable accessibilityRole="button" onPress={() => setAttempt((n) => n + 1)} style={styles.retry}>
               <Text style={[styles.retryText, font(600)]}>{t.retry}</Text>
@@ -164,11 +164,11 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
           </View>
         ) : search.status === 'ready' ? (
           search.places.length === 0 ? (
-            <View style={styles.statusBox}>
+            <View key="empty" style={styles.statusBox}>
               <Text style={[styles.emptyText, font(400)]}>{t.noResults}</Text>
             </View>
           ) : (
-            <View style={styles.card} pointerEvents={picking ? 'none' : 'auto'}>
+            <View key="results" style={styles.card} pointerEvents={picking ? 'none' : 'auto'}>
               {search.places.map((place, index) => (
                 <PlaceRow
                   key={place.id}

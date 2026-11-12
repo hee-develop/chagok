@@ -15,7 +15,13 @@ sealed interface TileView {
 
     /** 목적지 묻기에서 보이는 일정 장소 타일. [line]은 "13:00 육전집 점심". */
     data class PlaceTile(val name: String, val line: String) : TileView
+
+    /** 목적지 묻기의 후보 목록 타일(한 줄 가득). 줄 순서가 후보 번호이고 줄을 누르면 그 후보로 길안내한다. */
+    data class Candidates(val label: String, val rows: List<CandidateRow>) : TileView
 }
+
+/** 후보 한 줄. [name]은 부르는 이름("집", "광주송정역"), [detail]은 장소 이름·주소나 "13:00 육전집 점심". */
+data class CandidateRow(val name: String, val detail: String)
 
 /**
  * BriefingCard 한 장의 화면 내용. 순서는 규격 그대로다:

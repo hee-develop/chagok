@@ -18,7 +18,8 @@ class BoardingDeciderTest {
         plan: DayPlan? = this.plan,
         fallback: Boolean = false,
         travel: Duration? = thirtyMin,
-    ) = BoardingDecider.decide(at(now), kind, plan, fallback, travel)
+        favorites: List<Favorite> = emptyList(),
+    ) = BoardingDecider.decide(at(now), kind, plan, fallback, travel, favorites)
 
     private fun card(decision: BoardingDecision) = decision as BoardingDecision.Card
 
@@ -113,5 +114,32 @@ class BoardingDeciderTest {
         assertEquals(Question.AskDestination(AskReason.NO_SCHEDULE), card(decide("09:00", plan = onlyAllDay)).question)
         // 종일 일정은 늦음·건너뜀 판단 대상이 아니다
         assertEquals(emptyMap<String, ScheduleStatus>(), withAllDay.skipOverdue(at("23:59") + Duration.ofHours(1)).statuses.filterKeys { it == "d" })
+    }
+
+    private val home = Favorite(FavoriteKind.HOME, Place("예시 아파트", LatLng(35.17, 126.91)))
+    private val work = Favorite(FavoriteKind.WORK, Place("예시타워", OFFICE.position))
+    private val station = Favorite(FavoriteKind.OTHER, Place("광주송정역", LatLng(35.13, 126.79)), "광주 광산구 상무대로 201")
+    private val library = Favorite(FavoriteKind.OTHER, Place("광주 시립도서관", LatLng(35.13, 126.90)))
+    private val all = listOf(home, work, station, library)
+
+    @Test fun `일정이 없으면 자주 가는 곳을 앞에서부터 3개까지 후보로 붙임`() {
+        val q = card(decide("09:00", plan = null, favorites = all)).question as Question.AskDestination
+        assertEquals(Question.AskDestination(AskReason.NO_SCHEDULE, favorites = listOf(home, work, station)), q)
+        assertEquals(listOf(home.place, work.place, station.place), q.candidates)
+    }
+
+    @Test fun `여유가 많으면 일정 장소가 1번이고 같은 곳을 뺀 자주 가는 곳 2개가 뒤에 붙음`() {
+        // work는 일정 장소(OFFICE)와 좌표가 같아 뺀다.
+        val q = card(decide("08:19", favorites = all)).question as Question.AskDestination
+        assertEquals(Question.AskDestination(AskReason.PLENTY_OF_TIME, meeting, at("09:20"), listOf(home, station)), q)
+        assertEquals(listOf(OFFICE, home.place, station.place), q.candidates)
+    }
+
+    @Test fun `장소를 모르는 일정과 출발 제안에는 자주 가는 곳을 붙이지 않음`() {
+        val noPlace = schedule("n", "10:00", "11:00", place = null)
+        val unknown = card(decide("09:00", plan = DayPlan(listOf(noPlace)), favorites = all)).question as Question.AskDestination
+        assertEquals(emptyList<Favorite>(), unknown.favorites)
+        assertEquals(emptyList<Place>(), unknown.candidates)
+        assertEquals(Question.Depart(meeting, at("09:30")), card(decide("09:00", favorites = all)).question)
     }
 }
