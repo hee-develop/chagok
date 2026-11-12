@@ -67,4 +67,18 @@ describe('GET /schedules/today 자주 가는 곳', () => {
     await send(app, 'PUT', '/places/favorites/home', { placeId: 'mock-home-apt' });
     expect(await favorites(newApp())).toEqual([]);
   });
+
+  it('폰이 보낸 일정을 쓸 때도 같은 목록을 내려준다', async () => {
+    // 2026-11-06 09:20 KST. 폰 일정 출처로 바뀌어도 자주 가는 곳은 일정 출처와 무관하다.
+    const app = newApp({ now: () => new Date('2026-11-06T00:20:00Z') });
+    await send(app, 'PUT', '/places/favorites/home', { placeId: 'mock-home-apt' });
+    const event = {
+      id: 'e1@1', calendarId: '3', title: '팀 회의', start: '2026-11-06T05:00:00.000Z', end: '2026-11-06T06:00:00.000Z',
+      allDay: false, locationText: null, notes: null, attendees: [],
+    };
+    expect((await send(app, 'PUT', '/events', { events: [event] })).status).toBe(200);
+    const body = (await (await app.request(`/schedules/today?at=${at}`)).json()) as { schedules: { title: string }[]; favorites: Favorite[] };
+    expect(body.schedules.map((s) => s.title)).toEqual(['팀 회의']);
+    expect(body.favorites).toEqual([{ kind: 'home', ...place('mock-home-apt') }]);
+  });
 });
