@@ -14,6 +14,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
+import org.json.JSONArray
 
 /** 기어·시동 대신 테스트가 이벤트를 직접 넣으므로 시작하면 시동 신호가 없다고만 알린다(앱 진입이 탑승 신호). */
 class FakeSignals(private val onIgnitionSupport: (Boolean) -> Unit) : VehicleSignals {
@@ -84,7 +85,9 @@ class E2eApp : ChagokApp() {
         val host = SessionHost(
             this,
             clock = DemoClock(Clock.fixed(NOW, ZoneId.of("Asia/Seoul"))),
-            fetcher = ScheduleFetcher { at -> FixtureResponses.response(fixtureJson(), at, calendarsJson()) },
+            fetcher = ScheduleFetcher { at ->
+                FixtureResponses.response(if (emptyDay) EMPTY_DAY else fixtureJson(), at, calendarsJson(), JSONArray(favoritesJson))
+            },
             adapters = { post, onSpeaking, onDucking, onIgnitionSupport ->
                 speaker = FakeSpeaker(onSpeaking, onDucking)
                 navigator = FakeNavigator(post)
@@ -105,6 +108,14 @@ class E2eApp : ChagokApp() {
 
         lateinit var fakeNavigator: FakeNavigator
             private set
+
+        /** 서버 favorites 자리에 넣을 자주 가는 곳(JSON 배열). 다음 일정 받기([SessionHost.resetDemo])부터 쓴다. 기본은 빈 목록 */
+        @Volatile var favoritesJson: String = "[]"
+
+        /** true면 일정이 하나도 없는 날로 답한다. 다음 일정 받기부터 쓴다. */
+        @Volatile var emptyDay: Boolean = false
+
+        private const val EMPTY_DAY = """{"schedules":[]}"""
 
         private fun fixtureJson(): String = asset("schedules/gwangju-day.json")
 

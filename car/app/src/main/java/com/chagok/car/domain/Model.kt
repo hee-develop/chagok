@@ -6,6 +6,12 @@ data class LatLng(val lat: Double, val lng: Double)
 
 data class Place(val name: String, val position: LatLng)
 
+/** 폰 첫 설정 2단계에서 정한 자주 가는 곳의 자리. */
+enum class FavoriteKind { HOME, WORK, OTHER }
+
+/** 자주 가는 곳 하나. 서버 `GET /schedules/today`의 favorites로 받는다(집 → 회사 → 추가한 순서). */
+data class Favorite(val kind: FavoriteKind, val place: Place, val address: String? = null)
+
 /** 정책서 11장: 폰 앱이 보내고 서버가 그날까지 맡아 두는 일정 한 건. */
 data class Schedule(
     val id: String,

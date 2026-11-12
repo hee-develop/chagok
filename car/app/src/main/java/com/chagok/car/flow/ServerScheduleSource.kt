@@ -1,5 +1,6 @@
 package com.chagok.car.flow
 
+import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.Schedule
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -97,6 +98,7 @@ class ServerScheduleSource(
     private val lock = Any()
     private var generation = 0
     private var cache: List<Schedule> = emptyList()
+    private var cachedFavorites: List<Favorite> = emptyList()
     private var current = ScheduleOrigin.NONE
     private var cacheDate: LocalDate? = null
 
@@ -104,7 +106,7 @@ class ServerScheduleSource(
     @Volatile var refreshing: Boolean = false
         private set
 
-    override fun snapshot(): ScheduleSnapshot = synchronized(lock) { ScheduleSnapshot(cache, current) }
+    override fun snapshot(): ScheduleSnapshot = synchronized(lock) { ScheduleSnapshot(cache, current, cachedFavorites) }
 
     /**
      * 기준 시각(anchor)으로 다시 받고 이 받기의 세대 번호를 돌려준다. 마지막 세대가 끝나면(성공·실패 모두)
@@ -118,14 +120,15 @@ class ServerScheduleSource(
         worker.execute {
             try {
                 val body = runCatching { fetcher.fetch(at) }
-                val parsed = body.mapCatching { ScheduleParser.parse(it) }
+                val parsed = body.mapCatching { ScheduleParser.parseDay(it) }
                 val error = parsed.exceptionOrNull()
                 if (error != null) logger.warn(TAG, "일정 받기 실패: ${describe(error)}", null)
                 val result = if (error == null) Result(parsed.getOrThrow(), ScheduleOrigin.FRESH) else fallback(date)
                 val applied = synchronized(lock) {
                     (mine == generation).also {
                         if (it) {
-                            cache = result.schedules
+                            cache = result.day.schedules
+                            cachedFavorites = result.day.favorites
                             current = result.origin
                             if (result.origin == ScheduleOrigin.FRESH) cacheDate = date
                         }
@@ -144,16 +147,16 @@ class ServerScheduleSource(
     private fun describe(error: Throwable): String =
         (error as? ScheduleHttpException)?.let { "${it::class.simpleName} ${it.status}" } ?: (error::class.simpleName ?: "알 수 없는 예외")
 
-    private class Result(val schedules: List<Schedule>, val origin: ScheduleOrigin)
+    private class Result(val day: DayResponse, val origin: ScheduleOrigin)
 
-    /** 받기 실패 때 쓸 일정. 같은 날짜의 사본(메모리 캐시, 없으면 저장된 것)이 있으면 STORED. */
+    /** 받기 실패 때 쓸 일정과 자주 가는 곳. 같은 날짜의 사본(메모리 캐시, 없으면 저장된 것)이 있으면 STORED. */
     private fun fallback(date: LocalDate): Result {
-        synchronized(lock) { if (cacheDate == date) return Result(cache, ScheduleOrigin.STORED) }
+        synchronized(lock) { if (cacheDate == date) return Result(DayResponse(cache, cachedFavorites), ScheduleOrigin.STORED) }
         val stored = runCatching { copies?.loadCopy() }.getOrNull()
         if (stored != null && stored.date == date) {
-            runCatching { ScheduleParser.parse(stored.body) }.getOrNull()?.let { return Result(it, ScheduleOrigin.STORED) }
+            runCatching { ScheduleParser.parseDay(stored.body) }.getOrNull()?.let { return Result(it, ScheduleOrigin.STORED) }
         }
-        return Result(emptyList(), ScheduleOrigin.NONE)
+        return Result(DayResponse(emptyList()), ScheduleOrigin.NONE)
     }
 
     private fun saveCopy(copy: StoredCopy) {

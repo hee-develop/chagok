@@ -1,5 +1,7 @@
 package com.chagok.car.flow
 
+import com.chagok.car.domain.Favorite
+import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.LatLng
 import com.chagok.car.domain.Place
 import com.chagok.car.domain.Schedule
@@ -7,12 +9,34 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 
-/** 서버 `GET /schedules/today` 응답 본문을 [Schedule] 목록으로 바꾼다. 형식이 어긋나면 예외를 던진다. */
+/** 오늘 일정 응답 하나: 일정과 자주 가는 곳. */
+data class DayResponse(val schedules: List<Schedule>, val favorites: List<Favorite> = emptyList())
+
+/** 서버 `GET /schedules/today` 응답 본문을 읽는다. 형식이 어긋나면 예외를 던진다. */
 object ScheduleParser {
-    fun parse(body: String): List<Schedule> {
-        val items = JSONObject(body).getJSONArray("schedules")
-        return List(items.length()) { parseSchedule(items.getJSONObject(it)) }
+    fun parse(body: String): List<Schedule> = parseDay(body).schedules
+
+    /** favorites가 없는 본문(기능 전에 저장한 사본)은 자주 가는 곳이 없는 것으로 읽는다. */
+    fun parseDay(body: String): DayResponse {
+        val json = JSONObject(body)
+        val items = json.getJSONArray("schedules")
+        val favorites = json.optJSONArray("favorites")
+        return DayResponse(
+            schedules = List(items.length()) { parseSchedule(items.getJSONObject(it)) },
+            favorites = favorites?.let { array -> List(array.length()) { parseFavorite(array.getJSONObject(it)) } }.orEmpty(),
+        )
     }
+
+    /** 모르는 kind는 집·회사가 아닌 자주 가는 곳으로 본다. */
+    private fun parseFavorite(json: JSONObject) = Favorite(
+        kind = when (json.getString("kind")) {
+            "home" -> FavoriteKind.HOME
+            "work" -> FavoriteKind.WORK
+            else -> FavoriteKind.OTHER
+        },
+        place = parsePlace(json),
+        address = json.optStringOrNull("address"),
+    )
 
     private fun parseSchedule(json: JSONObject) = Schedule(
         id = json.getString("id"),

@@ -90,4 +90,19 @@ class IntentMatcherTest {
         // 후보 옆의 "그냥 갈게"는 거절이다
         assertEquals(Intent.Reject, IntentMatcher.match("그냥 갈게", candidates, acceptPick = 0))
     }
+
+    @Test fun `후보 세 개는 세 번째로도 고른다`() {
+        val candidates = listOf("집", "회사", "광주송정역")
+        assertEquals(Intent.Pick(2), match("세 번째", candidates))
+        assertEquals(Intent.Pick(2), match("셋째", candidates))
+        assertEquals(Intent.Pick(1), match("회사로", candidates))
+    }
+
+    @Test fun `짧은 후보 이름이 긴 후보 이름 안에 있으면 긴 이름을 고른다`() {
+        val candidates = listOf("집", "회사", "단골 콩물집")
+        assertEquals(Intent.Pick(2), match("단골 콩물집", candidates))
+        assertEquals(Intent.Pick(0), match("집으로", candidates))
+        // 서로 다른 두 후보를 말하면 고르지 않는다.
+        assertEquals(Intent.Unrecognized, match("집 말고 회사", candidates))
+    }
 }

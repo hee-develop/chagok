@@ -2,6 +2,10 @@ package com.chagok.car.flow
 
 import com.chagok.car.FixtureFile
 import com.chagok.car.FixtureResponses
+import com.chagok.car.domain.Favorite
+import com.chagok.car.domain.FavoriteKind
+import com.chagok.car.domain.LatLng
+import com.chagok.car.domain.Place
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -237,5 +241,29 @@ class ServerScheduleSourceTest {
         source.refresh { latch.countDown() }
         assertTrue(latch.await(5, TimeUnit.SECONDS))
         assertEquals("schedule-fetch", thread)
+    }
+
+    private val favoritesJson = org.json.JSONArray(
+        """[{"kind":"home","name":"예시 아파트 101동","address":"광주 북구 샘플로 12","lat":35.1743,"lng":126.9121}]""",
+    )
+    private val home = Favorite(FavoriteKind.HOME, Place("예시 아파트 101동", LatLng(35.1743, 126.9121)), "광주 북구 샘플로 12")
+
+    @Test fun `같은 응답의 자주 가는 곳을 함께 캐시하고 실패하면 사본의 것을 쓴다`() {
+        val copies = MemoryCopies()
+        val ok = source({ at -> FixtureResponses.response(fixture, at, favorites = favoritesJson) }, copies)
+        ok.refresh {}
+        assertEquals(listOf(home), ok.snapshot().favorites)
+
+        // 같은 인스턴스에서 실패하면 메모리 캐시, 새 인스턴스면 저장된 사본에서 같은 목록을 쓴다.
+        val failing = source({ error("서버 꺼짐") }, copies)
+        failing.refresh {}
+        assertEquals(ScheduleOrigin.STORED, failing.snapshot().origin)
+        assertEquals(listOf(home), failing.snapshot().favorites)
+    }
+
+    @Test fun `받은 적도 사본도 없으면 자주 가는 곳도 없다`() {
+        val source = source({ error("서버 꺼짐") })
+        source.refresh {}
+        assertEquals(emptyList<Favorite>(), source.snapshot().favorites)
     }
 }

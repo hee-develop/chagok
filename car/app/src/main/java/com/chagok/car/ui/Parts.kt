@@ -233,8 +233,8 @@ private fun tileBase(context: Context, d: DesignScale, gap: Int): LinearLayout =
     dividerDrawable = android.graphics.drawable.GradientDrawable().apply { setSize(1, gap) }
 }
 
-/** 타일 하나를 만든다. */
-fun contextTile(context: Context, d: DesignScale, tile: TileView): View = when (tile) {
+/** 타일 하나를 만든다. [onPick]은 후보 타일의 줄을 눌렀을 때 0부터 센 후보 번호로 부른다. */
+fun contextTile(context: Context, d: DesignScale, tile: TileView, onPick: (Int) -> Unit = {}): View = when (tile) {
     is TileView.Schedules -> tileBase(context, d, d.dimenInt(R.dimen.tile_gap)).apply {
         addView(d.text(R.style.t_label, d.color(R.color.ink_3)).apply { text = "오늘 일정" })
         tile.rows.forEach { addView(scheduleRow(context, d, it)) }
@@ -252,7 +252,63 @@ fun contextTile(context: Context, d: DesignScale, tile: TileView): View = when (
         addView(d.text(R.style.t_body, d.color(R.color.ink)).apply { text = tile.name; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
         addView(d.text(R.style.t_body, d.color(R.color.ink_2)).apply { text = tile.line; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
     }
+    // 고정 높이 카드에 줄 세 개가 들어가도록 세로 패딩을 줄이고 줄 사이 간격 없이 붙인다(줄 높이가 터치 영역이다).
+    is TileView.Candidates -> tileBase(context, d, d.dimenInt(R.dimen.tile_gap)).apply {
+        val h = d.dimenInt(R.dimen.space_xl)
+        val v = d.dimenInt(R.dimen.space_s)
+        setPadding(h, v, h, v)
+        addView(d.text(R.style.t_label, d.color(R.color.ink_3)).apply { text = tile.label })
+        addView(
+            LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                tile.rows.forEachIndexed { i, row -> addView(candidateRow(context, d, i, row) { onPick(i) }) }
+            },
+        )
+    }
 }
+
+/**
+ * 후보 한 줄: 번호(t-time, 1번만 accent) + 부르는 이름(t-body ink) + 장소 이름·주소(t-body ink-3, 넘치면 말줄임).
+ * 줄 전체가 누름 대상이고 높이는 candidate_row_h(카드에 안 들어가면 [BriefingCardView]가 줄인다). 눌림은 surface-300 바탕.
+ */
+private fun candidateRow(context: Context, d: DesignScale, index: Int, row: CandidateRow, onClick: () -> Unit): View =
+    LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = d.dimenInt(R.dimen.candidate_row_h)
+        val pad = d.dimenInt(R.dimen.space_xs)
+        setPadding(pad, 0, pad, 0)
+        background = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), d.shape(d.color(R.color.surface_300), d.dimen(R.dimen.radius_m)))
+        }
+        setTag(R.id.candidate_row, true)
+        isClickable = true
+        isFocusable = true
+        contentDescription = "${index + 1} ${row.name}"
+        setOnClickListener { onClick() }
+        addView(
+            d.text(R.style.t_time, d.color(if (index == 0) R.color.accent else R.color.ink_3)).apply {
+                text = "${index + 1}"
+                isSingleLine = true
+            },
+            LinearLayout.LayoutParams(d.dimenInt(R.dimen.candidate_number_w), ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
+        addView(
+            d.text(R.style.t_body, d.color(R.color.ink)).apply {
+                text = row.name
+                isSingleLine = true
+                ellipsize = TextUtils.TruncateAt.END
+            },
+        )
+        addView(
+            d.text(R.style.t_body, d.color(R.color.ink_3)).apply {
+                text = row.detail
+                isSingleLine = true
+                ellipsize = TextUtils.TruncateAt.END
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = d.dimenInt(R.dimen.space_s) },
+        )
+    }
 
 /** 일정 한 줄: 시각(t-time, 다음 일정만 accent·나머지 ink-3) + 제목(t-body) */
 private fun scheduleRow(context: Context, d: DesignScale, row: TileRow): View = LinearLayout(context).apply {

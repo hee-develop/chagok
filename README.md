@@ -32,7 +32,7 @@ pnpm typecheck         # 서버와 폰 앱 타입체크
 
 - 목 캘린더 6개는 `fixtures/calendars/mock-device.json` 한 파일이 단일 출처이고, 폰 앱과 서버가 같은 파일을 읽습니다.
 - `PUT /calendars/selection`은 `{ selectedIds, revision }`을 받아 저장하고(`GET`으로 조회), `GET /schedules/today`는 저장된 선택(없으면 `defaultSelected`) 캘린더의 일정 중 `at`(없으면 현재)의 Asia/Seoul 날짜 일정만 내려줍니다(전날 시작해 아직 안 끝난 일정 포함). 일정의 `calendarId`는 `fixtures/schedules/gwangju-day.json`에 있습니다.
-- 장소는 `fixtures/places/mock-places.json`(검색 대상)과 `suggestions.json`('캘린더에서 자주 나온 곳' 고정 추천)이 단일 출처입니다. `GET /places/search?q=`(이름·주소 부분 일치, 최대 10개, q 50자 상한, 빈 q는 400), `GET /places/suggestions`, `GET /places/favorites`(`{ home, work, others, revision }`), `PUT /places/favorites/home`·`/work`(`{ placeId|null }`), `POST /places/favorites/others`(`{ placeId }`)를 둡니다. 쓰기 요청은 자리 하나만 바꾸고 전체 상태를 돌려주며, 같은 장소가 다른 자리에 있으면 서버가 옮깁니다. others 최대 20, 이미 추가한 장소·모르는 id는 400이고 `revision`은 서버가 올립니다. 저장은 폰→서버까지이고 차량 앱은 아직 읽지 않습니다.
+- 장소는 `fixtures/places/mock-places.json`(검색 대상)과 `suggestions.json`('캘린더에서 자주 나온 곳' 고정 추천)이 단일 출처입니다. `GET /places/search?q=`(이름·주소 부분 일치, 최대 10개, q 50자 상한, 빈 q는 400), `GET /places/suggestions`, `GET /places/favorites`(`{ home, work, others, revision }`), `PUT /places/favorites/home`·`/work`(`{ placeId|null }`), `POST /places/favorites/others`(`{ placeId }`)를 둡니다. 쓰기 요청은 자리 하나만 바꾸고 전체 상태를 돌려주며, 같은 장소가 다른 자리에 있으면 서버가 옮깁니다. others 최대 20, 이미 추가한 장소·모르는 id는 400이고 `revision`은 서버가 올립니다. 차량 앱은 `GET /schedules/today`의 `favorites`(집 → 회사 → 추가한 순서)로 받아 '어디로 갈까요?' 후보로 씁니다([목적지 후보 문서](docs/destination-candidates.md)).
 - `revision`은 폰이 보내는 단조 증가 정수이고, 서버는 저장된 값보다 작은 요청을 저장하지 않고 현재 저장값을 200으로 돌려줍니다. 저장 중 '나중에 할게요'로 취소한 요청도 서버에는 이미 반영됐을 수 있습니다.
 
 ## 폰 앱
