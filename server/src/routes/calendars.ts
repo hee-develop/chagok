@@ -6,38 +6,50 @@ import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
 
 export const MAX_SELECTED_IDS = 50;
 
-export type SavedSelection = { selectedIds: string[]; savedAt: string; revision: number };
+/** 선택한 id가 어느 출처의 캘린더 id인가. mock은 서버의 목 캘린더 id, device는 폰이 읽은 실제 기기 캘린더 id. */
+export type SelectionSource = 'mock' | 'device';
+
+export type SavedSelection = { selectedIds: string[]; savedAt: string; revision: number; source: SelectionSource };
 
 /** 목 사용자 한 명의 선택을 메모리에 둔다. */
 export type SelectionStore = {
   get(): SavedSelection | null;
   /** 저장된 revision보다 작은 요청은 저장하지 않고 현재 저장값을 돌려준다. */
-  set(selectedIds: string[], revision: number): SavedSelection;
+  set(selectedIds: string[], revision: number, source?: SelectionSource): SavedSelection;
 };
 
 export function createSelectionStore(): SelectionStore {
   let saved: SavedSelection | null = null;
   return {
     get: () => saved,
-    set: (selectedIds, revision) => {
+    set: (selectedIds, revision, source = 'mock') => {
       if (saved && revision < saved.revision) return saved;
-      saved = { selectedIds, savedAt: new Date().toISOString(), revision };
+      saved = { selectedIds, savedAt: new Date().toISOString(), revision, source };
       return saved;
     },
   };
 }
 
-/** 저장된 선택이 있으면 그것을, 없으면 defaultSelected 캘린더 id를 돌려준다. */
+/**
+ * 픽스처(목 캘린더 id)에 쓸 선택. 목 출처로 저장된 선택이 있으면 그것을, 없으면(또는 기기 캘린더 선택뿐이면) defaultSelected 캘린더 id.
+ * 기기 캘린더 id는 목 일정의 calendarId와 무관하므로 섞어 쓰지 않는다.
+ */
 export function effectiveSelectedIds(calendars: MockCalendar[], store: SelectionStore): string[] {
-  return store.get()?.selectedIds ?? calendars.filter((c) => c.defaultSelected).map((c) => c.id);
+  const saved = store.get();
+  return saved && saved.source === 'mock' ? saved.selectedIds : calendars.filter((c) => c.defaultSelected).map((c) => c.id);
 }
 
+/**
+ * selectedIds를 검증한다. source가 'device'면 폰이 읽은 실제 기기 캘린더 id이므로 목 캘린더 id에 있는지는 보지 않는다
+ * (그 외 형식·개수·길이·중복 검사는 같다). source가 없거나 'mock'이면 목 캘린더 id만 받는다.
+ */
 function parseSelection(
   raw: unknown,
   knownIds: Set<string>,
-): { ok: true; ids: string[]; revision: number } | { ok: false; error: string } {
+): { ok: true; ids: string[]; revision: number; source: SelectionSource } | { ok: false; error: string } {
   if (typeof raw !== 'object' || raw === null) return { ok: false, error: '본문이 객체가 아닙니다' };
-  const { selectedIds, revision } = raw as Record<string, unknown>;
+  const { selectedIds, revision, source } = raw as Record<string, unknown>;
+  if (source !== undefined && source !== 'mock' && source !== 'device') return { ok: false, error: "source는 'mock' 또는 'device'여야 합니다" };
   if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) {
     return { ok: false, error: 'revision은 0 이상의 정수여야 합니다' };
   }
@@ -52,9 +64,9 @@ function parseSelection(
     ids.push(id);
   }
   if (new Set(ids).size !== ids.length) return { ok: false, error: 'selectedIds에 중복이 있습니다' };
-  const unknown = ids.find((id) => !knownIds.has(id));
+  const unknown = source === 'device' ? undefined : ids.find((id) => !knownIds.has(id));
   if (unknown !== undefined) return { ok: false, error: '목 캘린더에 없는 id가 있습니다' };
-  return { ok: true, ids, revision };
+  return { ok: true, ids, revision, source: source === 'device' ? 'device' : 'mock' };
 }
 
 // RPC 타입 추론을 위해 체이닝을 유지한다.
@@ -66,6 +78,7 @@ export const createCalendarsRoute = (calendars: MockCalendar[], store: Selection
         selectedIds: store.get()?.selectedIds ?? (null as string[] | null),
         savedAt: store.get()?.savedAt ?? (null as string | null),
         revision: store.get()?.revision ?? (null as number | null),
+        source: store.get()?.source ?? (null as SelectionSource | null),
       }),
     )
     .put(
@@ -77,12 +90,12 @@ export const createCalendarsRoute = (calendars: MockCalendar[], store: Selection
       validator('json', (value, c) => {
         const parsed = parseSelection(value, knownIds);
         if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-        return { selectedIds: parsed.ids, revision: parsed.revision };
+        return { selectedIds: parsed.ids, revision: parsed.revision, source: parsed.source };
       }),
       (c) => {
-        const { selectedIds, revision } = c.req.valid('json');
-        const saved = store.set(selectedIds, revision);
-        return c.json({ selectedIds: saved.selectedIds, savedAt: saved.savedAt, revision: saved.revision }, 200);
+        const { selectedIds, revision, source } = c.req.valid('json');
+        const saved = store.set(selectedIds, revision, source);
+        return c.json({ selectedIds: saved.selectedIds, savedAt: saved.savedAt, revision: saved.revision, source: saved.source }, 200);
       },
     );
 };

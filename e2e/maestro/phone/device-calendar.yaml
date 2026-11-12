@@ -1,0 +1,80 @@
+# 실제 기기 캘린더 연결(device 출처). scripts/e2e-phone.sh 가 에뮬레이터에 캘린더를 심고(scripts/seed-phone-calendar.sh)
+# Metro를 EXPO_PUBLIC_CALENDAR_SOURCE=device 로 띄운 뒤 아래 env를 넣어 실행한다.
+#   APP_ID      Expo Go 번들 ID (Android host.exp.exponent)
+#   EXPO_URL    Metro 접속 주소 (exp://...)
+#   SERVER_URL  호스트에서 본 서버 주소
+# clearState로 권한 허용을 지워 시스템 권한 창이 뜨게 한다.
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+# 같은 에뮬레이터를 다른 프로젝트(다른 세션의 Metro)도 쓰면 Expo Go가 우리 주소 대신 다른 프로젝트나 그 개발자 메뉴를 열 수 있다.
+# 우리 화면 제목이나 권한 창이 뜨는지 확인하고, 아니면 Expo Go를 끈 뒤 우리 주소(EXPO_URL)를 다시 연다(최대 4번).
+- retry:
+    maxRetries: 3
+    commands:
+      - stopApp
+      - openLink: ${EXPO_URL}
+      # Expo Go 첫 실행 안내와 개발자 메뉴가 뜨면 닫는다.
+      - runFlow:
+          when:
+            visible: 'Continue'
+          commands:
+            - tapOn: 'Continue'
+      - runFlow:
+          when:
+            visible: 'Go home'
+          commands:
+            - back
+      # 화면이 뜨기 전에 권한 창이 먼저 덮을 수 있어 화면 제목이나 권한 버튼 중 하나를 기다린다.
+      - extendedWaitUntil:
+          visible: '(캘린더를 골라 주세요|ALLOW|Allow|허용)'
+          timeout: 60000
+
+# 권한 창은 두 겹일 수 있다: Expo Go의 '다른 Expo 앱에 이미 허용했다' 확인 창(대문자 ALLOW)과
+# 시스템 캘린더 권한 창(Allow·허용). 영어·한국어 에뮬레이터 모두 받는다.
+- runFlow:
+    when:
+      visible: 'ALLOW'
+    commands:
+      - tapOn: 'ALLOW'
+- runFlow:
+    when:
+      visible: 'Allow'
+    commands:
+      - tapOn: 'Allow'
+- runFlow:
+    when:
+      visible: '허용'
+    commands:
+      - tapOn: '허용'
+- runFlow:
+    when:
+      visible: 'ALLOW'
+    commands:
+      - tapOn: 'ALLOW'
+
+- extendedWaitUntil:
+    visible: '캘린더를 골라 주세요'
+    timeout: 30000
+
+# 심어 둔 캘린더가 목록에 보이고, 소유 캘린더라 기본 선택돼 있다.
+- extendedWaitUntil:
+    visible: 'ChagokE2E'
+    timeout: 30000
+# 0개에도 맞는 '.*개'가 아니라 1개 이상일 때만 통과한다(앞 flow가 저장한 목 id 선택 때문에 0개로 시작하면 실패해야 한다).
+- assertVisible: '캘린더 [1-9][0-9]*개 연결하기'
+- takeScreenshot: 01-device-calendars
+
+- tapOn: '캘린더 [1-9][0-9]*개 연결하기'
+- extendedWaitUntil:
+    visible: '자주 가는 곳을 알려주세요'
+    timeout: 15000
+- assertVisible: '2 / 4'
+- takeScreenshot: 02-places
+
+# 선택 저장 뒤 폰이 오늘·내일 일정을 보냈는지 서버에서 확인한다.
+- runScript:
+    file: assert-device-calendar.js
+    env:
+      SERVER_URL: ${SERVER_URL}

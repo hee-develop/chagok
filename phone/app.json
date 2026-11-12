@@ -24,7 +24,13 @@
       "expo-router",
       "expo-status-bar",
       "expo-font",
-      "expo-splash-screen"
+      "expo-splash-screen",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "고른 캘린더의 오늘·내일 일정을 읽어 차에 보내기 위해 캘린더 접근이 필요해요."
+        }
+      ]
     ],
     "scheme": "chagok"
   }

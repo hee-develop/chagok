@@ -1,54 +1,118 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
-import type { DayFixture, MockCalendar, PlacesCatalog, ScheduleFixture } from '../fixture-types.js';
+import type { DayFixture, MockCalendar, MockPlace, PlaceFixture, PlacesCatalog } from '../fixture-types.js';
 import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
+import { MINUTE_MS, parseAt, seoulDay } from '../time.js';
 import { effectiveSelectedIds, type SelectionStore } from './calendars.js';
-
-const ISO_8601 =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-](\d{2}):(\d{2}))$/;
-
-/**
- * 오프셋이 있는 ISO8601 시각 문자열만 받는다. 형식이 틀리거나 달력에 없는 값(2026-02-30, T24:00, 초 60)이면 null.
- * Date는 범위를 넘는 값을 다음 날로 넘겨 받아들이므로 날짜 부분은 되돌려 읽어 같은지 확인한다.
- * 0~99년은 Date.UTC가 1900년대로 읽으므로 setUTCFullYear로 연도를 그대로 넣는다.
- */
-function parseAt(value: string): Date | null {
-  const m = ISO_8601.exec(value);
-  if (!m) return null;
-  const [year, month, day, hour, minute] = [m[1], m[2], m[3], m[4], m[5]].map(Number);
-  const second = m[6] === undefined ? 0 : Number(m[6]);
-  if (hour > 23 || minute > 59 || second > 59) return null;
-  if (m[8] !== undefined && (Number(m[8]) > 23 || Number(m[9]) > 59)) return null;
-  const calendar = new Date(0);
-  calendar.setUTCFullYear(year, month - 1, day);
-  if (calendar.getUTCFullYear() !== year || calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day) {
-    return null;
-  }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-const MINUTE_MS = 60_000;
-const DAY_MS = 24 * 60 * MINUTE_MS;
-const SEOUL_OFFSET_MS = 9 * 60 * MINUTE_MS;
-
-/** Asia/Seoul 기준 날짜 번호(1970-01-01 = 0). */
-const seoulDay = (ms: number) => Math.floor((ms + SEOUL_OFFSET_MS) / DAY_MS);
+import type { EventsStore } from './events.js';
 
 /** 캘린더 원본과 분리한 일정별 보정값. 라우트 인스턴스 수명 동안만 보관한다. */
 type Override = { placeId: string | null; noTravel: boolean };
 type PlaceChange = { placeId: string | null } | { noTravel: true };
 
-export const createSchedulesRoute = (fixture: DayFixture, calendars: MockCalendar[], selection: SelectionStore, catalog: PlacesCatalog) => {
+/** 폰이 보낸 일정과 픽스처 일정을 같은 모양으로 다루기 위한 행. 시각은 UTC 밀리초. */
+type Row = {
+  id: string;
+  calendarId: string;
+  title: string;
+  start: number;
+  end: number;
+  allDay: boolean;
+  locationText: string | null;
+  place: PlaceFixture | null;
+  /** 장소가 비었을 때 '여기 맞아요'로 내릴 후보(지난번 기억 또는 이름이 포함되는 목 장소). */
+  candidate: MockPlace | undefined;
+  memo: string | null;
+  attendees: string[];
+};
+
+const normalize = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * 일정 출처: 폰이 보낸 일정을 한 번이라도 받았으면 그것(날짜 지난 것은 이미 지워짐), 아니면 픽스처.
+ * 폰 일정의 장소는 보정(view에서 먼저 적용) → 목 장소 이름이 장소 칸과 정규화해서 완전히 같은 것 → null 순으로 정한다.
+ * 지난번 기억(제목)과 이름이 일부만 겹치는 목 장소는 좌표를 확정하지 않고 픽스처 일정과 같은 계약대로 `suggestion`(확인 필요)으로만 내린다.
+ */
+export const createSchedulesRoute = (
+  fixture: DayFixture,
+  calendars: MockCalendar[],
+  selection: SelectionStore,
+  catalog: PlacesCatalog,
+  events: EventsStore,
+  now: () => Date = () => new Date(),
+) => {
   const overrides = new Map<string, Override>();
   const places = new Map([...catalog.places, ...catalog.suggestions].map((p) => [p.id, p]));
   const remembered = new Map(catalog.remembered.map((r) => [r.title, places.get(r.placeId)!]));
-  const selectedSchedules = () => {
-    const selected = new Set(effectiveSelectedIds(calendars, selection));
-    return fixture.schedules.filter((s) => selected.has(s.calendarId));
+  const toPlace = (p: MockPlace): PlaceFixture => ({ name: p.name, lat: p.lat, lng: p.lng });
+  const namedPlaces = [...places.values()].map((p) => ({ p, name: normalize(p.name) }));
+  /** 장소 칸 글자와 이름이 완전히 같은 목 장소(공백·대소문자만 무시). 좌표를 확정해도 되는 유일한 경우다. */
+  const exactMatch = (locationText: string | null): MockPlace | undefined => {
+    const text = locationText === null ? '' : normalize(locationText);
+    return text === '' ? undefined : namedPlaces.find((n) => n.name === text)?.p;
   };
-  const view = (s: ScheduleFixture) => {
+  /** 이름이 일부만 겹치는 목 장소(2글자 이상). '잠실 실내 체육관'→'체육관'처럼 틀릴 수 있어 후보로만 쓴다. */
+  const partialMatch = (locationText: string | null): MockPlace | undefined => {
+    const text = locationText === null ? '' : normalize(locationText);
+    if (text.length < 2) return undefined;
+    return namedPlaces.find((n) => n.name.length >= 2 && (text.includes(n.name) || n.name.includes(text)))?.p;
+  };
+  // 폰 일정이 교체되거나 비워지면, 더는 없는 일정 id의 보정을 버린다(픽스처 id의 보정은 남긴다).
+  const fixtureIds = new Set(fixture.schedules.map((s) => s.id));
+  events.subscribe((ids) => {
+    for (const id of overrides.keys()) if (!ids.has(id) && !fixtureIds.has(id)) overrides.delete(id);
+  });
+  const rows = (anchor: Date): Row[] => {
+    const phone = events.get();
+    if (phone === null) {
+      return fixture.schedules.map((s) => ({
+        id: s.id,
+        calendarId: s.calendarId,
+        title: s.title,
+        start: anchor.getTime() + s.startOffsetMinutes * MINUTE_MS,
+        end: anchor.getTime() + s.endOffsetMinutes * MINUTE_MS,
+        allDay: s.allDay,
+        locationText: s.locationText,
+        place: s.place,
+        candidate: remembered.get(s.title),
+        memo: s.memo,
+        attendees: s.attendees,
+      }));
+    }
+    return phone.events.map((e) => {
+      const exact = exactMatch(e.locationText);
+      return {
+        id: e.id,
+        calendarId: e.calendarId,
+        title: e.title,
+        start: e.start,
+        end: e.end,
+        allDay: e.allDay,
+        locationText: e.locationText,
+        place: exact ? toPlace(exact) : null,
+        candidate: exact ? undefined : remembered.get(e.title) ?? partialMatch(e.locationText),
+        memo: e.notes,
+        attendees: e.attendees,
+      };
+    });
+  };
+  /**
+   * 고른 캘린더로 거른다. 선택의 출처(source)와 일정의 출처가 같을 때만 적용한다:
+   * 폰 일정은 기기 캘린더 id로 저장한 선택(device)만, 픽스처는 목 캘린더 id 선택(mock)만 쓴다. 출처가 다르면 거르지 않거나(폰) 기본 선택(픽스처).
+   */
+  const selectedSchedules = (anchor: Date) => {
+    const all = rows(anchor);
+    if (events.get() !== null) {
+      const saved = selection.get();
+      if (saved === null || saved.source !== 'device') return all;
+      const selected = new Set(saved.selectedIds);
+      return all.filter((s) => selected.has(s.calendarId));
+    }
+    const selected = new Set(effectiveSelectedIds(calendars, selection));
+    return all.filter((s) => selected.has(s.calendarId));
+  };
+  const view = (s: Row) => {
     const override = overrides.get(s.id);
     const p = override?.placeId ? places.get(override.placeId) : null;
     return {
@@ -59,43 +123,37 @@ export const createSchedulesRoute = (fixture: DayFixture, calendars: MockCalenda
     };
   };
   /** 시작이 anchor와 같은 서울 날짜이거나, 전날 시작해 anchor 시각에 아직 끝나지 않은 일정. */
-  const isToday = (s: ScheduleFixture, anchor: Date) => {
-    const start = anchor.getTime() + s.startOffsetMinutes * MINUTE_MS;
-    const end = anchor.getTime() + s.endOffsetMinutes * MINUTE_MS;
+  const isToday = (s: Row, anchor: Date) => {
     const day = seoulDay(anchor.getTime());
-    return seoulDay(start) === day || (seoulDay(start) < day && end > anchor.getTime());
+    return seoulDay(s.start) === day || (seoulDay(s.start) < day && s.end > anchor.getTime());
   };
   const anchorValidator = validator('query', (value: { at?: string | string[] }, c) => {
-    const anchor = value.at === undefined ? new Date() : typeof value.at === 'string' ? parseAt(value.at) : null;
+    const anchor = value.at === undefined ? now() : typeof value.at === 'string' ? parseAt(value.at) : null;
     if (anchor === null) return c.json({ error: 'at은 ISO8601 시각이어야 합니다' }, 400);
     return { at: value.at } as { at?: string };
   });
-  const times = (s: ScheduleFixture, anchor: Date) => ({
-    start: new Date(anchor.getTime() + s.startOffsetMinutes * MINUTE_MS).toISOString(),
-    end: new Date(anchor.getTime() + s.endOffsetMinutes * MINUTE_MS).toISOString(),
-  });
+  const anchorOf = (at: string | undefined) => (at === undefined ? now() : parseAt(at)!);
+  const times = (s: Row) => ({ start: new Date(s.start).toISOString(), end: new Date(s.end).toISOString() });
   return new Hono()
     .get('/today', anchorValidator, (c) => {
-      const at = c.req.valid('query').at;
-      const anchor = at === undefined ? new Date() : parseAt(at)!;
+      const anchor = anchorOf(c.req.valid('query').at);
       return c.json({
         anchor: anchor.toISOString(),
-        schedules: selectedSchedules().filter((s) => !view(s).noTravel && isToday(s, anchor)).map((s) => {
+        schedules: selectedSchedules(anchor).filter((s) => !view(s).noTravel && isToday(s, anchor)).map((s) => {
           const { noTravel: _, ...place } = view(s);
-          return { ...place, title: s.title, ...times(s, anchor), allDay: s.allDay, memo: s.memo, attendees: s.attendees };
+          return { ...place, title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, attendees: s.attendees };
         }),
       }, 200);
     })
     .get('/places', anchorValidator, (c) => {
-      const at = c.req.valid('query').at;
-      const anchor = at === undefined ? new Date() : parseAt(at)!;
+      const anchor = anchorOf(c.req.valid('query').at);
       return c.json({
         anchor: anchor.toISOString(),
-        schedules: selectedSchedules().filter((s) => !s.allDay).sort((a, b) => a.startOffsetMinutes - b.startOffsetMinutes)
+        schedules: selectedSchedules(anchor).filter((s) => !s.allDay).sort((a, b) => a.start - b.start)
           .map((s) => {
             const v = view(s);
-            const known = v.place || v.noTravel ? undefined : remembered.get(s.title);
-            return { ...v, title: s.title, ...times(s, anchor), suggestion: known ? { placeId: known.id, name: known.name } : null };
+            const known = v.place || v.noTravel ? undefined : s.candidate;
+            return { ...v, title: s.title, ...times(s), suggestion: known ? { placeId: known.id, name: known.name } : null };
           }),
       }, 200);
     })
@@ -111,7 +169,7 @@ export const createSchedulesRoute = (fixture: DayFixture, calendars: MockCalenda
         }
         return c.json({ error: '알려진 placeId 또는 noTravel: true 하나가 필요합니다' }, 400);
       }), (c) => {
-        const schedule = selectedSchedules().find((s) => s.id === c.req.param('id'));
+        const schedule = selectedSchedules(now()).find((s) => s.id === c.req.param('id'));
         if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
         if (schedule.allDay) return c.json({ error: '종일 일정은 이동 대상이 아닙니다' }, 409);
         const change = c.req.valid('json');

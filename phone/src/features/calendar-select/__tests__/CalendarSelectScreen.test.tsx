@@ -1,14 +1,16 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
-import { AccessibilityInfo } from 'react-native';
+import { AccessibilityInfo, AppState, Linking } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { FontsLoadedContext } from '../../../ui/theme';
 import { CalendarSelectScreen } from '../CalendarSelectScreen';
-import { MOCK_CALENDARS, type CalendarSource } from '../calendarSource';
+import { CalendarPermissionError, MOCK_CALENDARS, type CalendarSource } from '../calendarSource';
 import { REQUEST_TIMEOUT_MS } from '../../../api/request';
 
 const mockPush = jest.fn();
+const mockPut = jest.fn();
+jest.mock('../../../api/client', () => ({ api: { calendars: { selection: { $put: (...a: unknown[]) => mockPut(...a) } } } }));
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
 }));
@@ -17,13 +19,15 @@ const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 
 
 const renderScreen = (ui: ReactElement) => render(<SafeAreaProvider initialMetrics={insets}>{ui}</SafeAreaProvider>);
 
-const source: CalendarSource = { list: async () => MOCK_CALENDARS.map((c) => ({ ...c })) };
+const base = { kind: 'mock' as const, listEvents: async () => [] };
+const source: CalendarSource = { ...base, list: async () => MOCK_CALENDARS.map((c) => ({ ...c })) };
 const noSaved = jest.fn().mockResolvedValue(null);
 
 const row = (name: string, account: string) => screen.getByRole('checkbox', { name: `${name}, ${account}` });
 
 beforeEach(() => {
   mockPush.mockReset();
+  mockPut.mockReset();
   noSaved.mockClear();
 });
 
@@ -56,7 +60,7 @@ describe('CalendarSelectScreen 렌더', () => {
   });
 
   it('로딩 중에는 목록 대신 접근 가능한 로딩 표시를 보여 준다', async () => {
-    const pending: CalendarSource = { list: () => new Promise(() => {}) };
+    const pending: CalendarSource = { ...base, list: () => new Promise(() => {}) };
     await renderScreen(<CalendarSelectScreen source={pending} save={jest.fn()} restore={noSaved} />);
 
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
@@ -67,7 +71,7 @@ describe('CalendarSelectScreen 렌더', () => {
   it('캘린더를 못 읽으면 오류 안내를 알리고 다시 시도로 복구한다', async () => {
     const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
     const list = jest.fn().mockRejectedValueOnce(new Error('fail')).mockResolvedValue(MOCK_CALENDARS);
-    await renderScreen(<CalendarSelectScreen source={{ list }} save={jest.fn()} restore={noSaved} />);
+    await renderScreen(<CalendarSelectScreen source={{ ...base, list }} save={jest.fn()} restore={noSaved} />);
 
     expect(await screen.findByText('캘린더를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeOnTheScreen();
     expect(announce).toHaveBeenCalledWith('캘린더를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.');
@@ -77,7 +81,8 @@ describe('CalendarSelectScreen 렌더', () => {
   });
 
   it('캘린더가 0개여도 화면이 깨지지 않고 주 버튼만 비활성이다', async () => {
-    await renderScreen(<CalendarSelectScreen source={{ list: async () => [] }} save={jest.fn()} restore={noSaved} />);
+    await renderScreen(<CalendarSelectScreen source={{ ...base, list: async () => [] }} save={jest.fn()} restore={noSaved} />);
+    expect(await screen.findByText(/연결할 캘린더가 없어요/)).toBeOnTheScreen();
 
     expect(await screen.findByRole('button', { name: '캘린더 0개 연결하기' })).toBeDisabled();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
@@ -100,6 +105,12 @@ describe('저장된 선택 복원', () => {
     const restore = jest.fn().mockResolvedValue(['mock-work', 'gone']);
     await renderScreen(<CalendarSelectScreen source={source} save={jest.fn()} restore={restore} />);
     expect(await screen.findByText('캘린더 1개 연결하기')).toBeOnTheScreen();
+  });
+
+  it('저장된 id가 이 기기에 하나도 없으면(목 id만 저장된 경우 등) 기본 선택으로 시작한다', async () => {
+    const restore = jest.fn().mockResolvedValue(['mock-a', 'mock-b']);
+    await renderScreen(<CalendarSelectScreen source={source} save={jest.fn()} restore={restore} />);
+    expect(await screen.findByText('캘린더 3개 연결하기')).toBeOnTheScreen();
   });
 
   it('저장된 게 없으면(null) 기본 선택으로 시작한다', async () => {
@@ -129,6 +140,7 @@ describe('저장된 선택 복원', () => {
 
   it('시간 제한은 기기 캘린더 목록을 읽은 뒤 조회를 시작할 때부터 센다', async () => {
     const slowSource: CalendarSource = {
+      ...base,
       list: () => new Promise((resolve) => setTimeout(() => resolve(MOCK_CALENDARS.map((c) => ({ ...c }))), 150)),
     };
     const restore = jest.fn().mockResolvedValue(null);
@@ -317,5 +329,112 @@ describe('글꼴', () => {
     const title = await screen.findByText('캘린더를 골라 주세요');
     expect(title).toHaveStyle({ fontWeight: '600' });
     expect(title).not.toHaveStyle({ fontFamily: 'IBMPlexSansKR_600SemiBold' });
+  });
+});
+
+describe('캘린더 권한 거부', () => {
+  const deniedSource = (list: jest.Mock): CalendarSource => ({ ...base, kind: 'device', list });
+
+  it('권한이 없으면 안내와 설정 열기·다시 시도만 보이고 목 캘린더는 보이지 않는다', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
+    const list = jest.fn().mockRejectedValue(new CalendarPermissionError(false));
+    await renderScreen(<CalendarSelectScreen source={deniedSource(list)} save={jest.fn()} restore={noSaved} />);
+
+    const message = '캘린더 접근을 허용해 주세요. 허용해야 일정을 차에 보낼 수 있어요.';
+    expect(await screen.findByText(message)).toBeOnTheScreen();
+    expect(announce).toHaveBeenCalledWith(message);
+    expect(screen.getByRole('button', { name: '설정 열기' })).toBeOnTheScreen();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.queryByText('내 캘린더')).toBeNull();
+    expect(screen.getByRole('button', { name: '캘린더 0개 연결하기' })).toBeDisabled();
+    expect(screen.getByText('나중에 할게요')).toBeOnTheScreen();
+    announce.mockRestore();
+  });
+
+  it('설정 열기는 시스템 설정을 연다', async () => {
+    const openSettings = jest.spyOn(Linking, 'openSettings').mockResolvedValue();
+    const list = jest.fn().mockRejectedValue(new CalendarPermissionError(false));
+    await renderScreen(<CalendarSelectScreen source={deniedSource(list)} save={jest.fn()} restore={noSaved} />);
+    await fireEvent.press(await screen.findByRole('button', { name: '설정 열기' }));
+    expect(openSettings).toHaveBeenCalled();
+    openSettings.mockRestore();
+  });
+
+  it('다시 시도에서 허용하면 목록이 나온다', async () => {
+    const list = jest.fn().mockRejectedValueOnce(new CalendarPermissionError(true)).mockResolvedValue(MOCK_CALENDARS);
+    await renderScreen(<CalendarSelectScreen source={deniedSource(list)} save={jest.fn()} restore={noSaved} />);
+    await fireEvent.press(await screen.findByRole('button', { name: '다시 시도' }));
+    expect(await screen.findByText('캘린더 3개 연결하기')).toBeOnTheScreen();
+  });
+
+  it('권한이 아닌 오류는 기존 불러오기 실패 안내다', async () => {
+    const list = jest.fn().mockRejectedValue(new Error('boom'));
+    await renderScreen(<CalendarSelectScreen source={deniedSource(list)} save={jest.fn()} restore={noSaved} />);
+    expect(await screen.findByText('캘린더를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeOnTheScreen();
+  });
+});
+
+describe('권한 설정 복귀', () => {
+  it('설정에서 허용하고 앱으로 돌아오면(active) 자동으로 다시 읽는다', async () => {
+    let handler: ((state: string) => void) | undefined;
+    const remove = jest.fn();
+    const spy = jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, h: (s: string) => void) => {
+      handler = h;
+      return { remove };
+    }) as never);
+    const list = jest.fn().mockRejectedValueOnce(new CalendarPermissionError(false)).mockResolvedValue(MOCK_CALENDARS);
+    await renderScreen(<CalendarSelectScreen source={{ ...base, kind: 'device', list }} save={jest.fn()} restore={noSaved} />);
+    await screen.findByRole('button', { name: '설정 열기' });
+    await act(async () => handler?.('background'));
+    expect(list).toHaveBeenCalledTimes(1);
+    await act(async () => handler?.('active'));
+    expect(await screen.findByText('캘린더 3개 연결하기')).toBeOnTheScreen();
+    expect(list).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
+  });
+});
+
+describe('기본 저장 함수', () => {
+  it("device 출처 화면이 save를 주지 않으면 source: 'device'로 저장한다", async () => {
+    mockPut.mockResolvedValue({ ok: true, json: async () => ({}) });
+    const list = async () => MOCK_CALENDARS.map((c) => ({ ...c }));
+    await renderScreen(<CalendarSelectScreen source={{ ...base, kind: 'device', list }} restore={noSaved} />);
+    await fireEvent.press(await screen.findByRole('button', { name: '캘린더 3개 연결하기' }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/setup/places'));
+    expect(mockPut.mock.calls[0][0].json).toMatchObject({ source: 'device', selectedIds: ['mock-my', 'mock-work', 'mock-family'] });
+  });
+
+  it("목 출처 화면은 source: 'mock'으로 저장한다", async () => {
+    mockPut.mockResolvedValue({ ok: true, json: async () => ({}) });
+    await renderScreen(<CalendarSelectScreen source={source} restore={noSaved} />);
+    await fireEvent.press(await screen.findByRole('button', { name: '캘린더 3개 연결하기' }));
+    await waitFor(() => expect(mockPut).toHaveBeenCalled());
+    expect(mockPut.mock.calls[0][0].json.source).toBe('mock');
+  });
+});
+
+describe('저장 뒤 일정 보내기', () => {
+  it('저장에 성공하면 onSaved를 부르고, 저장에 실패하면 부르지 않는다', async () => {
+    const onSaved = jest.fn();
+    const save = jest.fn().mockRejectedValueOnce(new Error('x')).mockResolvedValue({});
+    await renderScreen(<CalendarSelectScreen source={source} save={save} restore={noSaved} onSaved={onSaved} />);
+    await screen.findByText('캘린더 3개 연결하기');
+    await fireEvent.press(screen.getByText('캘린더 3개 연결하기'));
+    await screen.findByText('저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+    expect(onSaved).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByText('다시 시도'));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(onSaved).toHaveBeenCalledWith(['mock-my', 'mock-work', 'mock-family']);
+    expect(mockPush).toHaveBeenCalledWith('/setup/places');
+  });
+
+  it("'나중에 할게요'는 저장도 일정 보내기도 하지 않는다", async () => {
+    const onSaved = jest.fn();
+    const save = jest.fn();
+    await renderScreen(<CalendarSelectScreen source={source} save={save} restore={noSaved} onSaved={onSaved} />);
+    await screen.findByText('캘린더 3개 연결하기');
+    await fireEvent.press(screen.getByText('나중에 할게요'));
+    expect(save).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
   });
 });

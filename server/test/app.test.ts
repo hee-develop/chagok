@@ -40,16 +40,25 @@ describe('GET /schedules/today', () => {
     expect(allDay).toMatchObject({ title: '광주 직관', start: body.anchor, locationText: null, place: null, memo: null });
   });
 
-  it('at을 생략하면 현재 시각을 기준으로 한다', async () => {
-    const before = Date.now();
-    const res = await app.request('/schedules/today');
-    const after = Date.now();
+  it('at을 생략하면 현재 시각(서버 시계)을 기준으로 한다', async () => {
+    // 시계를 고정한다. 실제 시각에 기대면 저녁(서울 20:40 이후)에 일정이 자정을 넘어 응답에서 빠진다.
+    const clock = newApp({ now: () => new Date('2026-11-06T09:20:00+09:00') });
+    const res = await clock.request('/schedules/today');
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { anchor: string; schedules: { start: string }[] };
+    const body = (await res.json()) as { anchor: string; schedules: { id: string; start: string }[] };
+    expect(body.anchor).toBe('2026-11-06T00:20:00.000Z');
     const anchor = Date.parse(body.anchor);
+    const lunch = body.schedules.find((s) => s.id === fixture.schedules[1].id)!;
+    expect(Date.parse(lunch.start) - anchor).toBe(fixture.schedules[1].startOffsetMinutes * 60_000);
+  });
+
+  it('시계를 따로 주지 않으면 실제 현재 시각을 기준으로 앵커를 만든다', async () => {
+    const before = Date.now();
+    const res = await app.request('/schedules/places');
+    const after = Date.now();
+    const anchor = Date.parse(((await res.json()) as { anchor: string }).anchor);
     expect(anchor).toBeGreaterThanOrEqual(before);
     expect(anchor).toBeLessThanOrEqual(after);
-    expect(Date.parse(body.schedules[1].start) - anchor).toBe(fixture.schedules[1].startOffsetMinutes * 60_000);
   });
 
   it.each([
