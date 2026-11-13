@@ -14,7 +14,7 @@ jest.mock('expo-router', () => {
   };
 });
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
-const empty: SetupSchedule = { id: 'lunch', title: '육전집 점심', start: '2026-11-06T04:00:00Z', end: '2026-11-06T05:00:00Z', place: null, locationText: null, noTravel: false, suggestion: null };
+const empty: SetupSchedule = { id: 'lunch', title: '육전집 점심', start: '2026-11-06T04:00:00Z', end: '2026-11-06T05:00:00Z', place: null, locationText: null, noTravel: false, noTravelReason: null, suggestion: null };
 const resolved: SetupSchedule = { ...empty, id: 'game', title: 'KIA 직관', place: { name: '챔피언스필드', lat: 35.1, lng: 126.8 } };
 const makeApi = (overrides: Partial<SchedulePlacesApi> = {}) => ({
   fetchSchedules: jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [empty, resolved] }),
@@ -147,4 +147,20 @@ describe('지난번 장소 기억', () => {
     await waitFor(() => expect(api.fetchSchedules).toHaveBeenCalledTimes(2));
     expect(api.savePlace).toHaveBeenCalledTimes(1);
   });
+});
+
+it('온라인 회의·회의실이라 저절로 거른 일정은 이유를 붙이고 흐리게 보이며 빈 개수에서 뺀다', async () => {
+  const online: SetupSchedule = { ...empty, id: 'zoom', title: '주간 회의', noTravel: true, noTravelReason: 'online' };
+  const room: SetupSchedule = { ...empty, id: 'room', title: '기획 리뷰', noTravel: true, noTravelReason: 'meetingRoom' };
+  const manual: SetupSchedule = { ...empty, id: 'gym', title: '운동', noTravel: true };
+  await renderScreen(makeApi({ fetchSchedules: jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [empty, online, room, manual] }) }));
+  expect(await screen.findByText('장소가 빈 일정이 1개 있어요')).toBeOnTheScreen();
+  expect(screen.getByText('✓ 이동 없음 · 온라인 회의')).toBeOnTheScreen();
+  expect(screen.getByText('✓ 이동 없음 · 회의실')).toBeOnTheScreen();
+  expect(screen.getByText('✓ 이동 없음')).toBeOnTheScreen();
+  expect(screen.getByTestId('schedule-zoom')).toHaveStyle({ opacity: 0.55 });
+  expect(screen.getByTestId('schedule-gym')).not.toHaveStyle({ opacity: 0.55 });
+  // 잘못 거른 일정은 장소를 넣어 다시 차로 보낼 수 있다.
+  await fireEvent.press(screen.getByRole('button', { name: '주간 회의 장소 변경' }));
+  expect(mockPush).toHaveBeenCalledWith({ pathname: '/setup/schedule-place-search', params: { scheduleId: 'zoom' } });
 });

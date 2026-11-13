@@ -6,7 +6,7 @@ import { HttpError } from '../../api/request';
 export type SchedulePlaces = InferResponseType<typeof api.schedules.places.$get, 200>;
 export type SetupSchedule = SchedulePlaces['schedules'][number];
 export type SchedulePlaceChange = { placeId: string | null } | { noTravel: true };
-export type SavedSchedulePlace = Pick<SetupSchedule, 'id' | 'place' | 'locationText' | 'noTravel'>;
+export type SavedSchedulePlace = Pick<SetupSchedule, 'id' | 'place' | 'locationText' | 'noTravel' | 'noTravelReason'>;
 export type SchedulePlacesApi = {
   fetchSchedules: (signal: AbortSignal) => Promise<SchedulePlaces>;
   savePlace: (id: string, change: SchedulePlaceChange, signal: AbortSignal) => Promise<SavedSchedulePlace>;

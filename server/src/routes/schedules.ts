@@ -6,6 +6,7 @@ import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
 import { MINUTE_MS, parseAt, seoulDay } from '../time.js';
 import { effectiveSelectedIds, type SelectionStore } from './calendars.js';
 import type { EventsStore } from './events.js';
+import { detectNoTravel, type NoTravelReason } from '../noTravel.js';
 import type { FavoritesStore } from './places.js';
 
 /** 캘린더 원본과 분리한 일정별 보정값. 라우트 인스턴스 수명 동안만 보관한다. */
@@ -29,6 +30,8 @@ type Row = {
   candidate: MockPlace | undefined;
   memo: string | null;
   attendees: string[];
+  /** 온라인 회의·회의실이라 저절로 '이동 없음'인 이유. 보정(장소 넣기·이동 없음)이 있으면 보정이 이긴다. */
+  autoNoTravel: NoTravelReason | null;
 };
 
 const normalize = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -99,6 +102,7 @@ export const createSchedulesRoute = (
         candidate: remembered.get(s.title),
         memo: s.memo,
         attendees: s.attendees,
+        autoNoTravel: detectNoTravel({ title: s.title, locationText: s.locationText, notes: s.memo }),
       }));
     }
     return phone.events.map((e) => {
@@ -115,6 +119,7 @@ export const createSchedulesRoute = (
         candidate: exact ? undefined : remembered.get(e.title) ?? partialMatch(e.locationText),
         memo: e.notes,
         attendees: e.attendees,
+        autoNoTravel: detectNoTravel({ title: e.title, locationText: e.locationText, notes: e.notes }),
       };
     });
   };
@@ -133,14 +138,20 @@ export const createSchedulesRoute = (
     const selected = new Set(effectiveSelectedIds(calendars, selection));
     return all.filter((s) => selected.has(s.calendarId));
   };
+  /**
+   * 보정을 반영한 장소. 보정이 없으면 온라인 회의·회의실 일정은 저절로 '이동 없음'이고 noTravelReason에 이유를 둔다.
+   * 사용자가 장소를 넣으면(보정) 그 일정은 다시 차로 가고, 보정을 지우면(placeId: null) 저절로 거르는 상태로 돌아간다.
+   */
   const view = (s: Row) => {
     const override = overrides.get(s.id);
     const p = override?.placeId ? places.get(override.placeId) : null;
+    const noTravel = override ? override.noTravel : s.autoNoTravel !== null;
     return {
       id: s.id,
-      locationText: override?.noTravel ? null : p?.name ?? s.locationText,
-      place: override?.noTravel ? null : p ? { name: p.name, lat: p.lat, lng: p.lng } : s.place,
-      noTravel: override?.noTravel ?? false,
+      locationText: noTravel ? null : p?.name ?? s.locationText,
+      place: noTravel ? null : p ? { name: p.name, lat: p.lat, lng: p.lng } : s.place,
+      noTravel,
+      noTravelReason: override ? (null as NoTravelReason | null) : s.autoNoTravel,
     };
   };
   /** 시작이 anchor와 같은 서울 날짜이거나, 전날 시작해 anchor 시각에 아직 끝나지 않은 일정. */
@@ -161,7 +172,7 @@ export const createSchedulesRoute = (
       return c.json({
         anchor: anchor.toISOString(),
         schedules: selectedSchedules(anchor).filter((s) => !view(s).noTravel && isToday(s, anchor)).map((s) => {
-          const { noTravel: _, ...place } = view(s);
+          const { noTravel: _, noTravelReason: _reason, ...place } = view(s);
           return { ...place, title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, attendees: s.attendees };
         }),
         favorites: favoritePlaces(),
