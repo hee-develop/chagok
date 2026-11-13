@@ -46,6 +46,7 @@ object FixtureResponses {
                     .put("locationText", item.get("locationText"))
                     .put("place", item.get("place"))
                     .put("memo", item.get("memo"))
+                    .put("care", JSONObject.NULL)
                     .put("attendees", item.getJSONArray("attendees")),
             )
         }

@@ -47,6 +47,8 @@ object ScheduleParser {
         locationText = json.optStringOrNull("locationText"),
         place = if (json.isNull("place")) null else parsePlace(json.getJSONObject("place")),
         memo = json.optStringOrNull("memo"),
+        // 채비가 없는 서버·사본(기능 전 응답)은 null로 읽는다.
+        care = json.optStringOrNull("care"),
         attendees = json.optJSONArray("attendees")?.let { names(it) }.orEmpty(),
     )
 

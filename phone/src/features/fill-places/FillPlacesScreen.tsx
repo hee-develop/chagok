@@ -152,6 +152,20 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
                 </Pressable>
               </>}
             </View>
+            {schedule.noTravel ? null : (
+              // 채비는 차로 가는 일정에만 둔다. 차는 앱 채비를 메모보다 먼저 읽는다.
+              <View style={styles.careRow}>
+                <Text style={[styles.care, font(400)]} numberOfLines={2}>{schedule.care ? `${t.careLabel} · ${schedule.care}` : ''}</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel={`${schedule.title} ${schedule.care ? t.careEdit : t.careAdd}`}
+                  accessibilityState={{ disabled: saving }} disabled={saving} style={styles.textButton}
+                  onPress={() => {
+                    setSaveIssue(null);
+                    router.push({ pathname: '/setup/schedule-care', params: { scheduleId: schedule.id, title: schedule.title, care: schedule.care ?? '' } });
+                  }}>
+                  <Text style={[styles.secondaryText, font(400)]}>{schedule.care ? t.careEdit : t.careAdd}</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
         ))}
       </ScrollView>
@@ -196,6 +210,8 @@ const styles = StyleSheet.create({
   confirm: { minHeight: 44, paddingHorizontal: 16, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   confirmText: { fontSize: 15, color: colors.onPrimary },
   actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 },
+  careRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border },
+  care: { flex: 1, fontSize: 15, lineHeight: 22, color: colors.textStrong },
   textButton: { minHeight: 44, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
   secondaryText: { fontSize: 15, color: colors.textMuted },
   outline: { minHeight: 44, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1.5, borderColor: colors.text, alignItems: 'center', justifyContent: 'center' },

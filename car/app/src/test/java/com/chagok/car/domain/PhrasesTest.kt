@@ -241,4 +241,33 @@ class PhrasesTest {
         val noPlace = sched("c", "치과", "13:00")
         assertEquals(emptyList<String>(), Phrases.candidateNames(Question.AskDestination(AskReason.PLACE_UNKNOWN, noPlace, favorites = listOf(home))))
     }
+
+    // ---- 앱에서 적은 채비 ----
+
+    private fun careCard(vararg items: CareItem) =
+        card(briefing(Briefing.Level.FULL, lunch, memo = MemoNote.Care(items.toList())), Question.Depart(lunch), "09:20")
+
+    @Test fun `한 일정의 짧은 채비는 그대로 읽고 채비 타일에 둔다`() {
+        val c = careCard(CareItem("KIA 직관", "유니폼·응원봉·티켓"))
+        assertEquals("KIA 직관 채비는 ‘유니폼·응원봉·티켓’이에요. 출발할까요?", c.sub)
+        assertTrue(TileView.Care(listOf("유니폼", "응원봉", "티켓")) in c.tiles)
+    }
+
+    @Test fun `채비 조사는 받침에 맞춘다`() {
+        assertEquals("KIA 직관 채비는 ‘우산’이에요. 출발할까요?", careCard(CareItem("KIA 직관", "우산")).sub)
+        assertEquals("KIA 직관 채비는 ‘보조배터리’예요. 출발할까요?", careCard(CareItem("KIA 직관", "보조배터리")).sub)
+    }
+
+    @Test fun `여러 일정의 채비는 오늘 채비로 묶고 같은 항목은 한 번만 태그로 둔다`() {
+        val c = careCard(CareItem("KIA 직관", "유니폼·티켓"), CareItem("콩물 픽업", "보냉백·티켓"))
+        assertEquals("오늘 채비는 ‘유니폼·티켓·보냉백·티켓’이에요. 출발할까요?", c.sub)
+        assertTrue(TileView.Care(listOf("유니폼", "티켓", "보냉백")) in c.tiles)
+    }
+
+    @Test fun `채비가 30자를 넘으면 있다고만 말하고 항목은 타일에 둔다`() {
+        val long = "가".repeat(31)
+        assertEquals("KIA 직관 채비가 있어요. 출발할까요?", careCard(CareItem("KIA 직관", long)).sub)
+        assertEquals("오늘 챙길 채비가 있어요. 출발할까요?", careCard(CareItem("KIA 직관", "가".repeat(20)), CareItem("콩물 픽업", "나".repeat(11))).sub)
+        assertTrue(careCard(CareItem("KIA 직관", long)).tiles.any { it is TileView.Care })
+    }
 }

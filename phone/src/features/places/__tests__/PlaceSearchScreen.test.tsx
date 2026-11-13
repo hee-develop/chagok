@@ -353,7 +353,7 @@ describe('취소와 돌아가기', () => {
 describe('3단계 일정 장소 검색', () => {
   it('선택한 일정에만 장소를 저장하고 3단계로 돌아간다', async () => {
     const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]) });
-    const scheduleApi = { fetchSchedules: jest.fn(), savePlace: jest.fn().mockResolvedValue({ id: 'lunch', place: APT, locationText: APT.name, noTravel: false }) };
+    const scheduleApi = { fetchSchedules: jest.fn(), saveCare: jest.fn(), savePlace: jest.fn().mockResolvedValue({ id: 'lunch', place: APT, locationText: APT.name, noTravel: false }) };
     await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={scheduleApi} debounceMs={0} />);
     expect(screen.getByText('3 / 4')).toBeOnTheScreen();
     await fireEvent.changeText(input(), '아파트');
@@ -366,7 +366,7 @@ describe('3단계 일정 장소 검색', () => {
   it('저장 실패는 성공으로 이동하지 않고, 재시도가 같은 일정에만 적용된다', async () => {
     const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]) });
     const savePlace = jest.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({});
-    await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={{ fetchSchedules: jest.fn(), savePlace }} debounceMs={0} />);
+    await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={{ fetchSchedules: jest.fn(), saveCare: jest.fn(), savePlace }} debounceMs={0} />);
     await fireEvent.changeText(input(), '아파트');
     await fireEvent.press(await screen.findByRole('button', { name: `${APT.name}, ${APT.address}` }));
     await screen.findByText(SAVE_FAILED);
@@ -380,7 +380,7 @@ describe('3단계 일정 장소 검색', () => {
     mockCanGoBack.mockReturnValue(false);
     const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]) });
     const savePlace = jest.fn().mockRejectedValue(new HttpError(404, 'removed'));
-    await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={{ fetchSchedules: jest.fn(), savePlace }} debounceMs={0} />);
+    await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={{ fetchSchedules: jest.fn(), saveCare: jest.fn(), savePlace }} debounceMs={0} />);
     await fireEvent.changeText(input(), '아파트');
     await fireEvent.press(await screen.findByRole('button', { name: `${APT.name}, ${APT.address}` }));
     await screen.findByText('일정이 바뀌었어요. 목록에서 다시 확인해 주세요.');

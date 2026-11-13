@@ -142,4 +142,34 @@ class BoardingDeciderTest {
         assertEquals(emptyList<Place>(), unknown.candidates)
         assertEquals(Question.Depart(meeting, at("09:30")), card(decide("09:00", favorites = all)).question)
     }
+
+    // ---- 앱에서 적은 채비 ----
+
+    private val withCare = { s: Schedule, care: String -> s.copy(care = care) }
+
+    @Test fun `첫 탑승은 오늘 다른 일정의 앱 채비를 모으고 메모 대신 읽음`() {
+        // 대상(meeting)에는 메모만, 점심(lunch)에 앱 채비. 다른 일정의 앱 채비가 있으면 앱 채비만 모은다.
+        val plan = DayPlan(listOf(meeting, withCare(lunch, "우산")))
+        assertEquals(MemoNote.Care(listOf(CareItem(lunch.title, "우산"))), card(decide("09:00", plan = plan)).briefing.memo)
+    }
+
+    @Test fun `대상 일정의 앱 채비가 먼저이고 종일 일정 채비도 모음`() {
+        val allDay = Schedule("d", "광주 직관", at("00:00"), at("23:59"), allDay = true, care = "보조배터리")
+        val plan = DayPlan(listOf(withCare(meeting, "계약서"), withCare(lunch, "우산"), allDay))
+        val expected = listOf(CareItem(meeting.title, "계약서"), CareItem("광주 직관", "보조배터리"), CareItem(lunch.title, "우산"))
+        assertEquals(MemoNote.Care(expected), card(decide("09:00", plan = plan)).briefing.memo)
+    }
+
+    @Test fun `도착하거나 건너뛴 일정의 채비와 빈 채비는 모으지 않음`() {
+        val done = withCare(schedule("x", "08:00", "08:30"), "명함")
+        val plan = DayPlan(listOf(done, meeting, withCare(lunch, "  ")), mapOf("x" to ScheduleStatus.ARRIVED))
+        // 모을 앱 채비가 없으면 지금처럼 대상 일정의 메모를 읽는다.
+        assertEquals(MemoNote.ReadAloud("계약서 2부"), card(decide("09:00", plan = plan)).briefing.memo)
+    }
+
+    @Test fun `재탑승은 대상 일정의 앱 채비만`() {
+        val plan = DayPlan(listOf(withCare(meeting, "계약서"), withCare(lunch, "우산")))
+        assertEquals(MemoNote.Care(listOf(CareItem(meeting.title, "계약서"))), card(decide("09:00", kind = BoardingKind.AGAIN, plan = plan)).briefing.memo)
+        assertEquals(MemoNote.None, card(decide("09:00", kind = BoardingKind.AGAIN, plan = DayPlan(listOf(meeting, withCare(lunch, "우산"))))).briefing.memo)
+    }
 }

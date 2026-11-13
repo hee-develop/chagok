@@ -14,11 +14,12 @@ jest.mock('expo-router', () => {
   };
 });
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
-const empty: SetupSchedule = { id: 'lunch', title: '육전집 점심', start: '2026-11-06T04:00:00Z', end: '2026-11-06T05:00:00Z', place: null, locationText: null, noTravel: false, noTravelReason: null, suggestion: null };
+const empty: SetupSchedule = { id: 'lunch', title: '육전집 점심', start: '2026-11-06T04:00:00Z', end: '2026-11-06T05:00:00Z', place: null, locationText: null, noTravel: false, noTravelReason: null, care: null, suggestion: null };
 const resolved: SetupSchedule = { ...empty, id: 'game', title: 'KIA 직관', place: { name: '챔피언스필드', lat: 35.1, lng: 126.8 } };
 const makeApi = (overrides: Partial<SchedulePlacesApi> = {}) => ({
   fetchSchedules: jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [empty, resolved] }),
   savePlace: jest.fn().mockResolvedValue({ id: empty.id, place: null, locationText: null, noTravel: true }),
+  saveCare: jest.fn().mockResolvedValue({ id: empty.id, care: null }),
   ...overrides,
 });
 const renderScreen = (api: SchedulePlacesApi, timeoutMs?: number) => render(<SafeAreaProvider initialMetrics={insets}><FillPlacesScreen api={api} timeoutMs={timeoutMs} /></SafeAreaProvider>);
@@ -163,4 +164,18 @@ it('온라인 회의·회의실이라 저절로 거른 일정은 이유를 붙�
   // 잘못 거른 일정은 장소를 넣어 다시 차로 보낼 수 있다.
   await fireEvent.press(screen.getByRole('button', { name: '주간 회의 장소 변경' }));
   expect(mockPush).toHaveBeenCalledWith({ pathname: '/setup/schedule-place-search', params: { scheduleId: 'zoom' } });
+});
+
+it('차로 가는 일정에는 채비 줄을 두고, 적어 둔 채비는 보여 주며 채비 화면으로 넘긴다', async () => {
+  const kia: SetupSchedule = { ...resolved, id: 'kia', care: '유니폼·응원봉·티켓' };
+  const filtered: SetupSchedule = { ...empty, id: 'zoom', title: '주간 회의', noTravel: true, noTravelReason: 'online' };
+  await renderScreen(makeApi({ fetchSchedules: jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [empty, kia, filtered] }) }));
+  expect(await screen.findByText('채비 · 유니폼·응원봉·티켓')).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: '육전집 점심 채비 넣기' })).toBeOnTheScreen();
+  // 이동 없음 일정은 차로 가지 않으니 채비 줄이 없다.
+  expect(screen.queryByRole('button', { name: '주간 회의 채비 넣기' })).toBeNull();
+  await fireEvent.press(screen.getByRole('button', { name: 'KIA 직관 채비 수정' }));
+  expect(mockPush).toHaveBeenCalledWith({ pathname: '/setup/schedule-care', params: { scheduleId: 'kia', title: 'KIA 직관', care: '유니폼·응원봉·티켓' } });
+  await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 채비 넣기' }));
+  expect(mockPush).toHaveBeenLastCalledWith({ pathname: '/setup/schedule-care', params: { scheduleId: 'lunch', title: '육전집 점심', care: '' } });
 });

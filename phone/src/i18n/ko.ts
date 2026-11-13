@@ -61,6 +61,20 @@ export const ko = {
     cancel: '취소',
   },
   talk: { title: '말 거는 방법' },
+  scheduleCare: {
+    title: (scheduleTitle: string) => `${scheduleTitle} 채비`,
+    description: '차에 탈 때 읽어 드려요. 캘린더에는 저장하지 않아요.',
+    inputLabel: '채비',
+    placeholder: '예: 유니폼·응원봉·티켓',
+    save: '저장',
+    clear: '채비 지우기',
+    saving: '저장하는 중',
+    saveFailed: SAVE_FAILED,
+    scheduleChanged: '일정이 바뀌었어요. 목록에서 다시 확인해 주세요.',
+    backToSchedules: '일정 목록으로',
+    retry: RETRY,
+    cancel: '취소',
+  },
   fillPlaces: {
     title: (count: number) => `장소가 빈 일정이 ${count}개 있어요`,
     heading: '일정 장소를 확인해 주세요',
@@ -71,6 +85,10 @@ export const ko = {
     noTravel: '이동 없음',
     // 서버가 저절로 이동 없음으로 본 이유(온라인 회의·회의실). 1단계 문구 "걸러서 차에 보내지 않아요"의 실제 동작이다.
     noTravelReason: { online: '온라인 회의', meetingRoom: '회의실' },
+    // 일정마다 적는 채비. 차가 탈 때 읽는다.
+    careLabel: '채비',
+    careAdd: '채비 넣기',
+    careEdit: '채비 수정',
     rememberedHint: (title: string) => `지난번 '${title}' 일정`,
     rememberedConfirm: '여기 맞아요',
     add: '장소 넣기',

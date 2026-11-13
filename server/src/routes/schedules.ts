@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import type { DayFixture, MockCalendar, MockPlace, PlaceFixture, PlacesCatalog } from '../fixture-types.js';
-import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
+import { MAX_BODY_BYTES, MAX_CARE_LENGTH, MAX_ID_LENGTH } from '../limits.js';
 import { MINUTE_MS, parseAt, seoulDay } from '../time.js';
 import { effectiveSelectedIds, type SelectionStore } from './calendars.js';
 import type { EventsStore } from './events.js';
@@ -51,6 +51,11 @@ export const createSchedulesRoute = (
   now: () => Date = () => new Date(),
 ) => {
   const overrides = new Map<string, Override>();
+  /**
+   * 앱에서 적은 채비(일정 id → 한 줄). 캘린더에는 쓰지 않고 차곡 안에만 둔다. 차는 이 채비를 먼저, 없으면 일정 메모를 읽는다.
+   * 보정과 같이 라우트 인스턴스 수명 동안만 보관하고, 폰 일정이 바뀌어 사라진 일정의 채비는 버린다.
+   */
+  const cares = new Map<string, string>();
   const places = new Map([...catalog.places, ...catalog.suggestions].map((p) => [p.id, p]));
   /**
    * 차량 '어디로 갈까요?' 후보로 쓰는 자주 가는 곳. 집 → 회사 → 추가한 순서이고, 일정 선택·날짜와 무관하다.
@@ -86,6 +91,7 @@ export const createSchedulesRoute = (
   const fixtureIds = new Set(fixture.schedules.map((s) => s.id));
   events.subscribe((ids) => {
     for (const id of overrides.keys()) if (!ids.has(id) && !fixtureIds.has(id)) overrides.delete(id);
+    for (const id of cares.keys()) if (!ids.has(id) && !fixtureIds.has(id)) cares.delete(id);
   });
   const rows = (anchor: Date): Row[] => {
     const phone = events.get();
@@ -173,7 +179,9 @@ export const createSchedulesRoute = (
         anchor: anchor.toISOString(),
         schedules: selectedSchedules(anchor).filter((s) => !view(s).noTravel && isToday(s, anchor)).map((s) => {
           const { noTravel: _, noTravelReason: _reason, ...place } = view(s);
-          return { ...place, title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, attendees: s.attendees };
+          return {
+            ...place, title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, care: cares.get(s.id) ?? null, attendees: s.attendees,
+          };
         }),
         favorites: favoritePlaces(),
       }, 200);
@@ -186,7 +194,10 @@ export const createSchedulesRoute = (
           .map((s) => {
             const v = view(s);
             const known = v.place || v.noTravel ? undefined : s.candidate;
-            return { ...v, title: s.title, ...times(s), suggestion: known ? { placeId: known.id, name: known.name } : null };
+            return {
+              ...v, title: s.title, ...times(s), care: cares.get(s.id) ?? null,
+              suggestion: known ? { placeId: known.id, name: known.name } : null,
+            };
           }),
       }, 200);
     })
@@ -210,5 +221,24 @@ export const createSchedulesRoute = (
         else if (change.placeId === null) overrides.delete(schedule.id);
         else overrides.set(schedule.id, { placeId: change.placeId, noTravel: false });
         return c.json(view(schedule), 200);
+      })
+    // 채비 한 줄 저장. 공백만이거나 null이면 지운다. 줄바꿈·연속 공백은 공백 하나로 줄인다. 종일 일정에도 둘 수 있다(하루 전체 채비).
+    .put('/:id/care', bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => c.json({ error: '본문이 너무 큽니다' }, 413) }),
+      validator('json', (raw: unknown, c) => {
+        if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return c.json({ error: '본문은 객체여야 합니다' }, 400);
+        const value = raw as Record<string, unknown>;
+        if (Object.keys(value).length !== 1 || !('care' in value)) return c.json({ error: 'care 하나가 필요합니다' }, 400);
+        if (value.care === null) return { care: null as string | null };
+        if (typeof value.care !== 'string') return c.json({ error: 'care는 문자열 또는 null이어야 합니다' }, 400);
+        const care = value.care.trim().replace(/\s+/g, ' ');
+        if (care.length > MAX_CARE_LENGTH) return c.json({ error: `care는 ${MAX_CARE_LENGTH}자 이하여야 합니다` }, 400);
+        return { care: care === '' ? null : care };
+      }), (c) => {
+        const schedule = selectedSchedules(now()).find((s) => s.id === c.req.param('id'));
+        if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
+        const { care } = c.req.valid('json');
+        if (care === null) cares.delete(schedule.id);
+        else cares.set(schedule.id, care);
+        return c.json({ id: schedule.id, care: cares.get(schedule.id) ?? null }, 200);
       });
 };
