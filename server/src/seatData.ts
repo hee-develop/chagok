@@ -1,15 +1,18 @@
 import { createSelectionStore, type SelectionStore } from './routes/calendars.js';
 import { createEventsStore, type EventsStore } from './routes/events.js';
 import { createFamilyStore, type FamilyStore } from './routes/family.js';
+import { createPlaceMemoryStore, type PlaceMemoryStore } from './placeMemory.js';
+import type { StoredPlace } from './placeSnapshot.js';
+import { MAX_BUCKET_MEMORIES, MAX_MEMORIES } from './placeSearch/limits.js';
 import { createFavoritesStore, type FavoritesStore } from './routes/places.js';
 import { DEFAULT_SEAT_ID, type SeatEvent } from './seats.js';
 
 /** 캘린더 원본과 분리한 일정별 보정값. */
-export type Override = { placeId: string | null; noTravel: boolean };
+export type Override = { place: StoredPlace | null; noTravel: boolean };
 
 /**
- * 운전자 자리 하나가 가진 데이터. 일정·캘린더 선택·자주 가는 곳·가족 요청·일정별 보정과 채비가 자리별로 따로 쌓인다.
- * 앞으로 생길 장소 기억·도착 횟수·이동 없음 기억 저장소도 여기에 붙인다(자리를 지우면 함께 지워진다).
+ * 운전자 자리 하나가 가진 데이터. 일정·캘린더 선택·자주 가는 곳·가족 요청·일정별 보정과 채비·장소 기억이 자리별로 따로 쌓인다.
+ * 장소 기억(`memory`)이 여기 있고, 앞으로 생길 도착 횟수·이동 없음 기억 저장소도 여기에 붙인다(자리를 지우면 함께 지워진다).
  */
 export type SeatData = {
   events: EventsStore;
@@ -21,6 +24,8 @@ export type SeatData = {
   overrides: Map<string, Override>;
   /** 일정 id → 앱에서 적은 채비 한 줄. 캘린더에는 쓰지 않고 차곡 안에만 둔다. */
   cares: Map<string, string>;
+  /** 장소 기억: 일정의 장소 칸 글자(또는 들은 이름) → 장소, 애매 여부. 폰을 바꿔도 남고 연결을 끊으면 자리와 함께 지워진다. */
+  memory: PlaceMemoryStore;
 };
 
 export type BucketDenied = 'rate-limited';
@@ -96,7 +101,7 @@ export function createSeatDataRegistry({
   bucketCreateWindowMs = BUCKET_CREATE_WINDOW_MS,
   maxBucketCreatesPerSource = MAX_BUCKET_CREATES_PER_SOURCE,
 }: SeatDataOptions): SeatDataRegistry {
-  const create = (preset: Preset = {}): SeatData => {
+  const create = (preset: Preset = {}, memoryMax: number = MAX_MEMORIES): SeatData => {
     const data: SeatData = {
       events: preset.events ?? createEventsStore(now),
       selection: preset.selection ?? createSelectionStore(),
@@ -104,6 +109,7 @@ export function createSeatDataRegistry({
       family: preset.family ?? createFamilyStore(now),
       overrides: new Map(),
       cares: new Map(),
+      memory: createPlaceMemoryStore(now, memoryMax),
     };
     // 폰 일정이 교체되거나 비워지면, 더는 없는 일정 id의 보정·채비를 버린다(픽스처 id의 것은 남긴다).
     data.events.subscribe((ids) => {
@@ -148,6 +154,7 @@ export function createSeatDataRegistry({
       d.selection.get() === null &&
       d.overrides.size === 0 &&
       d.cares.size === 0 &&
+      d.memory.size() === 0 &&
       saved.home === null &&
       saved.work === null &&
       saved.others.length === 0 &&
@@ -197,7 +204,7 @@ export function createSeatDataRegistry({
         if (victim === null) break;
         buckets.delete(victim);
       }
-      const data = create();
+      const data = create({}, MAX_BUCKET_MEMORIES);
       buckets.set(deviceId, { data, lastWrittenAt: at });
       return { ok: true, data };
     },
@@ -232,7 +239,9 @@ export function createSeatDataRegistry({
       } else if (event.type === 'created') {
         // 그 요청의 기기 id 버킷(연결 전에 이 폰이 모은 일정·선택·보정·채비·자주 가는 곳)을 새 자리가 이어받는다.
         // 기본 자리(픽스처·데모 경로)와 다른 폰의 버킷은 가져가지 않는다.
-        bySeat.set(event.seatId, takeBucket(event.deviceId) ?? create());
+        const data = takeBucket(event.deviceId) ?? create();
+        data.memory.setMax(MAX_MEMORIES); // 버킷의 낮은 기억 상한은 자리가 되면 풀린다
+        bySeat.set(event.seatId, data);
       } else {
         // 폰 바꾸기: 옛 폰의 캘린더에서 온 일정·캘린더 선택·보정·채비는 버리고, 새 폰의 버킷이 있으면 그 일정·선택·보정을 반영한다
         // (없으면 '받았고 0건' 상태). 자주 가는 곳 같은 기억과 가족 요청은 둔다.

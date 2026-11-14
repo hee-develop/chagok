@@ -56,10 +56,21 @@ describe('placesApi', () => {
     for (const other of ['homePut', 'workPut', 'othersPost'] as const) if (other !== key) expect(mock[other]).not.toHaveBeenCalled();
   });
 
-  it('searchPlaces는 q를 쿼리로 보내고 places 배열을 돌려준다', async () => {
+  it('assignPlace는 외부 검색 결과의 스냅숏이면 placeId 대신 place를 보낸다', async () => {
+    mock.homePut.mockResolvedValue(ok({ home: null, work: null, others: [], revision: 1 }));
+    const place = { name: '약국', address: '주소', lat: 35.1, lng: 126.8, externalId: 'kakao:1' };
+    await placesApi.assignPlace('home', place, signal);
+    expect(mock.homePut).toHaveBeenCalledWith({ json: { place } }, { init: { signal } });
+  });
+
+  it('searchPlaces는 q를 쿼리로 보내고 places와 출처를 돌려준다(목 출처 응답에는 source가 없다)', async () => {
     mock.searchGet.mockResolvedValue(ok({ places: [{ id: 'p' }] }));
-    await expect(placesApi.searchPlaces('광주', signal)).resolves.toEqual([{ id: 'p' }]);
+    await expect(placesApi.searchPlaces('광주', signal)).resolves.toEqual({ places: [{ id: 'p' }], source: 'mock' });
     expect(mock.searchGet).toHaveBeenCalledWith({ query: { q: '광주' } }, { init: { signal } });
+    mock.searchGet.mockResolvedValue(ok({ places: [{ id: 'kakao:1' }], source: 'kakao' }));
+    await expect(placesApi.searchPlaces('광주', signal)).resolves.toEqual({ places: [{ id: 'kakao:1' }], source: 'kakao' });
+    mock.searchGet.mockResolvedValue(ok({ places: [], source: 'unavailable' }));
+    await expect(placesApi.searchPlaces('광주', signal)).resolves.toEqual({ places: [], source: 'unavailable' });
   });
 
   it.each([

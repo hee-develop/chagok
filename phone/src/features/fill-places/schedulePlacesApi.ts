@@ -2,10 +2,11 @@ import type { InferResponseType } from 'hono/client';
 
 import { api } from '../../api/client';
 import { HttpError } from '../../api/request';
+import type { PlaceSnapshot } from '../places/placesApi';
 
 export type SchedulePlaces = InferResponseType<typeof api.schedules.places.$get, 200>;
 export type SetupSchedule = SchedulePlaces['schedules'][number];
-export type SchedulePlaceChange = { placeId: string | null } | { noTravel: true };
+export type SchedulePlaceChange = { placeId: string | null } | { place: PlaceSnapshot } | { noTravel: true };
 export type SavedSchedulePlace = Pick<SetupSchedule, 'id' | 'place' | 'locationText' | 'noTravel' | 'noTravelReason'>;
 export type SavedCare = InferResponseType<(typeof api.schedules)[':id']['care']['$put'], 200>;
 export type SchedulePlacesApi = {

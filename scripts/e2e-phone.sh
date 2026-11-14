@@ -196,7 +196,8 @@ install_expo_go() {
 start_server() {
   port_in_use "$SERVER_PORT" && { echo "포트 $SERVER_PORT 사용 중. E2E_SERVER_PORT로 바꿔 주세요." >&2; return 1; }
   # watch 없이 한 번만 띄운다. pnpm을 거치지 않고 tsx를 직접 실행해 그룹 정리가 확실하다.
-  (cd "$ROOT/server" && PORT="$SERVER_PORT" FIXTURE_PATH="${E2E_FIXTURE_PATH:-}" exec "$ROOT/server/node_modules/.bin/tsx" src/index.ts) \
+  # FIXTURE_SEATS=1(데모·E2E 전용): 연결 전 기기 버킷(이 E2E의 폰)에도 목 일정·목 장소 검색을 쓰게 한다. 실제 자리에서는 목 데이터를 쓰지 않는다.
+  (cd "$ROOT/server" && PORT="$SERVER_PORT" FIXTURE_PATH="${E2E_FIXTURE_PATH:-}" FIXTURE_SEATS=1 exec "$ROOT/server/node_modules/.bin/tsx" src/index.ts) \
     >"$LOG_DIR/server.log" 2>&1 &
   SERVER_PID=$!
   wait_for "서버 기동" 30 curl -sf "http://127.0.0.1:$SERVER_PORT/health"

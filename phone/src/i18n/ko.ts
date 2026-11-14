@@ -54,6 +54,7 @@ export const ko = {
     inputPlaceholder: '장소 이름이나 주소로 검색',
     searching: '장소를 찾는 중',
     noResults: '검색 결과가 없어요',
+    searchUnavailable: '지금은 장소를 검색할 수 없어요. 잠시 뒤 다시 시도해 주세요.',
     searchFailed: '장소를 찾지 못했어요. 잠시 뒤 다시 시도해 주세요.',
     saveFailed: SAVE_FAILED,
     retry: RETRY,

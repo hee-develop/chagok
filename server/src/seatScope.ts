@@ -88,6 +88,7 @@ export type SeatGuardOptions = {
 
 const unauthorized = (c: Context, error: string) => c.json({ error, reason: 'unauthorized' as const }, 401);
 const forbidden = (c: Context, error: string) => c.json({ error, reason: 'forbidden' as const }, 403);
+const driverRequired = (c: Context) => c.json({ error: '차 토큰으로 부를 때는 driver=<자리 id>가 꼭 필요합니다', reason: 'driver-required' as const }, 400);
 const badDevice = (c: Context) => c.json({ error: `${DEVICE_HEADER} 헤더는 22~64자의 영문·숫자·-·_ 이어야 합니다`, reason: 'bad-device' as const }, 400);
 
 /**
@@ -143,11 +144,11 @@ export function createSeatGuard(
     const data = registry.blank();
     return { ...base('none', 'none'), data, open: () => ({ ok: false, reason: 'unwritable' }) };
   };
-  const legacyRead = (): SeatScope => {
+  const legacyRead = (legacy: boolean): SeatScope => {
     // 자리 있는 차가 하나도 없는 서버의 식별 없는 읽기만 기본 자리(픽스처·데모·차량 E2E)다.
     const cars = seats.seatedCarCount();
     if (cars === 0) return defaultScope();
-    const seat = legacyDriverFallback && cars === 1 ? seats.soleCarSeat() : null;
+    const seat = legacy && legacyDriverFallback && cars === 1 ? seats.soleCarSeat() : null;
     return seat ? seatScope(seat.seatId) : noneScope();
   };
 
@@ -162,7 +163,7 @@ export function createSeatGuard(
     return seatScope(found.seat.seatId);
   };
 
-  const resolveRead = (c: Context): SeatScope | Response => {
+  const resolveRead = (c: Context, legacy = true): SeatScope | Response => {
     const auth = bearerOf(c);
     const device = deviceOf(c);
     if (device.kind === 'bad') return badDevice(c);
@@ -182,13 +183,49 @@ export function createSeatGuard(
       // 차 토큰으로 driver 없이 읽는 것은 옛 차 앱 호환 읽기다: 그 차 안에서만 지난번 고른 자리(없으면 최근 자리). 자리가 없으면 빈 범위.
       const car = seats.carByToken(auth.token);
       if (car) {
+        if (!legacy) return driverRequired(c);
         const seat = legacyDriverFallback ? seats.preferredSeat(car.carId) : null;
         return seat ? seatScope(seat.seatId) : noneScope();
       }
       return unauthorized(c, '연결이 끊겼거나 다른 폰으로 바뀐 토큰입니다. 차와 다시 연결해 주세요');
     }
     if (device.kind === 'id') return deviceScope(c, device.id);
-    return legacyRead();
+    return legacyRead(legacy);
+  };
+
+  /**
+   * 차가 자리 데이터에 쓰는 요청(장소 기억 저장). 차 토큰이 있으면 `driver=<seatId>`가 그 차의 자리여야 하고(아니면 403), `driver`가 없으면
+   * 옛 차 앱 호환으로 그 차의 지난번 고른 자리(없으면 가장 최근 자리)이며 자리가 없으면 409 `no-seat`다(`legacyDriverFallback: false`면 `driver`가 꼭 필요).
+   * 차 토큰이 아닌 요청(폰 토큰·기기 id·식별 없음)은 폰의 쓰기와 같은 규칙이다(`resolveWrite`).
+   */
+  const resolveCarWrite = (c: Context, legacy = true): SeatScope | Response => {
+    const auth = bearerOf(c);
+    if (auth.kind !== 'token') return resolveWrite(c);
+    const car = seats.carByToken(auth.token);
+    if (!car || seats.seatByToken(auth.token)) return resolveWrite(c);
+    if (deviceOf(c).kind === 'bad') return badDevice(c);
+    const driver = c.req.query('driver');
+    if (driver !== undefined) {
+      return seats.seatsOf(car.carId).some((s) => s.seatId === driver)
+        ? seatScope(driver)
+        : forbidden(c, '그 운전자 자리를 볼 수 없습니다');
+    }
+    if (!legacy) return driverRequired(c);
+    const seat = legacyDriverFallback ? seats.preferredSeat(car.carId) : null;
+    return seat ? seatScope(seat.seatId) : c.json({ error: '쓸 운전자 자리를 정할 수 없습니다. driver를 지정해 주세요', reason: 'no-seat' as const }, 409);
+  };
+
+  /**
+   * 새 장소 API(`/places/resolve`·`/places/memory`)의 자리 정하기. 옛 차 앱 호환(`legacyDriverFallback`)을 적용하지 않는다:
+   * 폰 토큰 = 그 자리, 차 토큰 = `driver=<seatId>` 필수(없으면 400), 기기 id만 = 그 기기의 연결 전 버킷, 식별 없음 = 서버에 자리 있는 차가
+   * 하나도 없을 때만 기본 자리(데모·E2E)이고 그 밖에는 저장하지 않는 빈 범위(읽으면 비어 있고 쓰면 거절). 식별 없는 요청이 실제 자리의
+   * 기억을 읽거나 쓰는 경로가 없다.
+   */
+  const strictRead = (c: Context) => resolveRead(c, false);
+  const strictWrite = (c: Context): SeatScope | Response => {
+    const scope = resolveCarWrite(c, false);
+    if (scope instanceof Response) return scope;
+    return scope.kind === 'default' && seats.seatedCarCount() > 0 ? noneScope() : scope;
   };
 
   const middleware = (resolve: (c: Context) => SeatScope | Response): MiddlewareHandler<SeatEnv> => async (c, next) => {
@@ -205,6 +242,12 @@ export function createSeatGuard(
     write: middleware(resolveWrite),
     /** 읽기 요청이 쓰는 미들웨어 */
     read: middleware(resolveRead),
+    /** 차가 자리 데이터에 쓰는 요청(차 토큰 + driver)이 쓰는 미들웨어. 폰 토큰·기기 id 요청은 `write`와 같다 */
+    carWrite: middleware((c) => resolveCarWrite(c)),
+    /** 새 장소 API의 읽기·해석(옛 호환 없음, 위 `strictRead`) */
+    placeRead: middleware(strictRead),
+    /** 새 장소 API의 쓰기(옛 호환 없음, 위 `strictWrite`). 차 토큰은 `driver=`가 필수 */
+    placeWrite: middleware(strictWrite),
   };
 }
 

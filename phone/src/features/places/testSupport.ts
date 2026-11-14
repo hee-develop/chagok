@@ -1,5 +1,5 @@
 import { HttpError } from '../../api/request';
-import type { Favorites, Place, PlacesApi, Suggestion } from './placesApi';
+import type { Favorites, Place, PlaceSearchResult, PlaceSearchSource, PlacesApi, PlaceSnapshot, Suggestion } from './placesApi';
 
 export const APT: Place = { id: 'mock-home-apt', name: '예시 아파트 101동', address: '광주 북구 샘플로 12', lat: 35.1743, lng: 126.9121 };
 export const TOWER: Place = { id: 'mock-work-tower', name: '예시타워', address: '서울 강남구 테헤란로 100', lat: 37.5012, lng: 127.0396 };
@@ -12,6 +12,9 @@ export const SUGGESTIONS: Suggestion[] = [
   { ...GYM, hint: '화요일 저녁마다' },
   { ...FIELD, hint: '직관 일정에 자주 나와요' },
 ];
+
+/** 검색 응답(목 출처가 기본). */
+export const found = (places: Place[], source: PlaceSearchSource = 'mock'): PlaceSearchResult => ({ places, source });
 
 export const EMPTY: Favorites = { home: null, work: null, others: [], revision: 0 };
 
@@ -26,8 +29,11 @@ export type FakeApi = { [K in keyof PlacesApi]: jest.Mock } & {
  */
 export function makeApi(overrides: Partial<PlacesApi> = {}, initial: Favorites = EMPTY): FakeApi {
   let state = initial;
-  const assignPlace = async (target: 'home' | 'work' | 'other', placeId: string): Promise<Favorites> => {
-    const place = KNOWN.find((p) => p.id === placeId) as Place;
+  const assignPlace = async (target: 'home' | 'work' | 'other', pick: string | PlaceSnapshot): Promise<Favorites> => {
+    const place = (typeof pick === 'string'
+      ? KNOWN.find((p) => p.id === pick)
+      : { id: `ext:${pick.externalId}`, name: pick.name, address: pick.address ?? '', lat: pick.lat, lng: pick.lng }) as Place;
+    const placeId = place.id;
     if (target === 'other' && state.others.some((p) => p.id === placeId)) throw new HttpError(400, 'POST /places/favorites/others 400');
     const rest = {
       home: state.home?.id === placeId ? null : state.home,
@@ -41,7 +47,7 @@ export function makeApi(overrides: Partial<PlacesApi> = {}, initial: Favorites =
   return {
     fetchFavorites: jest.fn().mockImplementation(async () => state),
     fetchSuggestions: jest.fn().mockResolvedValue(SUGGESTIONS),
-    searchPlaces: jest.fn().mockResolvedValue([]),
+    searchPlaces: jest.fn().mockResolvedValue(found([])),
     assignPlace: jest.fn().mockImplementation(assignPlace),
     ...overrides,
     server: { get: () => state, set: (next) => (state = next) },

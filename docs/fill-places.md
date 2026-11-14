@@ -19,10 +19,16 @@
   `place`는 `{ name, lat, lng } | null`입니다. 빈 개수는 `place === null && !noTravel`이며 후보가 있는 일정도 셉니다.
   `suggestion`은 `{ placeId, name } | null`로, 장소가 비고 이동 없음이 아닌 일정 중 제목이 기억한 장소와
   같은 일정에만 채웁니다. 기억한 장소는 `fixtures/places/remembered.json`(일정 제목 → 목 장소 id)입니다.
-  '여기 맞아요'는 이 `placeId`를 아래 `PUT`으로 저장합니다. 기억 후보가 틀리면 같은 카드의
+  (이 파일은 픽스처·데모 자리(기본 자리·`FIXTURE_SEATS=1`)의 시드이고 실제 자리에는 쓰지 않습니다. 실제 자리에서는 목 장소 이름 완전 일치·부분 일치도 쓰지 않습니다.)
+  차가 `PUT /places/memory`로 저장한 '이름 → 장소' 기억은 **애매하지 않으면 장소를 확정**합니다(`place` 채움, `suggestion: null`,
+  응답에 `placeMemory: { ambiguous: false }` 덧붙음). **애매한 기억(`ambiguous: true`)은 확정하지 않고** `place`는 `null`로 두며
+  `suggestion`이 `{ placeId: null, name, place: { name, address, lat, lng }, source: "memory", ambiguous: true }`가 됩니다
+  (`/schedules/today`에는 이 경우에만 같은 `suggestion` 필드가 덧붙습니다). 일정 장소 확정 순서는 보정 → 기억 → 목 완전 일치(기본 자리·`FIXTURE_SEATS=1`만) → `suggestion`이고,
+  기억 순서와 계약은 `docs/place-resolve.md`를 따릅니다.
+  '여기 맞아요'는 `placeId`가 있으면 그 `placeId`를, 없으면(`placeId: null`, 애매한 기억) `suggestion.place`를 장소 스냅숏으로 아래 `PUT`에 저장합니다. 기억 후보가 틀리면 같은 카드의
   '이동 없음'·'장소 넣기'로 직접 고를 수 있게 후보 박스 아래에 그 줄을 함께 둡니다.
-- `PUT /schedules/:id/place`: `{ placeId: string | null }` 또는 `{ noTravel: true }` 중 하나를 받습니다.
-  장소 id는 기존 목 장소 검색·추천 목록에서 검증합니다. `null`은 저장한 보정을 지웁니다.
+- `PUT /schedules/:id/place`: `{ placeId: string | null }`, `{ place: { name, lat, lng, address?, externalId? } }`(외부 검색 결과의 장소 스냅숏), `{ noTravel: true }` 중 하나를 받습니다.
+  장소 id는 기존 목 장소 검색·추천 목록에서 검증합니다. 스냅숏은 서버가 그 자리 저장소에 값으로 저장합니다(`docs/place-resolve.md`). `null`은 저장한 보정을 지웁니다.
   장소 지정은 해당 일정만 바꾸고 이동 없음 표시를 해제합니다. 이동 없음은 장소를 비우고
   차량 대상에서 제외합니다. 둘 다 원본 픽스처는 수정하지 않습니다.
   성공 응답은 `{ id, locationText, place, noTravel, noTravelReason }`이며 같은 요청을 재전송해도 결과가 같습니다.
