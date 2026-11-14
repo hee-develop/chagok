@@ -51,6 +51,9 @@ private class InjectedNavigator(private val inner: Navigator, private val post: 
     }
 
     override fun startRoute(place: Place): Boolean = DebugInjection.routeOk ?: inner.startRoute(place)
+
+    // 위치는 실제 내비에 묻는다. E2E는 chagok-debug://signal?loc=위도,경도로 답을 직접 넣는다.
+    override fun requestLocation() = inner.requestLocation()
 }
 
 private class InjectedSpeaker(private val inner: Speaker) : Speaker {

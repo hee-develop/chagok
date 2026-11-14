@@ -263,7 +263,7 @@ object Phrases {
                 base.copy(
                     voice = voice,
                     sub = sub,
-                    tiles = firstBoardingTiles(briefing, zone),
+                    tiles = boardingTiles(briefing, zone),
                     primary = ACCEPT_DEPART,
                     secondary = HOLD,
                 )
@@ -325,12 +325,17 @@ object Phrases {
         hints = listOf(HINT_AUTO_FOLD),
     )
 
-    /** 첫 탑승 타일: 오늘 일정(최대 3줄, 첫 번째만 다음 일정) + 채비(짧은 메모일 때). */
-    private fun firstBoardingTiles(briefing: Briefing, zone: ZoneId): List<TileView> {
+    /**
+     * 출발 제안 카드의 타일. 첫 탑승은 오늘 일정(최대 3줄, 첫 번째만 다음 일정) + 채비(짧은 메모·앱 채비),
+     * 재탑승(대상 일정 한 줄, 5장)은 채비만 둔다.
+     */
+    private fun boardingTiles(briefing: Briefing, zone: ZoneId): List<TileView> {
         val tiles = mutableListOf<TileView>()
-        val rows = briefing.upcoming.take(MAX_TILE_ROWS)
-            .mapIndexed { i, s -> TileRow(time(s, zone), s.title, next = i == 0) }
-        if (rows.isNotEmpty()) tiles += TileView.Schedules(rows)
+        if (briefing.level == Briefing.Level.FULL) {
+            val rows = briefing.upcoming.take(MAX_TILE_ROWS)
+                .mapIndexed { i, s -> TileRow(time(s, zone), s.title, next = i == 0) }
+            if (rows.isNotEmpty()) tiles += TileView.Schedules(rows)
+        }
         when (val memo = briefing.memo) {
             is MemoNote.ReadAloud -> tiles += TileView.Care(careItems(memo.text))
             is MemoNote.Care -> tiles += TileView.Care(careItems(careText(memo)).distinct())

@@ -2,7 +2,20 @@ package com.chagok.car.domain
 
 import java.time.Instant
 
-data class LatLng(val lat: Double, val lng: Double)
+data class LatLng(val lat: Double, val lng: Double) {
+    /** 두 점 사이 거리(미터). 지구를 반지름 6,371km 공으로 본 대원 거리(haversine)라 도착 판정(수백 m)에는 충분하다. */
+    fun distanceTo(other: LatLng): Double {
+        val dLat = Math.toRadians(other.lat - lat)
+        val dLng = Math.toRadians(other.lng - lng)
+        val a = Math.sin(dLat / 2).let { it * it } +
+            Math.cos(Math.toRadians(lat)) * Math.cos(Math.toRadians(other.lat)) * Math.sin(dLng / 2).let { it * it }
+        return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(a.coerceIn(0.0, 1.0)))
+    }
+
+    private companion object {
+        const val EARTH_RADIUS_M = 6_371_000.0
+    }
+}
 
 data class Place(val name: String, val position: LatLng)
 

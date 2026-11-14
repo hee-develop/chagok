@@ -206,6 +206,7 @@ class SessionHost(
             }
             is Effect.RequestTravelTime -> navi.requestTravelTime(effect.requestId, effect.place)
             is Effect.StartRoute -> post(Event.RouteRequestResult(navi.startRoute(effect.place)))
+            Effect.RequestLocation -> navi.requestLocation()
             is Effect.Save -> store.save(effect.snapshot)
             Effect.RefreshSchedules -> refreshRequested = true
             is Effect.ScheduleResultTimeout ->

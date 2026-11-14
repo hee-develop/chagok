@@ -98,7 +98,7 @@ class BoardingBriefingTest {
     }
 
     @Test
-    fun 같은_날_두_번째_탑승에는_아무_반응이_없다() {
+    fun 같은_날_두_번째_탑승은_대상_일정_한_줄로_다시_묻는다() {
         launch()
         assertNotNull(waitFor("광주 직관 날이에요!"))
         device.findObject(By.text("응, 출발")).click()
@@ -107,12 +107,13 @@ class BoardingBriefingTest {
 
         host.post(Event.Boarded)
 
-        assertNull(device.wait(Until.findObject(By.textContains("육전집 점심까지")), 1_500))
-        assertTrue(speaker.spoken.isEmpty())
-        // 화면에 카드가 없다: 카드 뷰, 버튼, 인사 문구 모두 보이지 않는다
-        assertNull(device.findObject(By.res(instrumentation.targetContext.packageName, "briefing_card")))
-        assertNull(device.findObject(By.text("응, 출발")))
+        // 5장 재탑승: 종일 인사·오늘 일정 타일·메모 없이 대상 일정 한 줄과 출발 질문
+        // 시각 사이 공백은 화면에서 NBSP라 시각이 없는 부분으로 찾는다.
+        assertNotNull("재탑승 한 줄", waitFor("육전집 점심까지"))
+        assertNotNull(device.findObject(By.text("출발할까요?")))
+        assertNotNull(device.findObject(By.text("응, 출발")))
         assertNull(device.findObject(By.textContains("광주 직관 날이에요!")))
+        assertNull(device.findObject(By.text("오늘 일정")))
     }
 
     private fun shell(command: String): String {

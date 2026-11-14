@@ -270,4 +270,14 @@ class PhrasesTest {
         assertEquals("오늘 챙길 채비가 있어요. 출발할까요?", careCard(CareItem("KIA 직관", "가".repeat(20)), CareItem("콩물 픽업", "나".repeat(11))).sub)
         assertTrue(careCard(CareItem("KIA 직관", long)).tiles.any { it is TileView.Care })
     }
+
+    @Test fun `재탑승 출발 제안은 대상 일정 한 줄이고 오늘 일정 타일 없이 채비만 둔다`() {
+        val oneLine = card(briefing(Briefing.Level.ONE_LINE, game), Question.Depart(game), "14:00")
+        assertEquals("5시 KIA 직관까지 3시간이에요.", oneLine.voice)
+        assertEquals("출발할까요?", oneLine.sub)
+        assertTrue(oneLine.tiles.isEmpty())
+        val withCare = card(briefing(Briefing.Level.ONE_LINE, game, memo = MemoNote.Care(listOf(CareItem("KIA 직관", "유니폼·티켓")))), Question.Depart(game), "14:00")
+        assertEquals("KIA 직관 채비는 ‘유니폼·티켓’이에요. 출발할까요?", withCare.sub)
+        assertEquals(listOf<TileView>(TileView.Care(listOf("유니폼", "티켓"))), withCare.tiles)
+    }
 }

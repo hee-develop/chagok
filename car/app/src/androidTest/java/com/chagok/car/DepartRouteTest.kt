@@ -37,11 +37,21 @@ class DepartRouteTest {
         host.post(Event.GearChanged(Gear.PARK))
         speaker.spoken.clear()
         speaker.listened.clear()
-        navigator.apply { travelTime = null; routeOk = true; routes.clear() }
+        navigator.apply { travelTime = null; routeOk = true; routes.clear(); location = null }
+    }
+
+    /** 이 테스트가 앞당긴 데모 시계. resetDemo()는 시계를 되돌리지 않아서 끝날 때 되돌린다(다음 테스트는 09:20에서 시작). */
+    private var advanced: Duration = Duration.ZERO
+
+    private fun advanceClock(by: Duration) {
+        advanced += by
+        host.advanceClock(by)
     }
 
     @After
     fun tearDown() {
+        host.advanceClock(advanced.negated())
+        advanced = Duration.ZERO
         E2eApp.failFetch = false
         host.post(Event.RestrictionChanged(false))
         host.post(Event.GearChanged(Gear.PARK))
@@ -298,6 +308,42 @@ class DepartRouteTest {
         assertNotNull(waitFor("광주 직관 날이에요!"))
         assertEquals("주 버튼이 잘리지 않아야 함", full, device.findObject(By.text("응, 출발")).visibleBounds.height())
         assertEquals(full, device.findObject(By.text("잠깐만")).visibleBounds.height())
+    }
+
+    /** 도착한 뒤 잠깐 정차(10분)가 지나 다시 타면 다음 일정(17:00 KIA 직관)을 한 줄로 묻는다. */
+    private fun reboardAfterArrival() {
+        // 이벤트는 메인 스레드에서 차례로 처리되고 시계는 바로 바뀐다. P단·도착이 처리된 뒤에 시계를 넘겨야 정차 시각이 맞다.
+        instrumentation.waitForIdleSync()
+        advanceClock(Duration.ofMinutes(20))
+        navigator.travelTime = null
+        speaker.spoken.clear()
+        host.post(Event.Boarded)
+        // 시각 사이 공백은 화면에서 NBSP라 시각이 없는 부분으로 찾는다.
+        assertNotNull("다음 일정 한 줄", waitFor("KIA 직관까지"))
+        assertNotNull(device.findObject(By.text("응, 출발")))
+        assertNull(device.findObject(By.textContains("육전집 점심")))
+    }
+
+    @Test
+    fun 길안내한_일정에_내비가_도착을_알리면_다시_탈_때_다음_일정을_묻는다() {
+        departOffer()
+        host.post(Event.Heard("응"))
+        assertNotNull(waitFor("길안내를 시작할게요."))
+        host.post(Event.GearChanged(Gear.DRIVE))
+        host.post(Event.DestinationArrived)
+        host.post(Event.GearChanged(Gear.PARK))
+        reboardAfterArrival()
+    }
+
+    @Test
+    fun P단에_넣은_곳이_대상_일정_300m_안이면_도착이고_다시_탈_때_다음_일정을_묻는다() {
+        departOffer()
+        device.findObject(By.text("잠깐만")).click()
+        host.post(Event.GearChanged(Gear.DRIVE))
+        // 내비가 위치 물음에 육전집(35.1595, 126.8526)에서 약 110m 떨어진 곳이라고 답한다.
+        navigator.location = com.chagok.car.domain.LatLng(35.1605, 126.8526)
+        host.post(Event.GearChanged(Gear.PARK))
+        reboardAfterArrival()
     }
 
     private companion object {

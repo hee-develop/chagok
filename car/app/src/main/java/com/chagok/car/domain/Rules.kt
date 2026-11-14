@@ -17,6 +17,9 @@ object Rules {
     const val MEMO_READ_MAX_CHARS = 30
     const val MAX_REPROMPTS = 1
 
+    /** 도착 판정 거리(기획서 '위치 (300m 판정)'): P단에 넣은 곳이 대상 일정 장소에서 이 거리 안이면 도착이다. */
+    const val ARRIVAL_RADIUS_METERS = 300.0
+
     // 가안
     val DEPARTURE_BUFFER: Duration = Duration.ofMinutes(10)
     const val CHATTER_OVER_WORDS = 4

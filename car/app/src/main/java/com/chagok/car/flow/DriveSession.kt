@@ -1,5 +1,6 @@
 package com.chagok.car.flow
 
+import com.chagok.car.domain.AskReason
 import com.chagok.car.domain.BoardingDecider
 import com.chagok.car.domain.BoardingDecision
 import com.chagok.car.domain.BoardingKind
@@ -10,6 +11,7 @@ import com.chagok.car.domain.Gear
 import com.chagok.car.domain.Ignition
 import com.chagok.car.domain.Intent
 import com.chagok.car.domain.IntentMatcher
+import com.chagok.car.domain.LatLng
 import com.chagok.car.domain.Motion
 import com.chagok.car.domain.Place
 import com.chagok.car.domain.Question
@@ -70,6 +72,12 @@ sealed interface Event {
     /** 데모 초기화: 일정 상태와 BoardingLog를 비운다. */
     data object Reset : Event
 
+    /** 현재 위치. 내비가 [Effect.RequestLocation]에 답하거나 디버그로 넣는다. P단에서 도착을 판단할 때 쓴다. */
+    data class LocationChanged(val position: LatLng) : Event
+
+    /** 내비가 목적지 도착을 알렸다. 차곡이 길안내를 시작한 일정이 있으면 그 일정을 도착으로 본다. */
+    data object DestinationArrived : Event
+
     /** 일정 받기([generation]세대)가 시작됐다. 끝날 때까지 탑승 판단은 보류한다. */
     data class ScheduleLoading(val generation: Int) : Event
 
@@ -116,6 +124,9 @@ sealed interface Effect {
 
     /** [place]로 길안내를 요청한다. 실행한 쪽은 요청을 보냈는지를 [Event.RouteRequestResult]로 알린다. */
     data class StartRoute(val place: Place) : Effect
+
+    /** 현재 위치를 한 번 묻는다(P단 도착 판단). 실행한 쪽은 답을 [Event.LocationChanged]로 넣는다. 답이 없으면 넣지 않는다. */
+    data object RequestLocation : Effect
     data class Save(val snapshot: Snapshot) : Effect
     data class ScheduleCardTimeout(val timerId: Int, val delay: Duration) : Effect
 
@@ -179,6 +190,15 @@ class DriveSession(
     private var pending: PendingBoarding? = null
     private var card: CardState? = null
     private var acceptedRoute = false
+
+    /** 차곡이 길안내를 시작한 일정. 내비 도착 알림이 오면 이 일정을 도착으로 본다. 자주 가는 곳으로 간 길안내는 null */
+    private var routeScheduleId: String? = null
+
+    /** 마지막으로 안 위치. 주행(D·R)을 시작하면 지난 위치라 버린다. */
+    private var lastPosition: LatLng? = null
+
+    /** P단에 넣으며 위치를 물었고 아직 답을 받지 않았다. 답이 오면 도착을 판단한다. */
+    private var awaitingParkLocation = false
     private var seq = 0
 
     /** 결과 한 줄을 보이고 있으면 그 타이머 ID, 아니면 null */
@@ -265,6 +285,8 @@ class DriveSession(
             is Event.CandidatePressed -> onCandidate(event.index, out)
             is Event.CardTimedOut -> if (card?.timerId == event.timerId) closeCard(out)
             Event.Reset -> onReset(out)
+            is Event.LocationChanged -> onLocation(event.position)
+            Event.DestinationArrived -> onDestinationArrived()
             is Event.ScheduleLoading, is Event.ScheduleLoaded -> if (loadedNow) onSchedulesLoaded(out)
         }
         flush(out)
@@ -348,7 +370,6 @@ class DriveSession(
         if (card != null && !notice) return
         val kind = log.classify(now(), zone)
         if (kind == BoardingKind.QUICK_STOP) return
-        if (kind == BoardingKind.AGAIN) return
         if (origin != ScheduleOrigin.FRESH && allowRefresh) {
             loadingSchedules = true
             loadGeneration = AWAITING_GENERATION
@@ -428,10 +449,19 @@ class DriveSession(
     private fun onGear(newGear: Gear, out: MutableList<Effect>) {
         val previous = gear
         gear = newGear
-        if (newGear == Gear.DRIVE || newGear == Gear.REVERSE) drivenSincePark = true
+        val driving = newGear == Gear.DRIVE || newGear == Gear.REVERSE
+        if (driving && previous != Gear.DRIVE && previous != Gear.REVERSE) {
+            // 움직이기 시작하면 전에 안 위치는 지난 위치다.
+            lastPosition = null
+            awaitingParkLocation = false
+        }
+        if (driving) drivenSincePark = true
         if (newGear == Gear.PARK && previous != Gear.PARK) {
             // 달린 적이 있을 때만 '방금 P단에 넣음'이다. 앱을 켠 순간 이미 P단인 경우는 기록하지 않는다.
-            if (drivenSincePark) log = log.parked(now())
+            if (drivenSincePark) {
+                log = log.parked(now())
+                checkArrivalAtPark(out)
+            }
             drivenSincePark = false
         }
         enforceDriving(out)
@@ -542,10 +572,18 @@ class DriveSession(
 
     /** 수락. 목적지 묻기는 [pick]번 후보로(주 버튼·"응"은 0번), 출발 제안·늦게 탐은 대상 일정 장소로 길안내한다. */
     private fun accept(state: CardState, out: MutableList<Effect>, pick: Int = 0) {
-        val place = when (val question = state.question) {
+        val question = state.question
+        val place = when (question) {
             is Question.Depart -> question.target.place
             is Question.DepartLate -> question.target.place
             is Question.AskDestination -> question.candidates.getOrNull(pick)
+            null -> null
+        }
+        // 일정으로 가는 길안내면 그 일정을 기억해 내비 도착 알림으로 도착을 판단한다(여유 많음의 1번 후보는 대상 일정 장소).
+        val scheduleId = when (question) {
+            is Question.Depart -> question.target.id
+            is Question.DepartLate -> question.target.id
+            is Question.AskDestination -> question.suggested?.id?.takeIf { question.reason == AskReason.PLENTY_OF_TIME && pick == 0 }
             null -> null
         }
         card = null
@@ -553,7 +591,51 @@ class DriveSession(
         out += Effect.CollapseCard()
         if (place == null) return
         acceptedRoute = true
+        routeScheduleId = scheduleId
         out += Effect.StartRoute(place)
+    }
+
+    /**
+     * P단에 넣을 때 도착 판단(3장): 대상 일정 장소에서 [Rules.ARRIVAL_RADIUS_METERS] 안이면 도착이다.
+     * 주행 중 받은 위치가 있으면 바로 보고, 없거나 멀면 위치를 한 번 물어 답([onLocation])으로 다시 본다.
+     */
+    private fun checkArrivalAtPark(out: MutableList<Effect>) {
+        val target = plan().target() ?: return
+        if (target.place == null) return
+        if (arriveIfNear(target, lastPosition)) return
+        awaitingParkLocation = true
+        out += Effect.RequestLocation
+    }
+
+    private fun onLocation(position: LatLng) {
+        lastPosition = position
+        if (!awaitingParkLocation) return
+        awaitingParkLocation = false
+        if (gear != Gear.PARK) return
+        plan().target()?.let { arriveIfNear(it, position) }
+    }
+
+    private fun arriveIfNear(target: Schedule, position: LatLng?): Boolean {
+        val place = target.place ?: return false
+        if (position == null || position.distanceTo(place.position) > Rules.ARRIVAL_RADIUS_METERS) return false
+        arrive(target.id)
+        return true
+    }
+
+    /** 내비 도착 알림: 차곡이 길안내를 시작한 일정만 도착으로 본다(다른 곳으로 간 길안내의 도착은 무시). */
+    private fun onDestinationArrived() {
+        val id = routeScheduleId ?: return
+        arrive(id)
+    }
+
+    /**
+     * 일정을 도착으로 바꾼다. 도착 순간에는 말하지 않는다(하차 체크는 2단계).
+     * 다음에 다시 타면 다음 일정을 한 줄로 묻는다(재탑승, 잠깐 정차 10분 안은 침묵).
+     */
+    private fun arrive(id: String) {
+        statuses = plan().markArrived(id).statuses
+        if (routeScheduleId == id) routeScheduleId = null
+        awaitingParkLocation = false
     }
 
     /** 길안내 요청 결과를 알린다. 정차 중일 때만 결과 한 줄을 보이고 말하며, 한 줄은 [Rules.RESULT_VISIBLE] 뒤 지운다. */
@@ -582,6 +664,9 @@ class DriveSession(
         statusDate = today()
         pending = null
         acceptedRoute = false
+        routeScheduleId = null
+        lastPosition = null
+        awaitingParkLocation = false
         heldBoarding = false
         noticeSpokenOn = null
         drivenSincePark = false
