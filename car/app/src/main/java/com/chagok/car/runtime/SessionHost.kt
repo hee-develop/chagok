@@ -41,6 +41,8 @@ data class UiState(
     val driving: Boolean = false,
     /** 주행 중에 보이는 다음 일정 칩의 본문("13:00 육전집 점심"). 비어 있으면 숨긴다. 표시 전용이라 누를 수 없다. */
     val nextChip: String = "",
+    /** 지금 위치를 쓸 일이 있는가(집 좌표가 있거나 오늘 남은 일정 중 장소가 있음). 없으면 위치 권한 설명 카드도 띄우지 않는다. */
+    val locationNeeded: Boolean = false,
 )
 
 /** 세션이 쓰는 SDK 어댑터 묶음. */
@@ -94,9 +96,12 @@ class SessionHost(
         copies = store,
         zone = { clock.zone },
         logger = AndroidLogger,
+        // 휴대폰과 연결 전에는 일정·집을 서버에서 받지 않는다(연결이 풀린 뒤 집 좌표가 되살아나지 않게).
+        allowed = { store.paired },
     )
     private val session = DriveSession(clock, source, store.load(), paired = store.paired, exitCardTimeout = DebugHooks::exitCardDuration)
-    private val pairing = PairingController(pairingClient, store, ::post)
+    // 서버가 연결 해제를 확인하면(앱이 앞으로 올 때 [PairingController.verify]) 받아 둔 일정·집 좌표와 저장된 사본을 지운다.
+    private val pairing = PairingController(pairingClient, store, ::post, onReleased = { source.clear() })
     private val refresher = ScheduleRefresher(source, ::post, ::dispatch)
 
     /** 이번 이벤트를 처리하는 중 세션이 일정 다시 받기를 요청했는가. 처리가 끝난 뒤 한 번만 받는다. */
@@ -107,6 +112,7 @@ class SessionHost(
     private val voice = parts.voice
     private val carSignals = parts.signals
     private val location = parts.location
+    private val sources = SourceStarter(carSignals, location)
 
     var ui = UiState()
         private set
@@ -139,9 +145,8 @@ class SessionHost(
     fun start() {
         navi.start()
         voice.start()
-        carSignals.start()
         // 기어·시동은 런타임 권한과 무관하다. 위치 권한을 묻는 중이거나 거부해도 늘 읽는다(위치만 [startPermissionGatedSources]가 권한 결정 뒤에 켠다).
-        if (Source.VEHICLE_SIGNALS in PermissionGate.ALWAYS_ON) carSignals.startPermissionGated()
+        sources.startAtLaunch()
         registerShutdownReceiver()
         registerClockReceiver()
         refreshSchedules()
@@ -173,7 +178,7 @@ class SessionHost(
      * 어댑터가 권한을 다시 확인해 없으면(거부·대략 위치만 허용) 아무것도 하지 않아 위치 판정만 빠진다.
      */
     fun startPermissionGatedSources() {
-        if (Source.LOCATION in PermissionGate.AFTER_PERMISSION) location.start()
+        sources.startAfterPermission()
     }
 
     fun onActivityResumed() {
@@ -181,6 +186,8 @@ class SessionHost(
             resumed = true
             location.setForeground(true)
             updatePairing()
+            // 연결이 서버에서 풀렸는지 확인한다(운전자 교체·폰에서 해제). 서버에 닿지 못하면 해제로 보지 않는다.
+            pairing.verify()
             // Suspend 중이었다면 어댑터를 다시 켠다. 포커스·재생은 되찾지 않는다.
             post(Event.Resumed)
             if (ignitionSupported == false) post(Event.AppEntered)
@@ -226,9 +233,11 @@ class SessionHost(
 
     /** 디버그·데모용: 휴대폰 연결 상태를 바꾼다. 같은 스레드에서 이어 넣는 이벤트보다 먼저 세션에 들어간다. */
     fun setPaired(paired: Boolean) {
-        // 연결이 풀리면 받아 둔 일정·집 좌표와 저장된 사본을 지운다(세션 이벤트보다 먼저 지워 다음 이벤트부터 집이 없다).
-        if (!paired && store.paired) source.clear()
+        val wasPaired = store.paired
         pairing.setPaired(paired)
+        // 연결이 풀리면 받아 둔 일정·집 좌표와 저장된 사본을 지운다. 연결 상태를 먼저 바꿔 그 순간부터 일정 받기가 막히게 하고(받는 중이던 응답도 버려진다),
+        // 세션의 Unpaired 이벤트는 메인 큐에서 이 뒤에 처리되므로 다음 이벤트부터 집이 없다.
+        if (!paired && wasPaired) source.clear()
     }
 
     fun advanceClock(by: Duration) {
@@ -248,6 +257,11 @@ class SessionHost(
             refreshSchedules()
         }
         if (ui.driving != session.isDriving) publish(ui.copy(driving = session.isDriving))
+        // 위치를 쓸 일이 생기거나 없어지면 위치 갱신을 켜고 끄고, 권한 설명 카드를 띄울지도 화면이 다시 판단한다.
+        if (ui.locationNeeded != session.needsLocation) {
+            location.setNeeded(session.needsLocation)
+            publish(ui.copy(locationNeeded = session.needsLocation))
+        }
         updatePairing()
     }
 
@@ -293,6 +307,8 @@ class SessionHost(
                 main.removeCallbacksAndMessages(CHIP_TOKEN)
                 main.postAtTime({ post(Event.ChipRecheck(effect.timerId)) }, CHIP_TOKEN, SystemClock.uptimeMillis() + effect.delay.toMillis())
             }
+            is Effect.ScheduleLocationTimeout ->
+                main.postDelayed({ post(Event.LocationTimedOut(effect.timerId)) }, effect.delay.toMillis())
             is Effect.ScheduleCardTimeout ->
                 main.postDelayed({ post(Event.CardTimedOut(effect.timerId)) }, effect.delay.toMillis())
         }

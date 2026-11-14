@@ -59,6 +59,8 @@ class DriveSessionLocationTest {
     private fun drive() = session.handle(Event.GearChanged(Gear.DRIVE))
     private fun park() = session.handle(Event.GearChanged(Gear.PARK))
     private fun loc(position: LatLng, ageMillis: Long = 0) = session.handle(Event.LocationChanged(position, ageMillis))
+    private fun naviAnswer(position: LatLng) = session.handle(Event.LocationChanged(position, naviAnswer = true))
+    private fun List<Effect>.locationTimer() = filterIsInstance<Effect.ScheduleLocationTimeout>().singleOrNull()
     private inline fun <reified T : Effect> List<Effect>.has() = any { it is T }
     private fun List<Effect>.exitCard() =
         filterIsInstance<Effect.ShowCard>().map { it.card }.singleOrNull { it.status == Phrases.STATUS_BEFORE_EXIT }
@@ -174,18 +176,41 @@ class DriveSessionLocationTest {
     // ---- 측위 나이·이번 주행 뒤 측위 ----
 
     @Test
-    fun 측위한_지_정확히_5분이면_쓰고_1밀리초_넘으면_쓰지_않는다() {
+    fun 측위한_지_정확히_5분인_위치는_내비_답이_없을_때만_쓰고_1밀리초_넘으면_아예_쓰지_않는다() {
         val maxAge = Rules.LOCATION_MAX_AGE.toMillis()
         // 달리기 시작한 10분 뒤에 받은 위치라 5분 전 측위도 이번 주행 안이다.
         val ten = Duration.ofMinutes(10)
         begin(schedule("a", "고객 미팅", 30))
-        assertNotNull(driveAndPark(NEAR_GANGNAM, ageMillis = maxAge, afterDriveStart = ten).exitCard())
+        val parked = driveAndPark(NEAR_GANGNAM, ageMillis = maxAge, afterDriveStart = ten)
+        // 30초보다 오래된 위치라 바로 쓰지 않고 내비에 묻는다. 답을 기다리는 시간(타이머)을 두고, 답이 없을 때만 이 위치로 판정한다.
+        assertTrue(parked.noExitCard())
+        assertTrue(parked.has<Effect.RequestLocation>())
+        val timer = parked.locationTimer()!!
+        assertEquals(Rules.LOCATION_ANSWER_TIMEOUT, timer.delay)
+        assertNotNull(session.handle(Event.LocationTimedOut(timer.timerId)).exitCard())
 
         begin(schedule("a", "고객 미팅", 30))
         val stale = driveAndPark(NEAR_GANGNAM, ageMillis = maxAge + 1, afterDriveStart = ten)
         assertTrue(stale.noExitCard())
         assertNull(statusOf(stale, "a"))
         assertTrue(stale.has<Effect.RequestLocation>())
+        // 5분을 넘긴 위치는 폴백으로도 쓸 수 없어 타이머도 없다.
+        assertNull(stale.locationTimer())
+    }
+
+    @Test
+    fun 측위한_지_30초_안의_위치는_내비에_묻지_않고_바로_쓰고_30초를_넘으면_내비에_먼저_묻는다() {
+        val trust = Rules.LOCATION_TRUST_AGE.toMillis()
+        val ten = Duration.ofMinutes(10)
+        begin(schedule("a", "고객 미팅", 30))
+        val direct = driveAndPark(NEAR_GANGNAM, ageMillis = trust, afterDriveStart = ten)
+        assertNotNull(direct.exitCard())
+        assertFalse(direct.has<Effect.RequestLocation>())
+
+        begin(schedule("a", "고객 미팅", 30))
+        val older = driveAndPark(NEAR_GANGNAM, ageMillis = trust + 1, afterDriveStart = ten)
+        assertTrue(older.noExitCard())
+        assertTrue(older.has<Effect.RequestLocation>())
     }
 
     @Test
@@ -217,7 +242,19 @@ class DriveSessionLocationTest {
         begin(schedule("a", "고객 미팅", 30))
         drive()
         clock.now += Duration.ofMinutes(3)
-        loc(NEAR_GANGNAM, ageMillis = Duration.ofMinutes(2).toMillis())
+        // 주행 시작 2분 뒤(= 1분 전)에 측위한 값. 30초가 넘었으니 내비에 먼저 묻고, 답이 없을 때 이 값으로 판정한다.
+        loc(NEAR_GANGNAM, ageMillis = Duration.ofMinutes(1).toMillis())
+        val parked = park()
+        assertTrue(parked.has<Effect.RequestLocation>())
+        assertNotNull(session.handle(Event.LocationTimedOut(parked.locationTimer()!!.timerId)).exitCard())
+    }
+
+    @Test
+    fun 방금_측위한_위치는_이번_주행_안이면_바로_쓴다() {
+        begin(schedule("a", "고객 미팅", 30))
+        drive()
+        clock.now += Duration.ofMinutes(3)
+        loc(NEAR_GANGNAM, ageMillis = 5_000)
         assertNotNull(park().exitCard())
     }
 
@@ -565,9 +602,9 @@ class DriveSessionLocationTest {
     }
 
     @Test
-    fun 내비_도착_대기가_있는_P단은_위치로_판정하지_않고_내비_쪽_카드_하나만_뜬다() {
+    fun 내비_도착_대기가_있는_P단에서도_위치로_다른_일정의_도착을_기록하되_카드는_먼저_기다린_것_하나다() {
         // 길안내 대상은 먼저 시작하는 고객 미팅. 콩물 픽업(장소 없음)은 집에서 알릴 물건이다.
-        // 집 앞 약속(c)은 이 P단의 위치(집 근처)로 도착이 될 수 있는 창 안의 일정이지만, 내비 도착 대기가 있어 이 P단은 위치로 판정하지 않는다.
+        // 집 앞 약속(c)은 이 P단의 위치(집 근처)로 도착이 될 수 있는 창 안의 일정이다. 정책서 3장: 도착은 내비 도착 또는 300m 안 P단 중 하나면 된다.
         begin(
             schedule("a", "고객 미팅", -45, 45, memo = "계약서 2부"),
             schedule("k", "콩물 픽업", -30, 30, place = null),
@@ -579,12 +616,48 @@ class DriveSessionLocationTest {
         loc(NEAR_HOME)
         session.handle(Event.DestinationArrived)
         val parked = park()
+        // 카드는 먼저 기다린 내비 도착(고객 미팅) 하나뿐이고 집 하차 카드는 없다.
         assertEquals("고객 미팅 메모에 ‘계약서 2부’가 있어요.", parked.exitCard()!!.voice)
         assertEquals(1, parked.filterIsInstance<Effect.ShowCard>().size)
-        assertFalse(parked.has<Effect.RequestLocation>())
         assertFalse(parked.savedSnapshot()!!.homeCardShown)
         assertEquals(ScheduleStatus.ARRIVED, statusOf(parked, "a"))
-        assertNull(statusOf(parked, "c"))
+        // 위치로는 집 앞 약속의 도착이 기록된다(카드는 없다).
+        assertEquals(ScheduleStatus.ARRIVED, statusOf(parked, "c"))
+    }
+
+    @Test
+    fun 제한으로_못_띄운_내비_도착_대기가_있으면_위치로_정한_뒤_도착도_기록만_하고_먼저_기다린_카드가_우선이다() {
+        begin(
+            schedule("a", "고객 미팅", -45, 45, memo = "계약서 2부"),
+            schedule("c", "집 앞 약속", -20, 40, place = Place("집 앞", NEAR_HOME)),
+        )
+        boardAndAccept()
+        drive()
+        loc(NEAR_HOME)
+        session.handle(Event.DestinationArrived)
+        session.handle(Event.RestrictionChanged(true))
+        val parked = park()
+        assertTrue(parked.noExitCard())
+        assertEquals(ScheduleStatus.ARRIVED, statusOf(parked, "c"))
+        assertEquals("a", parked.savedSnapshot()!!.exitTargetId)
+        assertEquals("고객 미팅 메모에 ‘계약서 2부’가 있어요.", session.handle(Event.RestrictionChanged(false)).exitCard()!!.voice)
+    }
+
+    @Test
+    fun 내비_도착_대기가_있는_P단은_집_반경_안이어도_집_하차를_띄우지_않는다() {
+        begin(schedule("a", "고객 미팅", -45, 45, place = Place("회사", AWAY), memo = "계약서 2부"), schedule("k", "콩물 픽업", -30, 30, place = null))
+        boardAndAccept()
+        drive()
+        loc(AWAY)
+        loc(NEAR_HOME)
+        session.handle(Event.DestinationArrived)
+        val parked = park()
+        assertEquals(1, parked.filterIsInstance<Effect.ShowCard>().size)
+        assertFalse(parked.savedSnapshot()!!.homeCardShown)
+        // 집 P단이었으니 집을 떠났다는 기록은 지워져, 곧바로 다시 집 P단을 넣어도 집 하차는 없다.
+        drive()
+        loc(NEAR_HOME)
+        assertTrue(park().noExitCard())
     }
 
     @Test
@@ -759,6 +832,211 @@ class DriveSessionLocationTest {
         loc(AWAY)
         loc(NEAR_HOME)
         assertEquals("콩물 챙기세요!", park().exitCard()!!.voice)
+    }
+
+    // ---- 낡은 위치와 내비 답 ----
+
+    @Test
+    fun 오래된_집_근처_위치가_있어도_일정_장소가_멀면_내비_답으로_일정_도착이_된다() {
+        // 4분 전 집 근처 위치(집 하차 조건을 갖춘 위치)가 어댑터에 있고, 일정 장소는 멀다(집에서 수십 km).
+        // 어댑터 위치로 바로 판정하면 집 하차가 되지만, 30초가 넘은 위치라 내비에 먼저 묻고 그 답(일정 장소)이 우선이다.
+        begin(schedule("a", "고객 미팅", 30, memo = "계약서 2부"), schedule("k", "콩물 픽업", -30, 30, place = null))
+        drive()
+        clock.now += Duration.ofMinutes(10)
+        loc(AWAY, ageMillis = Duration.ofMinutes(4).toMillis() + 30_000)
+        loc(NEAR_HOME, ageMillis = Duration.ofMinutes(4).toMillis())
+        val parked = park()
+        assertTrue(parked.has<Effect.RequestLocation>())
+        assertTrue(parked.noExitCard())
+        val answered = naviAnswer(NEAR_GANGNAM)
+        assertEquals("고객 미팅 메모에 ‘계약서 2부’가 있어요.", answered.exitCard()!!.voice)
+        assertEquals(ScheduleStatus.ARRIVED, statusOf(answered, "a"))
+        assertFalse(answered.savedSnapshot()!!.homeCardShown)
+        // 기다리던 타이머가 나중에 와도 이미 판정했으니 아무 일도 없다.
+        assertTrue(session.handle(Event.LocationTimedOut(parked.locationTimer()!!.timerId)).none { it is Effect.ShowCard })
+    }
+
+    @Test
+    fun 내비가_답하지_않으면_오래된_어댑터_위치로_일정_장소와_집_모두_같은_규칙으로_판정한다() {
+        // 일정 장소
+        begin(schedule("a", "고객 미팅", 30, memo = "계약서 2부"))
+        drive()
+        clock.now += Duration.ofMinutes(10)
+        loc(NEAR_GANGNAM, ageMillis = Duration.ofMinutes(4).toMillis())
+        val toArrive = park()
+        assertTrue(toArrive.noExitCard())
+        assertNotNull(session.handle(Event.LocationTimedOut(toArrive.locationTimer()!!.timerId)).exitCard())
+
+        // 집
+        begin()
+        drive()
+        clock.now += Duration.ofMinutes(10)
+        loc(AWAY, ageMillis = Duration.ofMinutes(4).toMillis() + 10_000)
+        loc(NEAR_HOME, ageMillis = Duration.ofMinutes(4).toMillis())
+        val atHome = park()
+        assertTrue(atHome.has<Effect.RequestLocation>())
+        assertTrue(atHome.noExitCard())
+        assertEquals(Phrases.HOME_GREETING, session.handle(Event.LocationTimedOut(atHome.locationTimer()!!.timerId)).exitCard()!!.voice)
+    }
+
+    @Test
+    fun 위치_답_기다림_타이머는_낡았거나_P단이_아니면_무시한다() {
+        begin(schedule("a", "고객 미팅", 30))
+        drive()
+        clock.now += Duration.ofMinutes(10)
+        loc(NEAR_GANGNAM, ageMillis = Duration.ofMinutes(4).toMillis())
+        val parked = park()
+        val timer = parked.locationTimer()!!
+        // 모르는 타이머 ID는 무시한다.
+        assertTrue(session.handle(Event.LocationTimedOut(timer.timerId + 100)).noExitCard())
+        // 다시 달리면 기다림을 그만두므로 같은 타이머가 와도 판정하지 않는다.
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        val late = session.handle(Event.LocationTimedOut(timer.timerId))
+        assertTrue(late.noExitCard())
+        assertNull(statusOf(late, "a"))
+    }
+
+    @Test
+    fun 기다리지_않을_때_온_내비_답은_위치로_기록하지_않는다() {
+        begin(schedule("a", "고객 미팅", 30))
+        // P단에서 묻고 기다리다가 다시 달린다. 늦게 온 내비 답은 주행 중 위치로 남지 않아 다음 P단에서 쓰이지 않는다.
+        driveAndPark(null)
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        assertTrue(naviAnswer(NEAR_GANGNAM).noExitCard())
+        val next = park()
+        assertTrue(next.noExitCard())
+        assertNull(statusOf(next, "a"))
+        assertTrue(next.has<Effect.RequestLocation>())
+    }
+
+    @Test
+    fun 묻지_않은_P단에서_온_내비_답은_위치로_기록하지_않고_어댑터_위치는_기록한다() {
+        begin(schedule("a", "고객 미팅", 30))
+        drive()
+        // 이번 주행에서 묻지 않았는데 내비 답이 왔다. 기록하지 않으니 P단에서도 쓰지 않는다.
+        naviAnswer(NEAR_GANGNAM)
+        val first = park()
+        assertTrue(first.noExitCard())
+        assertTrue(first.has<Effect.RequestLocation>())
+
+        // 같은 위치라도 어댑터가 읽은 값이면 주행 중에 기록되어 P단에서 바로 쓴다.
+        begin(schedule("a", "고객 미팅", 30))
+        drive()
+        loc(NEAR_GANGNAM)
+        assertNotNull(park().exitCard())
+    }
+
+    @Test
+    fun P단_직전에_들어온_시스템의_마지막_위치로_바로_판정하고_P단_뒤에_들어온_위치는_묻지_않았으면_쓰지_않는다() {
+        // SessionHost는 P단 이벤트 직전에 refreshNow의 위치를 먼저 넣는다.
+        begin(schedule("a", "고객 미팅", 30))
+        drive()
+        clock.now += Duration.ofMinutes(2)
+        loc(NEAR_GANGNAM, ageMillis = 3_000)
+        assertNotNull(park().exitCard())
+
+        // 반대로 P단 뒤에 도착한 어댑터 위치는 이미 판정이 끝났거나 묻지 않은 P단이면 판정에 쓰지 않는다.
+        begin(schedule("a", "고객 미팅", 30))
+        drive()
+        clock.now += Duration.ofMinutes(2)
+        val parked = park()
+        // 어댑터 위치가 없으니 내비에 묻는다. 기다리는 동안 들어온 믿을 만한 위치(방금 측위)는 같은 규칙으로 판정한다.
+        assertTrue(parked.has<Effect.RequestLocation>())
+        assertNotNull(loc(NEAR_GANGNAM, ageMillis = 3_000).exitCard())
+    }
+
+    @Test
+    fun 집_300m_안에_창_안_일정_장소가_있으면_일정_하차를_띄우고_집_하차_기록도_지운다() {
+        begin(schedule("a", "집 앞 약속", 30, place = Place("집 앞", NEAR_HOME), memo = "열쇠"))
+        drive()
+        loc(AWAY)
+        loc(NEAR_HOME)
+        assertEquals("열쇠 챙기세요!", park().exitCard()!!.voice)
+        // 이 P단에서 집을 떠났다는 기록을 소진했으니, 일정이 끝난 뒤 곧바로 다시 집 P단을 넣어도 집 하차가 한 번 더 뜨지 않는다.
+        drive()
+        loc(NEAR_HOME)
+        assertTrue(park().noExitCard())
+    }
+
+    @Test
+    fun 위치로_정한_하차_대기는_저장되고_다시_뜬_세션에서_달리면_지운다() {
+        begin(schedule("a", "고객 미팅", 30, memo = "계약서 2부"))
+        drive()
+        loc(NEAR_GANGNAM)
+        session.handle(Event.RestrictionChanged(true))
+        val saved = park().savedSnapshot()!!
+        assertEquals("a", saved.exitTargetId)
+        assertTrue(saved.exitByLocation)
+
+        // 프로세스가 다시 떠도(저장분 복원) 위치로 정한 대기는 그대로 위치로 정한 것이라, 다시 달리면 지워진다.
+        session = DriveSession(clock, { ScheduleSnapshot(schedules, favorites = favorites) }, restored = saved)
+        session.handle(Event.GearChanged(Gear.PARK))
+        val driven = session.handle(Event.GearChanged(Gear.DRIVE))
+        assertNull(driven.savedSnapshot()?.exitTargetId)
+        session.handle(Event.RestrictionChanged(false))
+        assertTrue(park().noExitCard())
+    }
+
+    @Test
+    fun 내비로_정한_하차_대기는_저장분을_복원해도_다시_달려도_남는다() {
+        begin(schedule("a", "고객 미팅", 30, memo = "계약서 2부"))
+        boardAndAccept()
+        drive()
+        val saved = session.handle(Event.DestinationArrived).savedSnapshot()!!
+        assertEquals("a", saved.exitTargetId)
+        assertFalse(saved.exitByLocation)
+        session = DriveSession(clock, { ScheduleSnapshot(schedules, favorites = favorites) }, restored = saved)
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        assertNotNull(park().exitCard())
+    }
+
+    @Test
+    fun Suspend에_들어가면_위치_답_기다림을_그만둔다() {
+        begin(schedule("a", "고객 미팅", 30))
+        driveAndPark(null)
+        session.handle(Event.IgnitionChanged(com.chagok.car.domain.Ignition.OFF))
+        session.handle(Event.IgnitionChanged(com.chagok.car.domain.Ignition.ON))
+        // 어댑터가 멈췄다 돌아온 뒤 늦게 온 내비 답은 기다리던 것이 아니라 쓰지 않는다.
+        val late = naviAnswer(NEAR_GANGNAM)
+        assertTrue(late.noExitCard())
+        assertNull(statusOf(late, "a"))
+    }
+
+    // ---- 위치를 쓸 일이 있는가 ----
+
+    @Test
+    fun 집_좌표가_있으면_위치를_쓸_일이_있다() {
+        begin()
+        assertTrue(session.needsLocation)
+        favorites = emptyList()
+        session.handle(Event.ClockChanged)
+        assertFalse(session.needsLocation)
+    }
+
+    @Test
+    fun 집이_없어도_오늘_끝나지_않은_장소_있는_일정이_있으면_쓸_일이_있고_모두_끝나거나_장소가_없으면_없다() {
+        favorites = emptyList()
+        begin(schedule("a", "고객 미팅", 30))
+        assertTrue(session.needsLocation)
+        // 일정이 끝나면(건너뜀) 더 쓸 일이 없다.
+        clock.now = at(200)
+        session.handle(Event.ClockChanged)
+        assertFalse(session.needsLocation)
+
+        begin(schedule("n", "장소 없음", 30, place = null), schedule("d", "종일", 0, 1440).copy(allDay = true))
+        assertFalse(session.needsLocation)
+    }
+
+    @Test
+    fun 도착으로_기록한_일정은_집이_없으면_더_쓸_일이_없고_연결_전에는_쓸_일이_없다() {
+        favorites = emptyList()
+        begin(schedule("a", "고객 미팅", 30))
+        assertNotNull(driveAndPark(NEAR_GANGNAM).exitCard())
+        assertFalse(session.needsLocation)
+
+        favorites = listOf(Favorite(FavoriteKind.HOME, Place("집", HOME)))
+        begin(paired = false)
+        assertFalse(session.needsLocation)
     }
 
     private companion object {

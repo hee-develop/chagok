@@ -114,4 +114,25 @@ class SnapshotCodecTest {
             assertEquals(false, decoded.homeCardShown)
         }
     }
+
+    @Test fun `위치로 정한 하차 대기인지도 저장하고 복원하며 이전 저장분은 false다`() {
+        val snapshot = Snapshot(
+            BoardingLog(), mapOf("a" to ScheduleStatus.ARRIVED), LocalDate.of(2026, 12, 3),
+            exitTargetId = "a", exitArrivedAt = Instant.parse("2026-12-03T01:00:00Z"), exitByLocation = true,
+        )
+        val decoded = SnapshotCodec.decode(SnapshotCodec.encode(snapshot))
+        assertEquals(snapshot, decoded)
+        assertEquals(true, decoded?.exitByLocation)
+
+        val old = """{"date":"2026-12-03","statuses":{"a":"ARRIVED"},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false},"noticeDate":null,"exitTargetId":"a","exitArrivedAt":5}"""
+        val oldDecoded = SnapshotCodec.decode(old)!!
+        assertEquals("a", oldDecoded.exitTargetId)
+        assertEquals(false, oldDecoded.exitByLocation)
+
+        // 칸이 손상돼도 나머지는 살린다.
+        val broken = old.dropLast(1) + ""","exitByLocation":"yes"}"""
+        val brokenDecoded = SnapshotCodec.decode(broken)!!
+        assertEquals("a", brokenDecoded.exitTargetId)
+        assertEquals(false, brokenDecoded.exitByLocation)
+    }
 }

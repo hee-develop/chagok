@@ -7,6 +7,8 @@
 #   DEMO_INSTALL=1  시작 전에 debug 앱을 설치한다.
 #   DEMO_AUTO=1     Enter를 기다리지 않고 바로 진행한다.
 #   PORT            서버 포트(기본 8787). 이미 떠 있으면 그대로 쓰고, 없으면 tsx src/index.ts로 띄웠다가 끝날 때 내린다.
+#   DEMO_HOME=1     이미 떠 있는 서버에도 집 하차 단계를 위해 서버 자주 가는 곳의 집(mock-home-apt)을 등록했다가 끝나면 해제한다.
+#                   이 스크립트가 서버를 띄운 경우에는 늘 한다. 기존 서버에 DEMO_HOME 없이 돌리면 집 하차 단계는 건너뛴다(폰이 쓰는 서버의 집을 바꾸지 않으려고).
 # 시작할 때 앱을 force-stop한 뒤 MainActivity를 다시 띄운다(DemoClock이 시작할 때 시간대를 잡고, 가짜 내비는 MainActivity가 앞에 있어야 움직인다).
 # 끝날 때(Ctrl-C 포함) 주입값(trip·route·listen·navi·drive·loc·exitcard)을 실제 값으로 되돌린다. 휴대폰 연결 상태는 되돌리지 않는다:
 # 시작할 때 paired=true로 '연결됨'으로 두므로(연결 카드가 단계 판정을 가리지 않게), PT 시연 전에는 `pnpm demo:pt reset`으로 다시 연결 전으로 돌린다.
@@ -71,7 +73,14 @@ reset_injection() {
   sleep 1
 }
 
+# 서버 자주 가는 곳의 집을 정한다(placeId가 null이면 지운다). 이 스크립트가 등록했을 때만 끝나면 지운다.
+HOME_SET=0
+set_home() {
+  curl -fs -X PUT "http://127.0.0.1:$PORT/places/favorites/home" -H 'content-type: application/json' -d "{\"placeId\":$1}" >/dev/null 2>&1
+}
+
 cleanup() {
+  [ "$HOME_SET" = "1" ] && set_home null
   reset_injection
   [ -n "$LOGCAT_PID" ] && kill "$LOGCAT_PID" 2>/dev/null
   restore_timezone
@@ -106,6 +115,13 @@ else
     sleep 1
   done
   curl -fs "http://127.0.0.1:$PORT/health" >/dev/null || { echo "서버가 뜨지 않았습니다. $RUN_DIR/server.log 를 확인하세요." >&2; exit 1; }
+fi
+
+# 집 하차 단계는 서버에 집을 등록해야 한다. 서버를 직접 띄웠거나 DEMO_HOME=1일 때만 한다.
+if [ -n "$SERVER_PGID" ] || [ "${DEMO_HOME:-}" = "1" ]; then
+  if set_home '"mock-home-apt"'; then HOME_SET=1; else echo "경고: 서버에 집을 등록하지 못해 집 하차 단계를 건너뜁니다." >&2; fi
+else
+  echo "== 이미 떠 있는 서버라 집 하차 단계는 건너뜁니다(DEMO_HOME=1이면 집을 등록했다가 해제합니다)"
 fi
 
 # 시작 이후 줄만 보려고 현재 위치(줄 수)를 단계마다 적어 둔다. 오래된 줄이 한 줄 섞여도 시작 위치 뒤만 읽어 영향이 없다.
@@ -295,6 +311,36 @@ step "위치로 도착: 내비 도착 알림 없이 육전집 300m 안에서 P�
   "카드 칩=도착 · 내리기 전.*카드 접음" 15 \
   "저장: [^ ,]+ 예정→도착;;카드 칩=도착 · 내리기 전 \\| voice=유니폼·응원봉·티켓 챙기세요!;;버튼=챙겼어요;;말함: 유니폼·응원봉·티켓 챙기세요!.*카드 접음" \
   "DestinationArrived"
+
+# ---- 집 하차(docs/home-exit.md): 집 반경(300m) 밖 위치를 한 번 이상 받은 뒤 집에 P단을 넣었을 때만 한다. 집은 서버 자주 가는 곳 mock-home-apt(35.1743,126.9121)다. ----
+AWAY_LOC='35.1378,126.7912'   # 광주송정역 근처(집·일정 장소 어디도 아님)
+HOME_LOC='35.1743,126.9121'
+
+if [ "$HOME_SET" = "1" ]; then
+  step "집 하차: 집을 떠났다 돌아오면 인사" \
+    "정책서 4·6·9장: 집 밖 위치를 받은 뒤 집 반경 300m 안에서 달린 뒤 P단 → 집 하차 카드. 09:20에는 챙길 물건(콩물 픽업 21:00)이 없어 '오늘도 수고했어요.'(버튼 없음, 한 번 말하고 듣지 않음)" \
+    "'도착 · 내리기 전' 칩과 '오늘도 수고했어요.'. 버튼 없이 5초 뒤 접힘(지도 덮개 72%는 가짜 내비를 켠 때만). 초기화 직후라 첫 탑승 브리핑이 먼저 뜰 수 있어 그 카드의 버튼·듣기는 판정에서 가리지 않고, 인사 카드 줄 끝에 버튼·듣기가 붙지 않는지만 본다" \
+    "now=$FIRST_AT&navi=real&listen=off&trip=none&exitcard=real&gear=P gear=D loc=$AWAY_LOC loc=$HOME_LOC gear=P" \
+    "카드 칩=도착 · 내리기 전.*카드 접음" 15 \
+    "카드 칩=도착 · 내리기 전 \\| voice=오늘도 수고했어요\\.[[:space:]];;말함: 오늘도 수고했어요\\.[[:space:]];;카드 접음" \
+    "DestinationArrived"
+
+  step "집 하차: 같은 날 다시 들러도 말 없음" \
+    "같은 날 집에 다시 들르면 이미 인사했고 새 물건도 없어 카드가 없다(인사·물건은 하루 한 번)" \
+    "아무 카드도 뜨지 않음" \
+    "gear=D loc=$AWAY_LOC loc=$HOME_LOC gear=P" \
+    "" 0 \
+    "GearChanged\\(gear=PARK\\)" \
+    "$SILENT"
+
+  step "집 하차: 픽업 물건이 있으면 챙기세요" \
+    "21:10에는 콩물 픽업(21:00 시작)이 지나 집 하차 카드가 '콩물 챙기세요!' + 채비 타일 + [챙겼어요]다. 초기화로 오늘 알림 기록을 다시 센다" \
+    "'도착 · 내리기 전' 칩, '콩물 챙기세요!', 채비 타일, [챙겼어요]. 5초 뒤 접힘" \
+    "now=$FIRST_AT&advance=710&exitcard=real&gear=P gear=D loc=$AWAY_LOC loc=$HOME_LOC gear=P" \
+    "카드 칩=도착 · 내리기 전.*카드 접음" 15 \
+    "카드 칩=도착 · 내리기 전 \\| voice=콩물 챙기세요!;;버튼=챙겼어요;;말함: 콩물 챙기세요!.*카드 접음" \
+    "수고했어요"
+fi
 
 step "끝: 실제 내비로 되돌림" \
   "가짜 내비를 끄고 실제 내비 모드로, 주입값도 실제 값으로(이어지는 다른 확인에 영향이 없게)" \

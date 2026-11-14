@@ -57,6 +57,16 @@ class ChagokStore(context: Context) : ScheduleCopyStore {
             prefs.edit().putBoolean(KEY_PAIRED, value).apply()
         }
 
+    /**
+     * 지금 연결이 서버가 확인해 준 연결인가(폰이 코드를 보내 서버 상태가 paired가 됐을 때 true). 앱이 앞으로 올 때 서버에 이 연결이 아직 있는지 물어
+     * 풀렸으면 일정·집을 지운다. debug 신호로 미리 연결한 것(서버는 모름)은 false라 묻지 않는다. 이전 설치분에는 없어 false다.
+     */
+    var pairedByServer: Boolean
+        get() = prefs.getBoolean(KEY_PAIRED_BY_SERVER, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_PAIRED_BY_SERVER, value).apply()
+        }
+
     private companion object {
         const val NONE = Long.MIN_VALUE
         const val KEY_SNAPSHOT = "snapshot"
@@ -65,5 +75,6 @@ class ChagokStore(context: Context) : ScheduleCopyStore {
         const val KEY_COPY_DATE = "scheduleCopyDate"
         const val KEY_CAR_ID = "carId"
         const val KEY_PAIRED = "paired"
+        const val KEY_PAIRED_BY_SERVER = "pairedByServer"
     }
 }

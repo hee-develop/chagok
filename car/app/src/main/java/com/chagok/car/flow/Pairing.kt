@@ -13,6 +13,37 @@ data class PairingStatus(val paired: Boolean, val codeActive: Boolean)
 /** 서버가 낸 연결 코드. [qr]은 차 화면 QR에 담을 글(`chagok://pair?code=…`), [code]는 숫자 6자리다. */
 data class PairingCode(val code: String, val qr: String, val expiresAt: Instant)
 
+/** [PairingVerifier.verify]의 판정. */
+enum class PairingVerdict {
+    /** 확인할 필요가 없다(연결 전이거나, 서버가 확인해 준 연결이 아니라 서버는 이 연결을 모른다 — debug 신호로 미리 연결한 경우). */
+    SKIPPED,
+
+    /** 서버에 이 차의 연결이 아직 있다. */
+    STILL_PAIRED,
+
+    /** 서버가 "연결 없음"이라고 답했다(해제). */
+    RELEASED,
+
+    /** 서버에 닿지 못했거나 응답이 이상하다. 해제로 단정하지 않는다. */
+    UNKNOWN,
+}
+
+/**
+ * 앱이 앞으로 올 때 서버에 이 차의 연결이 아직 있는지 묻고 판정한다(운전자 교체·폰에서 해제를 차가 알아채는 경로).
+ * 서버가 확인해 준 연결([paired]이고 [pairedByServer])일 때만 묻는다. 네트워크 실패는 [PairingVerdict.UNKNOWN]이라 해제로 보지 않는다.
+ */
+object PairingVerifier {
+    fun verify(client: PairingClient, carId: String, paired: Boolean, pairedByServer: Boolean): PairingVerdict {
+        if (!paired || !pairedByServer) return PairingVerdict.SKIPPED
+        val status = try {
+            client.status(carId)
+        } catch (e: Exception) {
+            return PairingVerdict.UNKNOWN
+        }
+        return if (status.paired) PairingVerdict.STILL_PAIRED else PairingVerdict.RELEASED
+    }
+}
+
 /**
  * 차–폰 연결 서버 호출. 차는 설치 때 만든 익명 차 id로 코드를 받아 보이고, 폰이 그 코드를 보내면 연결된다.
  * 호출은 메인 스레드가 아닌 곳에서 하고, 실패하면 예외를 던진다.

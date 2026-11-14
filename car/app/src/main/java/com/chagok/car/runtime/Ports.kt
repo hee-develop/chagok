@@ -55,6 +55,12 @@ interface Locator {
     fun setForeground(foreground: Boolean)
 
     /**
+     * 지금 위치를 쓸 일이 있는가(세션이 알린다: 집 좌표가 있거나 오늘 남은 일정 중 장소가 있는 것이 있음). false면 주기·수동 갱신을 켜지 않고 켜져 있던 것도 끈다.
+     * 처음 값은 false라 일정·집을 받아 쓸 일이 생길 때까지 센서를 읽지 않는다.
+     */
+    fun setNeeded(needed: Boolean)
+
+    /**
      * 시스템이 마지막으로 아는 위치(다른 앱·내비가 갱신해 둔 것 포함)를 지금 읽어 [deliver]로 바로 넘긴다. 메인 스레드에서 부르고 [deliver]도 그 자리에서 실행한다.
      * P단에 넣는 순간 부르면, 차곡이 뒤에 있어 주기 갱신을 못 받았어도 내비가 갱신해 둔 최근 위치로 판정할 수 있다.
      */
@@ -65,6 +71,7 @@ interface Locator {
         override fun start() = Unit
         override fun stop() = Unit
         override fun setForeground(foreground: Boolean) = Unit
+        override fun setNeeded(needed: Boolean) = Unit
         override fun refreshNow(deliver: (Event) -> Unit) = Unit
     }
 }

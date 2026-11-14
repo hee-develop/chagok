@@ -102,7 +102,7 @@ class InjectedNavigatorTest {
         posted.clear()
         navigator.requestLocation()
         assertEquals(1, inner.calls.size)
-        assertEquals(listOf<Event>(Event.LocationChanged(place.position)), posted) // 도착했으면 목적지 좌표
+        assertEquals(listOf<Event>(Event.LocationChanged(place.position, naviAnswer = true)), posted) // 도착했으면 목적지 좌표
     }
 
     @Test fun `route=fail은 남아 있던 이전 가짜 경로를 지운다`() {
@@ -122,7 +122,7 @@ class InjectedNavigatorTest {
         DebugInjection.injectedLocation = injected
         posted.clear()
         navigator.requestLocation()
-        assertEquals(listOf<Event>(Event.LocationChanged(injected)), posted)
+        assertEquals(listOf<Event>(Event.LocationChanged(injected, naviAnswer = true)), posted)
         assertTrue(inner.calls.isEmpty())
     }
 
@@ -131,7 +131,7 @@ class InjectedNavigatorTest {
         DebugInjection.injectedLocation = injected
         navigator.requestLocation()
         assertTrue(inner.calls.isEmpty())
-        assertEquals(listOf<Event>(Event.LocationChanged(injected)), posted)
+        assertEquals(listOf<Event>(Event.LocationChanged(injected, naviAnswer = true)), posted)
     }
 
     @Test fun `loc을 주입한 동안에는 실제 내비의 위치 답도 어댑터의 실제 위치도 버리고 가짜 내비가 켜져 있으면 실제 위치를 받지 않는다`() {

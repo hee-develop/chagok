@@ -16,7 +16,27 @@ class HomePickupTest {
     @Test fun `찾기와 사기도 센다`() {
         assertEquals("세탁물", HomePickup.itemName("세탁물 찾기"))
         assertEquals("우유", HomePickup.itemName("우유 사기"))
-        assertEquals("세탁물", HomePickup.itemName("찾기 세탁물"))
+    }
+
+    @Test fun `픽업류 단어는 제목 끝에 있을 때만 센다`() {
+        // 가운데·앞에 있으면 물건이 아니다.
+        assertNull(HomePickup.itemName("사기 예방 교육"))
+        assertNull(HomePickup.itemName("찾기 쉬운 길 안내"))
+        assertNull(HomePickup.itemName("택배 수령 장소 확인"))
+        assertNull(HomePickup.itemName("아이 픽업 후 학원"))
+        assertNull(HomePickup.itemName("찾기 세탁물"))
+        assertNull(HomePickup.itemName("픽업 콩물"))
+    }
+
+    @Test fun `제목 끝의 괄호 덩어리와 구두점과 공백은 정리하고 센다`() {
+        assertEquals("콩물", HomePickup.itemName("콩물 픽업 (2개)"))
+        assertEquals("콩물", HomePickup.itemName("콩물 픽업 [오후]"))
+        assertEquals("콩물", HomePickup.itemName("콩물 픽업 (2개) (냉장) !"))
+        assertEquals("콩물", HomePickup.itemName("콩물 픽업."))
+        assertEquals("세탁물", HomePickup.itemName("세탁물 찾기   "))
+        assertEquals("택배", HomePickup.itemName("택배 수령~"))
+        // 끝이 '확인'이라 괄호 안의 수령은 세지 않는다.
+        assertNull(HomePickup.itemName("택배 (수령) 확인"))
     }
 
     @Test fun `단어가 앞이나 뒤에 붙은 다른 낱말이면 세지 않는다`() {

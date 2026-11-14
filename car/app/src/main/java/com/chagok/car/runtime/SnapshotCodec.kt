@@ -27,6 +27,7 @@ object SnapshotCodec {
             .put("exitArrivedAt", snapshot.exitArrivedAt?.toEpochMilli() ?: JSONObject.NULL)
             .put("homeItemsAnnounced", JSONArray(snapshot.homeItemsAnnounced.sorted()))
             .put("homeCardShown", snapshot.homeCardShown)
+            .put("exitByLocation", snapshot.exitByLocation)
             .toString()
     }
 
@@ -57,6 +58,8 @@ object SnapshotCodec {
             root.optJSONArray("homeItemsAnnounced")?.let { array -> (0 until array.length()).map(array::getString).toSet() }.orEmpty()
         }.getOrDefault(emptySet())
         val cardShown = root.opt("homeCardShown") as? Boolean ?: false
-        Snapshot(log, statuses, date, noticeDate, exitTargetId, exitArrivedAt, announced, cardShown)
+        // 위치로 정한 하차 대기인지도 나중에 생긴 칸이라 없으면 false(내비 도착 대기로 본다).
+        val exitByLocation = root.opt("exitByLocation") as? Boolean ?: false
+        Snapshot(log, statuses, date, noticeDate, exitTargetId, exitArrivedAt, announced, cardShown, exitByLocation)
     }.getOrNull()
 }

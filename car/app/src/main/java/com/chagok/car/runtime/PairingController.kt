@@ -5,6 +5,8 @@ import android.os.HandlerThread
 import android.util.Log
 import com.chagok.car.flow.Event
 import com.chagok.car.flow.PairingClient
+import com.chagok.car.flow.PairingVerdict
+import com.chagok.car.flow.PairingVerifier
 import com.chagok.car.flow.PairingCode
 import java.time.Duration
 import java.time.Instant
@@ -20,6 +22,8 @@ class PairingController(
     private val client: PairingClient,
     private val store: ChagokStore,
     private val post: (Event) -> Unit,
+    /** 서버가 이 연결을 모른다고(해제) 확인했을 때 불린다([verify]). 전용 스레드에서 불리므로 받은 쪽이 메인으로 넘긴다. 일정·집 사본 정리는 여기서 한다. */
+    private val onReleased: () -> Unit = {},
 ) {
     private val thread = HandlerThread("chagok-pairing").apply { start() }
     private val handler = Handler(thread.looper)
@@ -48,6 +52,8 @@ class PairingController(
     fun setPaired(paired: Boolean) {
         if (store.paired == paired) return
         store.paired = paired
+        // 디버그로 맞춘 연결은 서버가 모른다. 서버가 확인한 연결이 아니라서 재진입 확인([verify])을 하지 않는다.
+        store.pairedByServer = false
         post(if (paired) Event.Paired(brief = false) else Event.Unpaired)
         handler.post {
             pause()
@@ -58,6 +64,29 @@ class PairingController(
             } catch (e: Exception) {
                 Log.w(TAG, "서버 연결 풀기 실패: ${e::class.simpleName}")
             }
+            resume()
+        }
+    }
+
+    /**
+     * 앱이 앞으로 올 때(재진입) 부른다. 서버가 확인해 준 연결([ChagokStore.pairedByServer])일 때만 서버에 이 차의 연결이 아직 있는지 묻고,
+     * 서버가 "연결 없음"이라고 답하면 해제로 보고 정리한다(운전자 교체·폰에서 해제: 일정·집 좌표를 차에 남기지 않는다).
+     * 서버에 닿지 못하거나 응답이 이상하면 해제로 단정하지 않고 그대로 둔다(다음 재진입에 다시 묻는다).
+     * 서버를 다시 켜 메모리의 연결이 사라져도 "연결 없음"으로 답하므로 이때도 해제로 보인다(서버 저장이 메모리인 동안의 한계, docs/pairing.md).
+     */
+    fun verify() {
+        if (!store.paired || !store.pairedByServer) return
+        handler.post {
+            val verdict = PairingVerifier.verify(client, store.carId(), store.paired, store.pairedByServer)
+            if (verdict == PairingVerdict.UNKNOWN) Log.w(TAG, "연결 확인 실패(해제로 보지 않음)")
+            if (verdict != PairingVerdict.RELEASED) return@post
+            // 서버가 해제를 확인했다. 연결 전으로 바꾼 뒤(그 순간부터 일정 받기가 막힌다) 일정·집 사본을 지우고, 세션에 알려 새 코드를 받는다.
+            store.paired = false
+            store.pairedByServer = false
+            onReleased()
+            post(Event.Unpaired)
+            pause()
+            code = null
             resume()
         }
     }
@@ -92,6 +121,7 @@ class PairingController(
                 // 디버그로 이미 연결했으면 다시 알리지 않는다.
                 if (!store.paired) {
                     store.paired = true
+                    store.pairedByServer = true
                     post(Event.Paired(brief = true))
                 }
                 return

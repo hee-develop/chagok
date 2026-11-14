@@ -36,3 +36,20 @@ object PermissionGate {
         else -> PermissionStep.EXPLAIN
     }
 }
+
+/**
+ * 앱 시작과 권한 결정 때 어떤 신호원을 켤지 [PermissionGate]의 구분대로 실행한다. [SessionHost]가 쓴다.
+ * 기어·시동은 위치 권한과 무관하게 앱 시작 때 늘 켜고([startAtLaunch]), 위치만 권한 결정 뒤에 켠다([startAfterPermission]: 어댑터가 권한을 다시 확인해 없으면 아무것도 하지 않는다).
+ */
+class SourceStarter(private val signals: VehicleSignals, private val location: Locator) {
+    /** 앱 시작 때 부른다. 권한을 묻는 중이거나 거부해도 기어·시동은 켠다. */
+    fun startAtLaunch() {
+        signals.start()
+        if (Source.VEHICLE_SIGNALS in PermissionGate.ALWAYS_ON) signals.startPermissionGated()
+    }
+
+    /** 위치 권한 결정 뒤(또는 이미 받았을 때) 부른다. */
+    fun startAfterPermission() {
+        if (Source.LOCATION in PermissionGate.AFTER_PERMISSION) location.start()
+    }
+}

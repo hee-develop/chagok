@@ -52,6 +52,7 @@ class MainActivity : Activity() {
     private var cardShown = false
     private var permissionCardShown = false
     private var driving = false
+    private var locationNeeded = false
     private var firstRender = true
 
     /** 지금 카드 열에 적용한 정렬. 가짜 내비(디버그)가 켜지고 꺼질 때만 바뀐다. */
@@ -164,7 +165,7 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != PERMISSION_REQUEST) return
         // 거부하면(대략 위치만 허용한 경우 포함) 짧은 안내만 보여 주고 말하지 않는다. 기어·시동은 권한과 무관하게 늘 읽는다.
-        if (!driving && missingPermissions().isNotEmpty()) showPermissionNotice(Phrases.PERMISSION_DENIED)
+        if (!driving && missingPermissions().isNotEmpty()) showDeniedNoticeOnce()
         host.startPermissionGatedSources()
     }
 
@@ -194,6 +195,11 @@ class MainActivity : Activity() {
         if (state.driving != driving) {
             driving = state.driving
             if (driving) hidePermissionUi() else requestRuntimePermissions()
+        }
+        // 위치를 쓸 일이 생기면(일정·집을 받은 뒤) 권한 흐름을 다시 판단한다. 쓸 일이 없으면 권한도 묻지 않는다.
+        if (state.locationNeeded != locationNeeded) {
+            locationNeeded = state.locationNeeded
+            if (locationNeeded && !driving) requestRuntimePermissions()
         }
         val view = state.card
         // 세션 카드가 뜨면 권한 설명 카드는 같은 자리에서 겹치지 않게 걷고, 세션 카드가 닫힌 뒤 다시 보인다.
@@ -272,14 +278,23 @@ class MainActivity : Activity() {
         permissionNotice.show(message)
     }
 
+    /** 거부 안내 한 줄은 한 번 본 뒤에는 그 실행 동안 다시 띄우지 않는다(세션 카드가 닫힐 때마다 되풀이되지 않게). 화면을 다시 만들어도 유지된다. */
+    private fun showDeniedNoticeOnce() {
+        if (deniedNoticeShown) return
+        deniedNoticeShown = true
+        showPermissionNotice(Phrases.PERMISSION_DENIED)
+    }
+
     /** 지금 상태(권한 보유, 주행 중, 이미 물음)에 맞게 권한 흐름을 진행한다. 규칙은 [PermissionGate]. */
     private fun requestRuntimePermissions() {
         permissionNotice.show("")
+        // 위치를 쓸 일이 없으면(집 좌표도, 오늘 남은 장소 있는 일정도 없음) 위치 권한을 묻지 않는다(가이드: 필요할 때 필요한 권한만).
+        if (missingPermissions().isNotEmpty() && !host.ui.locationNeeded) return
         when (PermissionGate.next(missingPermissions().isNotEmpty(), driving, permissionAsked)) {
             PermissionStep.START_SOURCES -> host.startPermissionGatedSources()
             PermissionStep.DEFER -> Unit
             PermissionStep.SHOW_DENIED -> {
-                showPermissionNotice(Phrases.PERMISSION_DENIED)
+                showDeniedNoticeOnce()
                 host.startPermissionGatedSources()
             }
             // 다른 카드가 떠 있으면 미루고, 그 카드가 닫힐 때([render]) 다시 판단한다.
@@ -292,5 +307,8 @@ class MainActivity : Activity() {
 
         // 프로세스 안에서 권한 설명 카드를 이미 띄웠는지(화면을 다시 만들어도 유지)
         var permissionAsked = false
+
+        // 거부 안내 한 줄을 이미 보였는지(프로세스 안에서 유지)
+        var deniedNoticeShown = false
     }
 }

@@ -6,24 +6,31 @@ import java.time.Instant
 data class PickupItem(val name: String, val schedule: Schedule)
 
 /**
- * 집 하차(정책서 4·6·9장): 그날 제목에 '픽업·찾기·사기·수령'이 들어간 일정의 물건을 챙기라고 알린다.
- * 물건은 제목에서 그 단어를 뺀 말이다(예: '콩물 픽업' → '콩물', '세탁물 찾기' → '세탁물').
+ * 집 하차(정책서 4·6·9장): 그날 제목 **끝**에 '픽업·찾기·사기·수령'이 있는 일정의 물건을 챙기라고 알린다.
+ * 물건은 제목에서 그 끝 단어를 뺀 말이다(예: '콩물 픽업' → '콩물', '세탁물 찾기' → '세탁물', '우유 사기' → '우유', '택배 수령' → '택배').
  *
- * 단어는 낱말 끝에서만 센다(뒤에 한글이 이어지면 다른 낱말이다: '픽업하기'·'사기꾼'은 아님).
- * '사기'·'찾기'는 앞에도 한글이 붙으면 다른 낱말일 가능성이 커서(예: '치사기') 앞이 한글이 아닐 때만 센다. '픽업'·'수령'은 '콩물픽업'처럼 붙여 써도 센다.
- * 단어를 빼고 남는 말이 없으면(제목이 '픽업'뿐) 물건을 알 수 없어 올리지 않는다.
+ * 단어가 제목 가운데 있으면 물건이 아니다('사기 예방 교육'·'찾기 쉬운 길 안내'·'택배 수령 장소 확인'·'아이 픽업 후 학원'). 제목 끝 뒤에 붙은 괄호 덩어리·구두점·공백은 먼저 정리한다('콩물 픽업 (2개)' → '콩물').
+ * 끝 단어 뒤에 한글이 이어지면 다른 낱말이라 끝이 아니다('픽업하기'·'사기꾼'). '사기'·'찾기'는 앞에도 한글이 붙으면 다른 낱말일 가능성이 커서(예: '치사기') 앞이 한글이 아닐 때만 센다.
+ * '픽업'·'수령'은 '콩물픽업'처럼 붙여 써도 센다. 단어를 빼고 남는 말이 없으면(제목이 '픽업'뿐) 물건을 알 수 없어 올리지 않는다.
  */
 object HomePickup {
-    private val LONG_WORDS = Regex("(픽업|수령)(?![가-힣])")
-    private val SHORT_WORDS = Regex("(?<![가-힣])(사기|찾기)(?![가-힣])")
+    private val END_WORD = Regex("(?:(픽업|수령)|(?<![가-힣])(사기|찾기))$")
+    private val TRAILING_GROUP = Regex("\\s*[(\\[（][^)\\]）]*[)\\]）]\\s*$")
+    private val TAIL_PUNCT = Regex("[\\s·,/:;\\-–!.~]+$")
     private val EDGE = Regex("^[\\s·,/:;()\\[\\]\\-–!.]+|[\\s·,/:;()\\[\\]\\-–!.]+$")
     private val SPACES = Regex("\\s+")
 
-    /** 제목에서 물건 이름을 뽑는다. 픽업류 단어가 없거나 물건이 남지 않으면 null. */
+    /** 제목에서 물건 이름을 뽑는다. 제목 끝에 픽업류 단어가 없거나 물건이 남지 않으면 null. */
     fun itemName(title: String): String? {
-        if (!LONG_WORDS.containsMatchIn(title) && !SHORT_WORDS.containsMatchIn(title)) return null
-        val name = title.replace(LONG_WORDS, " ").replace(SHORT_WORDS, " ")
-            .replace(SPACES, " ").replace(EDGE, "")
+        var core = title
+        // 끝의 괄호 덩어리·구두점을 번갈아 벗긴다('콩물 픽업 (2개) !').
+        while (true) {
+            val next = core.replace(TRAILING_GROUP, "").replace(TAIL_PUNCT, "")
+            if (next == core) break
+            core = next
+        }
+        val word = END_WORD.find(core) ?: return null
+        val name = core.substring(0, word.range.first).replace(SPACES, " ").replace(EDGE, "")
         return name.ifEmpty { null }
     }
 

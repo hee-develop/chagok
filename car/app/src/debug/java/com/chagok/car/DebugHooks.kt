@@ -137,9 +137,9 @@ internal class InjectedNavigator(
         val injected = DebugInjection.injectedLocation
         val trip = fake.trip
         when {
-            injected != null -> post(Event.LocationChanged(injected))
+            injected != null -> post(Event.LocationChanged(injected, naviAnswer = true))
             !DebugInjection.fakeNavi -> inner.requestLocation()
-            trip != null -> post(Event.LocationChanged(carPosition(trip)))
+            trip != null -> post(Event.LocationChanged(carPosition(trip), naviAnswer = true))
             else -> inner.requestLocation()
         }
     }
@@ -161,6 +161,7 @@ private class InjectedLocator(private val inner: Locator) : Locator {
     override fun start() = inner.start()
     override fun stop() = inner.stop()
     override fun setForeground(foreground: Boolean) = inner.setForeground(foreground)
+    override fun setNeeded(needed: Boolean) = inner.setNeeded(needed)
     override fun refreshNow(deliver: (Event) -> Unit) {
         if (DebugHooks.acceptsRealLocation()) inner.refreshNow(deliver)
     }

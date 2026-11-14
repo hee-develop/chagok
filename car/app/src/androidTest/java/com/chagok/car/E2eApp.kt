@@ -47,7 +47,7 @@ class FakeNavigator(private val post: (Event) -> Unit) : Navigator {
     @Volatile var location: com.chagok.car.domain.LatLng? = null
 
     override fun requestLocation() {
-        location?.let { post(Event.LocationChanged(it)) }
+        location?.let { post(Event.LocationChanged(it, naviAnswer = true)) }
     }
 }
 

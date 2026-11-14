@@ -70,6 +70,28 @@ class PairingTest {
         assertTrue(speaker.spoken.single().startsWith("광주 직관 날이에요!"))
     }
 
+    @Test
+    fun 서버가_연결을_풀면_앱이_앞으로_올_때_연결_카드로_돌아가고_받아_둔_일정_사본을_지운다() {
+        host.setPaired(false)
+        E2eApp.fakePairing.paired = false
+        launch()
+        assertNotNull("연결 카드", waitFor("휴대폰과 연결해 주세요."))
+        E2eApp.fakePairing.paired = true
+        assertNotNull("연결되면 첫 탑승 브리핑", waitFor("광주 직관 날이에요!", timeoutMs = 10_000))
+        // 연결해 일정을 받았으니 저장된 사본이 있다.
+        val store = com.chagok.car.runtime.ChagokStore(instrumentation.targetContext)
+        assertNotNull("받아 둔 사본", store.loadCopy())
+
+        // 폰(운전자)에서 연결을 풀었다. 차는 앱이 앞으로 올 때 서버에 물어 해제를 안다.
+        E2eApp.fakePairing.paired = false
+        device.pressHome()
+        launch()
+
+        assertNotNull("연결 카드로 돌아감", waitFor("휴대폰과 연결해 주세요."))
+        assertNull("일정 사본이 지워져야 함", store.loadCopy())
+        assertTrue(!store.paired)
+    }
+
     private companion object {
         const val TIMEOUT_MS = 5_000L
     }

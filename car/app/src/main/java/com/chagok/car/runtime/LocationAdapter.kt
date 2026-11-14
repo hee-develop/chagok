@@ -10,6 +10,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import com.chagok.car.domain.LatLng
+import com.chagok.car.domain.Rules
 import com.chagok.car.flow.Event
 import java.time.Duration
 
@@ -25,6 +26,8 @@ import java.time.Duration
  * - 수동(passive) 갱신은 센서를 켜지 않고 다른 앱(내비)이 얻은 위치만 받는다. 메인 스레드 부하를 줄이려고 [PASSIVE_INTERVAL]·[PASSIVE_DISTANCE_METERS]로 간격을 둔다.
  *   앱이 앞에 있는 동안 내비 같은 다른 앱이 얻은 위치도 받으려는 것이고, 앱이 뒤에 있을 때 받는 것은 기대하지 않는다.
  * - [refreshNow]는 P단에 넣는 순간 시스템의 마지막 위치를 읽는다(백그라운드 권한이 없으면 null일 수 있다).
+ * - 위치를 쓸 일이 있을 때([setNeeded]: 집 좌표가 있거나 오늘 남은 일정 중 장소가 있음)만 주기·수동 갱신을 켠다. 쓸 일이 없으면 센서를 읽지 않는다.
+ * - 정확도 반경이 [Rules.LOCATION_MAX_ACCURACY_METERS](100m)보다 큰 측위는 버린다(정확도를 모르는 측위는 받는다).
  * - 읽은 위치는 측위한 지 얼마나 됐는지([Event.LocationChanged.ageMillis])만 실어 보내고, 나이 기준(5분)과 이번 주행 시작 뒤인지는 세션이 판단한다.
  * 권한(ACCESS_FINE_LOCATION)이 없으면 아무것도 하지 않는다. 시스템이 Suspend로 가면 [stop], 돌아오면 [start]로 권한을 다시 확인하고 켠다. 메인 스레드에서 부른다.
  */
@@ -34,6 +37,7 @@ class LocationAdapter(context: Context, private val sink: (Event) -> Unit) : Loc
 
     private var started = false
     private var foreground = false
+    private var needed = false
     private var passiveOn = false
     private var activeOn = false
 
@@ -56,10 +60,16 @@ class LocationAdapter(context: Context, private val sink: (Event) -> Unit) : Loc
         apply()
     }
 
-    /** 지금 상태(시작 여부·권한·앞뒤)에 맞게 갱신 요청을 켜고 끈다. */
+    override fun setNeeded(needed: Boolean) {
+        if (this.needed == needed) return
+        this.needed = needed
+        apply()
+    }
+
+    /** 지금 상태(시작 여부·권한·쓸 일·앞뒤)에 맞게 갱신 요청을 켜고 끈다. */
     private fun apply() {
         val lm = manager ?: return
-        val allowed = started && hasPermission()
+        val allowed = started && needed && hasPermission()
         if (allowed != passiveOn) {
             if (allowed) {
                 passiveOn = runCatching {
@@ -88,7 +98,7 @@ class LocationAdapter(context: Context, private val sink: (Event) -> Unit) : Loc
 
     override fun refreshNow(deliver: (Event) -> Unit) {
         val lm = manager ?: return
-        if (!started || !hasPermission()) return
+        if (!started || !needed || !hasPermission()) return
         val best = (ACTIVE_PROVIDERS + LocationManager.PASSIVE_PROVIDER)
             .mapNotNull { provider -> runCatching { lm.getLastKnownLocation(provider) }.getOrNull() }
             .maxByOrNull { it.elapsedRealtimeNanos } ?: return
@@ -97,6 +107,7 @@ class LocationAdapter(context: Context, private val sink: (Event) -> Unit) : Loc
 
     /** 측위 시각(`elapsedRealtimeNanos`)으로 잰 나이를 실어 세션에 알린다. 세션 시계와 섞지 않으려고 시각이 아니라 나이를 보낸다. */
     private fun report(location: Location, to: (Event) -> Unit) {
+        if (!isAccurateEnough(location.hasAccuracy(), location.accuracy)) return
         val ageMillis = Duration.ofNanos(SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos).toMillis().coerceAtLeast(0)
         to(Event.LocationChanged(LatLng(location.latitude, location.longitude), ageMillis))
     }
@@ -106,6 +117,10 @@ class LocationAdapter(context: Context, private val sink: (Event) -> Unit) : Loc
 
     companion object {
         private const val TAG = "ChagokLocation"
+
+        /** 정확도 반경이 [Rules.LOCATION_MAX_ACCURACY_METERS]를 넘으면 버린다. 정확도를 모르는 측위(수동 갱신으로 온 다른 앱의 값 등)는 받는다. */
+        internal fun isAccurateEnough(hasAccuracy: Boolean, accuracyMeters: Float): Boolean =
+            !hasAccuracy || accuracyMeters <= Rules.LOCATION_MAX_ACCURACY_METERS
 
         /** 앞에 있을 때 위치를 다시 읽는 최소 간격. 도착 판정(300m)에 필요한 정밀도보다 훨씬 성기게 잡았다. */
         val FOREGROUND_INTERVAL: Duration = Duration.ofSeconds(30)
