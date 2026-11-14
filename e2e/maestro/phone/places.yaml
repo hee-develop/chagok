@@ -9,21 +9,11 @@ appId: ${APP_ID}
     clearState: true
 - openLink: ${EXPO_URL}
 
-# Expo Go 첫 실행 안내와 개발자 메뉴가 뜨면 닫는다.
+# Expo Go 개발자 메뉴 안내를 닫고 우리 화면을 기다린다(expo-dev-menu.yaml 설명 참고).
 - runFlow:
-    when:
-      visible: 'Continue'
-    commands:
-      - tapOn: 'Continue'
-- runFlow:
-    when:
-      visible: 'Go home'
-    commands:
-      - back
-
-- extendedWaitUntil:
-    visible: '자주 가는 곳을 알려주세요'
-    timeout: 120000
+    file: expo-dev-menu.yaml
+    env:
+      SCREEN_TITLE: '자주 가는 곳을 알려주세요'
 - assertVisible: '2 / 4'
 - assertVisible: '\[집 주소\]'
 - assertVisible: '\[회사 주소\]'
@@ -58,6 +48,11 @@ appId: ${APP_ID}
     timeout: 20000
 - assertVisible: '취소'
 - takeScreenshot: 02c-search-many-last
+# 검색칸도 스크롤 안에 있어 끝까지 내리면 화면 위로 사라진다. 다시 올려 검색칸을 누르고 글자를 지운다.
+- scrollUntilVisible:
+    element: '광주'
+    direction: UP
+    timeout: 20000
 - tapOn: '광주'
 - eraseText: 10
 
