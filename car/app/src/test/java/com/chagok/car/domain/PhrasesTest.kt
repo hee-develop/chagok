@@ -280,4 +280,10 @@ class PhrasesTest {
         assertEquals("KIA 직관 채비는 ‘유니폼·티켓’이에요. 출발할까요?", withCare.sub)
         assertEquals(listOf<TileView>(TileView.Care(listOf("유니폼", "티켓"))), withCare.tiles)
     }
+
+    @Test fun `주행 중 칩은 24시간제 시각과 제목이고 앞 글자는 다음이다`() {
+        assertEquals("13:00 육전집 점심", Phrases.nextChipBody(lunch, SEOUL))
+        assertEquals("17:00 KIA 직관", Phrases.nextChipBody(game, SEOUL))
+        assertEquals("다음", Phrases.NEXT_CHIP_LABEL)
+    }
 }

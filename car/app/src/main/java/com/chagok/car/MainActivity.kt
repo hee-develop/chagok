@@ -20,11 +20,13 @@ import com.chagok.car.ui.CardContent
 import com.chagok.car.ui.CardMotion
 import com.chagok.car.ui.DesignScale
 import com.chagok.car.ui.DuckingPill
+import com.chagok.car.ui.NextChip
 import com.chagok.car.ui.NoticePill
 
 /**
  * 차곡 화면: BriefingCard, 결과 한 줄, DuckingPill, 권한 설명 카드.
  * 주행 중에는 카드를 접고 화면에 아무것도 말하거나 띄우지 않는다(DO로 선언). 결과 한 줄과 권한 설명 카드·요청도 주행 중에는 미룬다.
+ * 주행 중에 남는 것은 정적인 글자 하나인 다음 일정 칩([NextChip])뿐이다. 창 왼쪽 위에 놓이고, 결과 한 줄은 주행 중에 안 보여 겹치지 않는다.
  * 상태와 흐름은 [SessionHost]가 갖고, 여기서는 그리고 버튼을 이벤트로 넘기기만 한다.
  * 최상위 화면이므로 Back은 종료하지 않고 숨긴다(moveTaskToBack, CCP 가이드).
  */
@@ -38,6 +40,7 @@ class MainActivity : Activity() {
     private lateinit var permissionNotice: NoticePill
     private lateinit var permissionCard: BriefingCardView
     private lateinit var ducking: DuckingPill
+    private lateinit var nextChip: NextChip
     private lateinit var notices: LinearLayout
 
     /** 마지막으로 그린 카드. 같은 내용이면 다시 그리지 않아 AutoDismissBar 같은 진행 중인 표시가 처음으로 돌아가지 않는다. */
@@ -95,6 +98,14 @@ class MainActivity : Activity() {
         column.addView(
             ducking,
             FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply { setMargins(margin, margin, margin, margin) },
+        )
+
+        // 주행 중 다음 일정 칩. 표시 전용이고 카드 열이 아니라 창 왼쪽 위 모서리에 둔다(release 포함).
+        // 칩은 주행 중에만 보이고 그때는 카드가 접혀 있다. 정차로 바뀌는 같은 이벤트에서 칩을 숨기므로 카드와 겹치지 않는다.
+        nextChip = NextChip(this, d)
+        root.addView(
+            nextChip,
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply { setMargins(margin, margin, margin, margin) },
         )
 
         // 디버그 빌드에만 있는 버튼 줄. 릴리스에서는 null.
@@ -164,6 +175,7 @@ class MainActivity : Activity() {
         }
         firstRender = false
         card.speaking = state.speaking && view != null
+        nextChip.show(state.nextChip)
         ducking.visibility = if (state.ducking) View.VISIBLE else View.GONE
         val resultText = if (driving || view != null) "" else state.result
         result.show(resultText)

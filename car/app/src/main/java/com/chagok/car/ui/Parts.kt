@@ -20,6 +20,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.chagok.car.R
+import com.chagok.car.flow.Phrases
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -420,6 +421,70 @@ class NoticePill(context: Context, d: DesignScale) : LinearLayout(context) {
     fun show(text: String) {
         label.text = text
         visibility = if (text.isEmpty()) GONE else VISIBLE
+    }
+}
+
+/**
+ * NextChip: 주행 중 화면에 남는 유일한 표시. "다음"(ink-3) + "13:00 육전집 점심"(굵게, ink) 한 줄 알약이다.
+ * 높이 size-chip, 왼쪽 패딩 10·오른쪽 24, surface-100에 line 테두리, 안에 size-mark-s 타일(surface-200, radius-s)과 곡 심볼.
+ * 타일·"다음"·본문 사이 간격은 space-s(12)다.
+ *
+ * 주행 규제를 위해 표시 전용이다: 누를 수 없고(클릭·포커스 없음), 애니메이션 없이 정적인 글자뿐이다.
+ * 내용이 바뀔 때만 글자를 다시 쓴다. 긴 제목은 한 줄에서 말줄임한다.
+ * 접근성에는 부모의 contentDescription("다음 13:00 육전집 점심")만 읽히고 자식 글자·로고는 건너뛴다.
+ */
+class NextChip(context: Context, d: DesignScale) : LinearLayout(context) {
+    private val label = d.text(R.style.t_chip, d.color(R.color.ink_3)).apply {
+        maxLines = 1
+        text = Phrases.NEXT_CHIP_LABEL
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+    private val body = d.text(R.style.t_chip, d.color(R.color.ink)).apply {
+        maxLines = 1
+        ellipsize = TextUtils.TruncateAt.END
+        d.semibold(this)
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+    private var shown = ""
+
+    init {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = d.shape(d.color(R.color.surface_100), d.dimen(R.dimen.radius_pill), d.color(R.color.line), d.dimen(R.dimen.hairline))
+        minimumHeight = d.dimenInt(R.dimen.size_chip)
+        setPadding(d.dimenInt(R.dimen.chip_pad_left), 0, d.dimenInt(R.dimen.chip_pad_right), 0)
+        val mark = FrameLayout(context).apply {
+            background = d.shape(d.color(R.color.surface_200), d.dimen(R.dimen.radius_s))
+        }
+        mark.addView(
+            ImageView(context).apply {
+                setImageResource(R.drawable.ic_logo_symbol)
+                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            },
+            FrameLayout.LayoutParams(d.dimenInt(R.dimen.symbol_in_mark_s), d.dimenInt(R.dimen.symbol_in_mark_s), Gravity.CENTER),
+        )
+        addView(mark, LayoutParams(d.dimenInt(R.dimen.size_mark_s), d.dimenInt(R.dimen.size_mark_s)))
+        val gap = d.dimenInt(R.dimen.space_s)
+        addView(label, LayoutParams(-2, -2).apply { marginStart = gap })
+        addView(body, LayoutParams(-2, -2).apply { marginStart = gap })
+        // 표시 전용: 눌러도 아무 일도 없고 포커스도 받지 않는다.
+        isClickable = false
+        isFocusable = false
+        visibility = GONE
+    }
+
+    /** [bodyText]는 "13:00 육전집 점심". 비어 있으면 숨긴다. 같은 내용이면 아무것도 다시 쓰지 않는다. */
+    fun show(bodyText: String) {
+        if (bodyText == shown) return
+        shown = bodyText
+        if (bodyText.isEmpty()) {
+            visibility = GONE
+            contentDescription = null
+            return
+        }
+        body.text = bodyText
+        contentDescription = "${Phrases.NEXT_CHIP_LABEL} $bodyText"
+        visibility = VISIBLE
     }
 }
 

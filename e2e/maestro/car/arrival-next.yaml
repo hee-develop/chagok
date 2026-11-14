@@ -21,9 +21,13 @@ env:
     timeout: 5000
 
 # 2. 출발해 육전집에 도착: 내비 도착 알림([도착] 버튼) 뒤 P단. 도착 순간에는 카드도 말도 없다.
+#    주행 중에는 창 왼쪽 위에 다음 일정 칩이 있고(표시 전용), 도착하면 다음 일정으로 바뀌며, 정차하면 사라진다.
 - openLink: chagok-debug://signal?gear=D
+- assertVisible: ".*13.00 육전집 점심.*"
 - tapOn: "도착"
+- assertVisible: ".*17.00 KIA 직관.*"
 - openLink: chagok-debug://signal?gear=P
+- assertNotVisible: ".*17.00 KIA 직관.*"
 - assertNotVisible: ".*육전집 점심까지.*"
 - takeScreenshot: ${SHOT_DIR}/01-arrived-silent
 

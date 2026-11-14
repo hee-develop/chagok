@@ -66,7 +66,7 @@
 
 - 권한: `pleos.car.permission.STT_SERVICE`를 더했다. 에뮬레이터 `pm list permissions -f`로 확인한 등급은 NAVI_ROUTE·NAVI_ROUTE_SEARCH·TTS_SERVICE·STT_SERVICE 모두 normal이라 런타임 동의(PermissionGate·권한 설명 카드)는 켜지 않았다.
 - 마이크(`RECORD_AUDIO`, dangerous): 넣지 않았다. STT는 CAAS 서비스(`ai.pleos.playground.caas`)가 녹음하고, SpeechToText AAR 매니페스트에도 RECORD_AUDIO가 없다. 2026-10-29 진단에서 이 권한 없이 `request()` 뒤 마이크가 열렸다(로그 실측). 실기기·회사망 밖에서 인식이 안 되면 그때 필요 여부를 다시 본다.
-- 경로 시작 이벤트: 결과 안내는 `requestRoute`를 내비에 보냈는지(`RouteRequestResult`)로 정한다. `onRouteStarted`(칩 도착 예정)와 `onRouteCancelled`(칩·도착 판정 정리)는 이번 기능의 결과 안내에 쓰이지 않아 다음 기능(주행 중 칩, 도착 판단)에서 넣는다.
+- 경로 시작 이벤트: 결과 안내는 `requestRoute`를 내비에 보냈는지(`RouteRequestResult`)로 정한다. `onRouteStarted`·`onRouteCancelled`는 이번 기능의 결과 안내에 쓰이지 않는다. 주행 중 칩은 `DayPlan.target()` 기준이라 경로 이벤트를 쓰지 않고 도착 예정도 넣지 않는다(도착 시각은 내비 몫, `docs/next-chip.md`).
 
 ### 미확인 — 수동 확인 필요 (회사망 밖, 실제 에뮬레이터·실차)
 

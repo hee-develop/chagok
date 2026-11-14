@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.chagok.car.BuildConfig
 import com.chagok.car.DebugHooks
 import com.chagok.car.flow.DriveSession
@@ -36,6 +37,8 @@ data class UiState(
     val collapseInstantly: Boolean = false,
     /** 주행 중(기어 D·R 또는 주행 제한)이면 true. 화면은 이때 아무것도 말하거나 띄우지 않는다. */
     val driving: Boolean = false,
+    /** 주행 중에 보이는 다음 일정 칩의 본문("13:00 육전집 점심"). 비어 있으면 숨긴다. 표시 전용이라 누를 수 없다. */
+    val nextChip: String = "",
 )
 
 /** 세션이 쓰는 SDK 어댑터 묶음. */
@@ -122,11 +125,17 @@ class SessionHost(
         override fun onReceive(context: Context, intent: Intent) = post(Event.SuspendRequested)
     }
 
+    // 기기 시각·시간대가 바뀌면 칩 재판단 시각이 낡는다.
+    private val clockReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = post(Event.ClockChanged)
+    }
+
     fun start() {
         navi.start()
         voice.start()
         carSignals.start()
         registerShutdownReceiver()
+        registerClockReceiver()
         refreshSchedules()
     }
 
@@ -136,6 +145,18 @@ class SessionHost(
             context.registerReceiver(shutdownReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             context.registerReceiver(shutdownReceiver, filter)
+        }
+    }
+
+    private fun registerClockReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_TIME_CHANGED)
+            addAction(Intent.ACTION_TIMEZONE_CHANGED)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(clockReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(clockReceiver, filter)
         }
     }
 
@@ -190,6 +211,7 @@ class SessionHost(
 
     fun advanceClock(by: Duration) {
         clock.offset += by
+        post(Event.ClockChanged)
     }
 
     /** 메인 스레드에서 부른다. 순서는 [ScheduleRefresher]가 정한다. */
@@ -217,6 +239,7 @@ class SessionHost(
             is Effect.ShowCard -> publish(ui.copy(card = effect.card, result = ""))
             is Effect.CollapseCard -> publish(ui.copy(card = null, collapseInstantly = effect.instant))
             is Effect.ShowResult -> publish(ui.copy(result = effect.text))
+            is Effect.ShowNextChip -> publish(ui.copy(nextChip = effect.text))
             is Effect.Speak -> voice.speak(effect.text, effect.thenListen)
             Effect.StopVoice -> voice.stopAll()
             // 이 앞에 StopVoice(재생 중단·포커스 반납)와 Save(상태 저장)가 이미 실행됐다.
@@ -238,6 +261,11 @@ class SessionHost(
             Effect.RefreshSchedules -> refreshRequested = true
             is Effect.ScheduleResultTimeout ->
                 main.postDelayed({ post(Event.ResultTimedOut(effect.timerId)) }, effect.delay.toMillis())
+            is Effect.ScheduleChipRecheck -> {
+                // 새로 예약하면 이전 것은 낡았으므로 지운다(쌓이지 않게).
+                main.removeCallbacksAndMessages(CHIP_TOKEN)
+                main.postAtTime({ post(Event.ChipRecheck(effect.timerId)) }, CHIP_TOKEN, SystemClock.uptimeMillis() + effect.delay.toMillis())
+            }
             is Effect.ScheduleCardTimeout ->
                 main.postDelayed({ post(Event.CardTimedOut(effect.timerId)) }, effect.delay.toMillis())
         }
@@ -255,5 +283,10 @@ class SessionHost(
     private fun publish(state: UiState) {
         ui = state
         listener?.invoke(state)
+    }
+
+    private companion object {
+        /** 칩 재판단 타이머를 한꺼번에 지우는 토큰. */
+        val CHIP_TOKEN = Any()
     }
 }
