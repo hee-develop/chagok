@@ -51,6 +51,39 @@ describe('createEventSync', () => {
     expect(send).toHaveBeenCalledWith([event()], expect.any(AbortSignal));
   });
 
+  it('끝날 때마다 구독자에게 결과를 알리고(성공·실패·권한 없음), 해제하면 알리지 않는다. 구독자가 던져도 동기화는 이어 간다', async () => {
+    const { sync, listEvents, send } = setup();
+    const results: string[] = [];
+    const off = sync.subscribe((r) => results.push(r));
+    sync.subscribe(() => {
+      throw new Error('x');
+    });
+    expect(await sync.run()).toBe('sent');
+    listEvents.mockRejectedValueOnce(new CalendarPermissionError(false));
+    expect(await sync.run()).toBe('permission-denied');
+    listEvents.mockResolvedValueOnce([event('b')]); // 내용이 달라야 '변화 없음'으로 건너뛰지 않고 보낸다
+    send.mockRejectedValueOnce(new HttpError(500, 'x'));
+    expect(await sync.run()).toBe('failed');
+    expect(results).toEqual(['sent', 'permission-denied', 'failed']);
+    off();
+    await sync.run();
+    expect(results).toHaveLength(3);
+  });
+
+  it('inFlight는 도는 중에만 그 실행의 결과로 풀리는 약속을 주고, 끝나면 null이다', async () => {
+    const { sync, send } = setup();
+    expect(sync.inFlight()).toBeNull();
+    const gate = deferred<unknown>();
+    send.mockReturnValueOnce(gate.promise);
+    const run = sync.run();
+    const pending = sync.inFlight();
+    expect(pending).not.toBeNull();
+    gate.resolve({});
+    expect(await pending).toBe('sent');
+    expect(await run).toBe('sent');
+    expect(sync.inFlight()).toBeNull();
+  });
+
   it('목 출처는 읽지도 보내지도 않는다(서버는 픽스처를 쓴다)', async () => {
     const { sync, fetchSelection, listEvents, send } = setup({ kind: 'mock' });
     expect(await sync.run()).toBe('mock');

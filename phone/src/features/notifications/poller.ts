@@ -1,6 +1,8 @@
 import { requestWithTimeout, REQUEST_TIMEOUT_MS } from '../../api/request';
 import { session } from '../../api/session';
-import { appInbox, type Inbox } from './inbox';
+import { appEventSync, type EventSync } from '../calendar-sync/eventSync';
+import { EVENTS_STALE_KIND, SYNC_WAIT_MS, settleEventsStale } from './eventsStale';
+import { appInbox, compareIds, type Inbox } from './inbox';
 import { expoLocalNotifier, type LocalNotifier } from './localNotifier';
 import { notificationsApi, type NotificationsApi } from './notificationsApi';
 
@@ -19,6 +21,10 @@ export type PollerOptions = {
   notifier?: LocalNotifier;
   /** 연결된 폰인가(폰 토큰이 있는가). 기본은 세션의 토큰. */
   hasSession?: () => Promise<boolean>;
+  /** '일정을 못 받고 있어요'를 받았을 때 결과를 따르는 일정 동기화. 기본은 앱 전체가 쓰는 하나. */
+  sync?: Pick<EventSync, 'inFlight' | 'run'>;
+  /** 일정 동기화 결과를 기다리는 최대 시간(밀리초). */
+  syncWaitMs?: number;
   timeoutMs?: number;
   /** 실패를 드러내는 곳. 알림 내용 없이 단계와 오류 이름만 넘긴다. 기본은 개발 빌드에서 console.warn. */
   log?: (message: string) => void;
@@ -28,6 +34,9 @@ export type NotificationPoller = {
   /**
    * 서버 알림함을 한 번 본다. **동시에 하나만** 돈다: 도는 중에 다시 불리면 그 실행의 결과를 같이 받는다(새 요청을 쌓지 않는다).
    * 새 알림만 폰 알림함에 담고, 권한이 있으면 시스템 알림으로 띄우고, 읽어 간 알림은 서버에서 지운다.
+   * 받은 `events-stale`은 이 폰의 일정 동기화 결과를 따른다(진행 중이면 기다린다): 보냈거나(`sent`·`unchanged`) 이 폰이 일정을 보낼 수 없는 상태
+   * (권한 꺼짐·캘린더 미선택·목)면 알림함에도 시스템 알림에도 쓰지 않고 ack만 한다(앱을 연 순간 낡은 경고가 뜨지 않게).
+   * 서버가 바뀌었거나 서버 시계가 뒤로 가서 마지막 id가 서버 id 기준값(`cursor`)보다 커졌으면 마지막 id를 버리고 처음부터 받는다.
    */
   poll(): Promise<PollResult>;
   /** 진행 중인 요청을 취소한다. 취소된 요청의 늦은 응답은 화면(알림함·시스템 알림)에 반영하지 않는다. */
@@ -45,6 +54,8 @@ export function createNotificationPoller({
   inbox = appInbox,
   notifier = expoLocalNotifier,
   hasSession = async () => Boolean(await session.getToken()),
+  sync = appEventSync,
+  syncWaitMs = SYNC_WAIT_MS,
   timeoutMs = REQUEST_TIMEOUT_MS,
   log = devLog,
 }: PollerOptions = {}): NotificationPoller {
@@ -64,9 +75,23 @@ export function createNotificationPoller({
     try {
       await inbox.load();
       const since = inbox.getState().lastId;
-      const received = await requestWithTimeout((signal) => api.fetchNew(since, signal), timeoutMs, controller);
+      let page = await requestWithTimeout((signal) => api.fetchNew(since, signal), timeoutMs, controller);
       if (cancelled()) return 'cancelled';
-      const added = await inbox.add(received);
+      if (since !== null && page.cursor !== null && compareIds(since, page.cursor) > 0) {
+        // 마지막 id가 서버가 아는 id보다 크다: 다른 서버이거나 서버 시계가 뒤로 갔다. 처음부터 받는다(이미 가진 알림은 id로 걸러진다).
+        inbox.resetLastId();
+        page = await requestWithTimeout((signal) => api.fetchNew(null, signal), timeoutMs, controller);
+        if (cancelled()) return 'cancelled';
+      }
+      const received = page.notifications;
+      const stale = received.filter((n) => n.kind === EVENTS_STALE_KIND);
+      let skip: ReadonlySet<string> | undefined;
+      if (stale.length > 0) {
+        const outcome = await settleEventsStale(sync, syncWaitMs);
+        if (cancelled()) return 'cancelled';
+        if (outcome !== 'unknown') skip = new Set(stale.map((n) => n.id));
+      }
+      const added = await inbox.add(received, { skip });
       if (cancelled()) return 'cancelled';
       if (added.length > 0) {
         // 권한이 없으면(거부·미결정) 시스템 알림 없이 폰 알림함(홈)에만 둔다.

@@ -50,6 +50,11 @@ export type Session = {
   clearToken: () => Promise<void>;
   /** 이 토큰이 아직 현재 토큰이면 지운다(오래된 요청의 401이 새 토큰을 지우지 않게). */
   clearIfCurrent: (token: string) => Promise<void>;
+  /**
+   * 토큰이 지워질 때마다(연결 끊기·서버가 401로 거절해 토큰을 버림) 부른다. 이 모듈이 다른 기능 모듈(폰 알림함 등)을 직접 가져오지 않고도
+   * 그 기능이 '다른 자리가 될 데이터'를 비우도록 하는 등록 자리다. 해제 함수를 돌려준다. 리스너가 던져도 토큰 지우기는 끝난다.
+   */
+  onTokenCleared: (listener: () => void) => () => void;
 };
 
 export function createSession(
@@ -94,8 +99,16 @@ export function createSession(
     cache = token;
     await storage.write(token).catch(() => undefined);
   };
+  const clearedListeners = new Set<() => void>();
   const clearToken = async () => {
     cache = null;
+    for (const listener of [...clearedListeners]) {
+      try {
+        listener();
+      } catch {
+        // 리스너 오류가 토큰 지우기를 막지 않는다.
+      }
+    }
     await storage.remove().catch(() => undefined);
   };
   return {
@@ -105,6 +118,10 @@ export function createSession(
     clearToken,
     clearIfCurrent: async (token) => {
       if ((await getToken()) === token) await clearToken();
+    },
+    onTokenCleared: (listener) => {
+      clearedListeners.add(listener);
+      return () => clearedListeners.delete(listener);
     },
   };
 }

@@ -1,4 +1,4 @@
-import type { AppNotification, PushSender } from './types.js';
+import type { AppNotification, NotificationKind, PushSender } from './types.js';
 
 /** 자리(폰) 하나가 알림함에 쌓아 둘 수 있는 알림 수. 넘으면 가장 오래된 것부터 버린다. */
 export const MAX_QUEUE_PER_SEAT = 50;
@@ -33,6 +33,8 @@ export type Outbox = PushSender & {
   list(seatId: string, since?: Since): AppNotification[];
   /** 그 자리의 이 id들을 지운다(읽음 처리). 지운 수. 다른 자리의 id는 무시한다. */
   ack(seatId: string, ids: string[]): number;
+  /** 그 자리에 쌓인 알림 중 이 종류를 모두 지운다(그 알림이 가리키는 일이 해결됐을 때). 지운 수. */
+  dropKind(seatId: string, kind: NotificationKind): number;
   /** 그 자리에 쌓인 알림 수(만료된 것은 세지 않는다). */
   size(seatId: string): number;
 };
@@ -79,6 +81,13 @@ export function createOutbox({ now = () => new Date(), maxPerSeat = MAX_QUEUE_PE
       const kept = list.filter((n) => !wanted.has(n.id));
       if (kept.length === 0) queues.delete(seatId);
       else queues.set(seatId, kept);
+      return list.length - kept.length;
+    },
+    dropKind: (seatId, kind) => {
+      const list = alive(seatId);
+      const kept = list.filter((n) => n.kind !== kind);
+      if (kept.length === 0) queues.delete(seatId);
+      else if (kept.length !== list.length) queues.set(seatId, kept);
       return list.length - kept.length;
     },
     size: (seatId) => alive(seatId).length,

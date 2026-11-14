@@ -2,9 +2,12 @@ import { api } from '../../api/client';
 import { HttpError } from '../../api/request';
 import type { ServerNotification } from './types';
 
+/** `GET /notifications` 응답에서 폰이 쓰는 부분. `cursor`는 서버의 알림 id 기준값(옛 서버가 안 주면 null)이다. */
+export type NotificationsPage = { notifications: ServerNotification[]; cursor: string | null };
+
 export type NotificationsApi = {
   /** `since`(알림 id)보다 나중에 온 알림을 오래된 것부터 받는다. 토큰이 없거나 연결 전이면 서버가 빈 목록을 준다. */
-  fetchNew: (since: string | null, signal: AbortSignal) => Promise<ServerNotification[]>;
+  fetchNew: (since: string | null, signal: AbortSignal) => Promise<NotificationsPage>;
   /** 읽어 간 알림을 서버 알림함에서 지운다. */
   ack: (ids: string[], signal: AbortSignal) => Promise<void>;
 };
@@ -15,7 +18,7 @@ export const createNotificationsApi = (client: Pick<typeof api, 'notifications'>
     const res = await client.notifications.$get({ query: { since: since ?? undefined } }, { init: { signal } });
     if (!res.ok) throw new HttpError(res.status, `GET /notifications ${res.status}`);
     const body = await res.json();
-    return body.notifications;
+    return { notifications: body.notifications, cursor: typeof body.cursor === 'string' ? body.cursor : null };
   },
   ack: async (ids, signal) => {
     if (ids.length === 0) return;

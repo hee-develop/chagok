@@ -2,7 +2,8 @@ import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import { MAX_BODY_BYTES } from '../limits.js';
-import { MAX_LIST_SIZE, parseSince, type Outbox } from '../notify/outbox.js';
+import type { Notifications } from '../notify/notifier.js';
+import { MAX_LIST_SIZE, parseSince } from '../notify/outbox.js';
 import type { AppNotification } from '../notify/types.js';
 import { bearerOf } from '../seatScope.js';
 import type { SeatStore } from '../seats.js';
@@ -30,7 +31,7 @@ const seatOf = (seats: SeatStore, c: Context): { kind: 'seat'; seatId: string } 
 const ID_PATTERN = /^[1-9]\d{0,19}$/;
 
 // RPC 타입 추론을 위해 체이닝을 유지한다.
-export const createNotificationsRoute = (seats: SeatStore, outbox: Outbox) =>
+export const createNotificationsRoute = (seats: SeatStore, { outbox, notifier }: Pick<Notifications, 'outbox' | 'notifier'>) =>
   new Hono()
     .get(
       '/',
@@ -45,7 +46,7 @@ export const createNotificationsRoute = (seats: SeatStore, outbox: Outbox) =>
         if (who.kind === 'unauthorized') return unauthorized(c);
         const since = parseSince(c.req.valid('query').since) ?? undefined;
         const notifications: AppNotification[] = who.kind === 'seat' ? outbox.list(who.seatId, since) : [];
-        return c.json({ notifications, limit: MAX_LIST_SIZE }, 200);
+        return c.json({ notifications, limit: MAX_LIST_SIZE, cursor: notifier.cursor() }, 200);
       },
     )
     .post(

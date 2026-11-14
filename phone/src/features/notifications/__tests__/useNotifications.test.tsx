@@ -2,7 +2,7 @@ import { render } from '@testing-library/react-native';
 import { AppState } from 'react-native';
 
 import { useNotifications } from '../useNotifications';
-import { fakeNotifier } from '../testSupport';
+import { fakeNotifier, fakeSync } from '../../../__tests__/support/notifications';
 import type { NotificationPoller } from '../poller';
 
 function Probe(props: Parameters<typeof useNotifications>[0]) {
@@ -91,5 +91,34 @@ describe('useNotifications(앱이 앞에 있을 때만 주기 폴링)', () => {
     expect(poller.stop).toHaveBeenCalled();
     jest.advanceTimersByTime(300_000);
     expect(poller.poll).toHaveBeenCalledTimes(1);
+  });
+  it('일정 동기화가 보냄·변화 없음·보낼 수 없음으로 끝나면 알림함의 events-stale을 지운다. 실패·취소는 그대로 둔다', async () => {
+    const poller = makePoller();
+    const fake = fakeSync();
+    const inbox = { dismissKind: jest.fn(), clear: jest.fn() };
+    await render(<Probe poller={poller} notifier={fakeNotifier().notifier} sync={fake.sync} inbox={inbox} session={{ onTokenCleared: () => () => undefined }} />);
+    expect(fake.listenerCount()).toBe(1);
+    for (const result of ['failed', 'cancelled'] as const) fake.emit(result);
+    expect(inbox.dismissKind).not.toHaveBeenCalled();
+    for (const result of ['sent', 'unchanged', 'permission-denied', 'no-selection', 'mock'] as const) fake.emit(result);
+    expect(inbox.dismissKind).toHaveBeenCalledTimes(5);
+    expect(inbox.dismissKind).toHaveBeenCalledWith('events-stale');
+  });
+
+  it('폰 토큰이 지워지면(연결 끊기·401) 진행 중인 폴링을 멈추고 알림함을 비운다. 내려가면 구독을 푼다', async () => {
+    const poller = makePoller();
+    const fake = fakeSync();
+    const inbox = { dismissKind: jest.fn(), clear: jest.fn() };
+    let cleared: () => void = () => undefined;
+    const off = jest.fn();
+    const session = { onTokenCleared: (l: () => void) => { cleared = l; return off; } };
+    const view = await render(<Probe poller={poller} notifier={fakeNotifier().notifier} sync={fake.sync} inbox={inbox} session={session} />);
+    (poller.stop as jest.Mock).mockClear();
+    cleared();
+    expect(poller.stop).toHaveBeenCalledTimes(1);
+    expect(inbox.clear).toHaveBeenCalledTimes(1);
+    await view.unmount();
+    expect(off).toHaveBeenCalled();
+    expect(fake.listenerCount()).toBe(0);
   });
 });

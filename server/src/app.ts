@@ -111,16 +111,22 @@ export const createApp = ({
   seats.subscribe((event) => {
     if (event.type !== 'created') notifications.notifier.forget(event.seatId);
   });
+  // 자리가 일정을 받으면 마지막 수신 시각을 갱신하고 '일정을 못 받고 있어요'는 해결됐으니 아직 안 읽어 간 그 알림을 지운다
+  // (나중에 낡은 경고로 전해지지 않게. 그날의 중복 억제 키는 남아 같은 날 다시 만들지 않는다).
+  const onEventsReceived = (seatId: string) => {
+    seats.markEvents(seatId);
+    notifications.outbox.dropKind(seatId, 'events-stale');
+  };
   const guard = createSeatGuard(seats, registry, { legacyDriverFallback, fixtureSeats, clientAddress });
   return new Hono()
     .get('/health', (c) => c.json({ ok: true as const }))
     .route('/calendars', createCalendarsRoute(calendars, guard))
     .route('/places', createPlacesRoute(places, guard))
-    .route('/events', createEventsRoute(guard, { now, isLoopback, loopbackOnly: eventsLoopbackOnly, onReceived: (seatId) => seats.markEvents(seatId) }))
+    .route('/events', createEventsRoute(guard, { now, isLoopback, loopbackOnly: eventsLoopbackOnly, onReceived: onEventsReceived }))
     .route('/family', createFamilyRoute(familyMembers, guard))
     .route('/pairing', createPairingRoute(seats, { clientAddress, isLoopback }))
     .route('/pair', createPairRoute(seats, { now, clientAddress, isLoopback }))
-    .route('/notifications', createNotificationsRoute(seats, notifications.outbox))
+    .route('/notifications', createNotificationsRoute(seats, notifications))
     .route('/drivers', createDriversRoute(seats))
     .route('/presence', createPresenceRoute(seats))
     .route('/car', createCarRoute(seats))

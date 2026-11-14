@@ -50,7 +50,7 @@ const setup = async () => {
     expect(res.status).toBe(200);
   };
   const inbox = async () => ((await json(await app.request('/notifications', { headers: { authorization: `Bearer ${claimed.phoneToken}` } }))).notifications as AppNotification[]);
-  return { seats, notifications, app, seatId: claimed.seatId as string, check, sendEvents, inbox, connectAnother };
+  return { seats, notifications, app, seatId: claimed.seatId as string, phoneToken: claimed.phoneToken as string, check, sendEvents, inbox, connectAnother };
 };
 
 describe('events-stale 판정', () => {
@@ -137,6 +137,32 @@ describe('events-stale 판정', () => {
     expect(s.check()).toEqual([]);
     at('2026-11-15T20:30:00'); // 24시간
     expect(s.check()).toEqual([s.seatId]);
+  });
+
+  it('그 자리가 일정을 받으면(PUT /events 성공) 아직 안 읽어 간 events-stale은 알림함에서 지워지고, 같은 날 다시 만들지 않는다', async () => {
+    const s = await setup();
+    const other = await s.connectAnother('폰B');
+    at('2026-11-14T20:00:00');
+    expect(s.check().sort()).toEqual([s.seatId, other.seatId].sort());
+    s.notifications.notifier.notify(s.seatId, { kind: 'late-sms', title: '다른 종류', body: '' });
+    expect((await s.inbox()).map((n) => n.kind)).toEqual(['events-stale', 'late-sms']);
+    at('2026-11-14T20:05:00');
+    await s.sendEvents();
+    // 일정을 보낸 자리의 events-stale만 지워진다(다른 종류·다른 자리의 것은 그대로).
+    expect((await s.inbox()).map((n) => n.kind)).toEqual(['late-sms']);
+    expect(s.notifications.outbox.size(other.seatId)).toBe(1);
+    // 그날의 중복 억제 키는 남아 있다.
+    at('2026-11-14T20:10:00');
+    expect(s.check()).toEqual([]);
+  });
+
+  it('일정 저장이 거절되면(본문 오류) events-stale을 지우지 않는다', async () => {
+    const s = await setup();
+    at('2026-11-14T20:00:00');
+    s.check();
+    const res = await s.app.request('/events', { method: 'PUT', headers: { authorization: `Bearer ${s.phoneToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ events: 'x' }) });
+    expect(res.status).toBe(400);
+    expect((await s.inbox()).map((n) => n.kind)).toEqual(['events-stale']);
   });
 
   it('연결한 지 24시간이 안 된 자리(일정을 한 번도 못 받음)에는 넣지 않는다', async () => {
@@ -360,6 +386,47 @@ describe('FCM 어댑터(네트워크 없음)', () => {
     const provider = createServiceAccountTokenProvider({ account: { clientEmail: 'e@x', privateKey }, fetch, now });
     await expect(provider()).rejects.toThrow('HTTP 401');
     await provider().catch((e: Error) => expect(e.message).not.toContain('PRIVATE KEY'));
+  });
+
+  it('접근 토큰 요청이 실패하면 기다린 뒤에만 다시 요청한다(30초에서 시작해 두 배씩, 최대 10분). 성공하면 처음으로 돌아간다', async () => {
+    at('2026-11-14T20:00:00');
+    let fail = true;
+    const fetch = vi.fn(async () =>
+      fail
+        ? { ok: false, status: 503, json: async () => ({}), text: async () => '' }
+        : { ok: true, status: 200, json: async () => ({ access_token: 'tok', expires_in: 3600 }), text: async () => '' },
+    );
+    const provider = createServiceAccountTokenProvider({ account: { clientEmail: 'e@x', privateKey }, fetch, now, retryInitialMs: 30_000, retryMaxMs: 100_000 });
+    await expect(provider()).rejects.toThrow('HTTP 503');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // 기다리는 동안은 요청하지 않고 같은 오류를 던진다.
+    await expect(provider()).rejects.toThrow('HTTP 503');
+    clockMs += 29_000;
+    await expect(provider()).rejects.toThrow('HTTP 503');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    clockMs += 1_000; // 30초
+    await expect(provider()).rejects.toThrow('HTTP 503');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    clockMs += 59_000; // 두 번째는 60초를 기다린다
+    await expect(provider()).rejects.toThrow('HTTP 503');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    clockMs += 1_000;
+    await expect(provider()).rejects.toThrow('HTTP 503');
+    expect(fetch).toHaveBeenCalledTimes(3);
+    clockMs += 99_000; // 세 번째는 120초가 아니라 상한 100초
+    await expect(provider()).rejects.toThrow('HTTP 503');
+    expect(fetch).toHaveBeenCalledTimes(3);
+    clockMs += 1_000;
+    fail = false;
+    expect(await provider()).toBe('tok');
+    expect(fetch).toHaveBeenCalledTimes(4);
+    // 성공하면 대기 상태가 풀려, 이후 실패는 다시 30초에서 시작한다.
+    clockMs += 3600_000;
+    fail = true;
+    await expect(provider()).rejects.toThrow('HTTP 503');
+    clockMs += 30_000;
+    await expect(provider()).rejects.toThrow('HTTP 503');
+    expect(fetch).toHaveBeenCalledTimes(6);
   });
 
   it('환경 변수: 없으면 꺼짐(null), 파일이 있으면 켜지고 키는 로그·오류에 없다', () => {

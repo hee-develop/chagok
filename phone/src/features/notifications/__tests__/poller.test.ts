@@ -3,16 +3,18 @@ import { createInbox } from '../inbox';
 import { createMemoryStorage } from '../keyValue';
 import type { NotificationsApi } from '../notificationsApi';
 import { createNotificationPoller } from '../poller';
-import { deferred, fakeNotifier, idsOf, note } from '../testSupport';
+import { deferred, fakeNotifier, fakeSync, idsOf, note, page } from '../../../__tests__/support/notifications';
+import type { SyncResult } from '../../calendar-sync/eventSync';
 
-const setup = (over: { permission?: 'granted' | 'denied' | 'undetermined'; session?: boolean; list?: ReturnType<typeof note>[] } = {}) => {
+const setup = (over: { permission?: 'granted' | 'denied' | 'undetermined'; session?: boolean; list?: ReturnType<typeof note>[]; sync?: SyncResult | null; inFlight?: Promise<SyncResult> | null; cursor?: string | null } = {}) => {
   const inbox = createInbox({ storage: createMemoryStorage() });
   const { notifier, present, state } = fakeNotifier(over.permission ?? 'granted');
-  const fetchNew = jest.fn<ReturnType<NotificationsApi['fetchNew']>, Parameters<NotificationsApi['fetchNew']>>().mockResolvedValue(over.list ?? []);
+  const fetchNew = jest.fn<ReturnType<NotificationsApi['fetchNew']>, Parameters<NotificationsApi['fetchNew']>>().mockResolvedValue(page(over.list ?? [], over.cursor ?? null));
   const ack = jest.fn<ReturnType<NotificationsApi['ack']>, Parameters<NotificationsApi['ack']>>().mockResolvedValue(undefined);
   const log = jest.fn();
-  const poller = createNotificationPoller({ api: { fetchNew, ack }, inbox, notifier, hasSession: async () => over.session ?? true, timeoutMs: 1000, log });
-  return { poller, inbox, fetchNew, ack, present, state, log };
+  const fake = fakeSync(over.sync === undefined ? 'failed' : over.sync, over.inFlight ?? null);
+  const poller = createNotificationPoller({ api: { fetchNew, ack }, inbox, notifier, hasSession: async () => over.session ?? true, sync: fake.sync, syncWaitMs: 500, timeoutMs: 1000, log });
+  return { poller, inbox, fetchNew, ack, present, state, log, sync: fake };
 };
 
 describe('createNotificationPoller', () => {
@@ -31,11 +33,11 @@ describe('createNotificationPoller', () => {
   it('새 알림만 띄운다: 다음 폴링은 since=마지막 id로 묻고, 같은 알림이 다시 오면 다시 띄우지 않는다', async () => {
     const { poller, fetchNew, present, ack } = setup({ list: [note('10')] });
     await poller.poll();
-    fetchNew.mockResolvedValueOnce([note('10'), note('20')]); // ack이 실패했던 것처럼 10이 다시 온다
+    fetchNew.mockResolvedValueOnce(page([note('10'), note('20')])); // ack이 실패했던 것처럼 10이 다시 온다
     await poller.poll();
     expect(fetchNew.mock.calls[1]?.[0]).toBe('10');
     expect(present.mock.calls.map(([item]) => item.id)).toEqual(['10', '20']);
-    fetchNew.mockResolvedValueOnce([]);
+    fetchNew.mockResolvedValueOnce(page());
     await poller.poll();
     expect(present).toHaveBeenCalledTimes(2);
     expect(ack).toHaveBeenCalledTimes(2); // 빈 목록은 ack하지 않는다
@@ -43,12 +45,12 @@ describe('createNotificationPoller', () => {
 
   it('동시에 하나만 돈다: 도는 중에 다시 불리면 같은 실행의 결과를 받고 요청을 하나 더 보내지 않는다', async () => {
     const { poller, fetchNew } = setup();
-    const gate = deferred<ReturnType<typeof note>[]>();
+    const gate = deferred<ReturnType<typeof page>>();
     fetchNew.mockReturnValueOnce(gate.promise);
     const first = poller.poll();
     const second = poller.poll();
     await Promise.resolve();
-    gate.resolve([]);
+    gate.resolve(page());
     expect(await Promise.all([first, second])).toEqual(['ok', 'ok']);
     expect(fetchNew).toHaveBeenCalledTimes(1);
     await poller.poll();
@@ -102,13 +104,13 @@ describe('createNotificationPoller', () => {
 
   it('stop()으로 취소된 요청의 늦은 응답은 알림함·시스템 알림에 반영하지 않고 ack도 안 한다', async () => {
     const { poller, inbox, present, ack, fetchNew } = setup();
-    const gate = deferred<ReturnType<typeof note>[]>();
+    const gate = deferred<ReturnType<typeof page>>();
     fetchNew.mockReturnValueOnce(gate.promise);
     const result = poller.poll();
     await Promise.resolve();
     await Promise.resolve();
     poller.stop();
-    gate.resolve([note('10')]);
+    gate.resolve(page([note('10')]));
     expect(await result).toBe('cancelled');
     expect(idsOf(inbox)).toEqual([]);
     expect(present).not.toHaveBeenCalled();
@@ -117,14 +119,14 @@ describe('createNotificationPoller', () => {
 
   it('stop() 뒤 다시 poll하면 취소된 옛 실행을 기다리지 않고 새로 돈다(오래된 응답이 새 결과를 덮지 않는다)', async () => {
     const { poller, inbox, fetchNew } = setup();
-    const stale = deferred<ReturnType<typeof note>[]>();
-    fetchNew.mockReturnValueOnce(stale.promise).mockResolvedValueOnce([note('20')]);
+    const stale = deferred<ReturnType<typeof page>>();
+    fetchNew.mockReturnValueOnce(stale.promise).mockResolvedValueOnce(page([note('20')]));
     const first = poller.poll();
     await Promise.resolve();
     await Promise.resolve();
     poller.stop();
     expect(await poller.poll()).toBe('ok');
-    stale.resolve([note('10')]);
+    stale.resolve(page([note('10')]));
     expect(await first).toBe('cancelled');
     expect(idsOf(inbox)).toEqual(['20']);
   });
@@ -132,12 +134,116 @@ describe('createNotificationPoller', () => {
   it('stop()이 세션 확인 중에 불려도 그 실행은 요청을 보내지 않는다', async () => {
     const gate = deferred<boolean>();
     const inbox = createInbox({ storage: createMemoryStorage() });
-    const fetchNew = jest.fn().mockResolvedValue([]);
-    const poller = createNotificationPoller({ api: { fetchNew, ack: jest.fn() }, inbox, notifier: fakeNotifier().notifier, hasSession: () => gate.promise, log: jest.fn() });
+    const fetchNew = jest.fn().mockResolvedValue(page());
+    const poller = createNotificationPoller({ api: { fetchNew, ack: jest.fn() }, inbox, notifier: fakeNotifier().notifier, hasSession: () => gate.promise, sync: fakeSync().sync, log: jest.fn() });
     const result = poller.poll();
     poller.stop();
     gate.resolve(true);
     expect(await result).toBe('cancelled');
     expect(fetchNew).not.toHaveBeenCalled();
+  });
+  describe('events-stale은 이 폰의 일정 동기화 결과를 따른다', () => {
+    const stale = (id: string) => note(id, { kind: 'events-stale' });
+
+    it('일정을 보냈으면(sent·unchanged) 알림함에도 시스템 알림에도 쓰지 않고 ack만 한다. 다음 폴링은 그 id 뒤부터 묻는다', async () => {
+      for (const result of ['sent', 'unchanged'] as const) {
+        const { poller, inbox, present, ack, fetchNew } = setup({ list: [stale('10')], sync: result });
+        expect(await poller.poll()).toBe('ok');
+        expect(idsOf(inbox)).toEqual([]);
+        expect(present).not.toHaveBeenCalled();
+        expect(ack).toHaveBeenCalledWith(['10'], expect.any(AbortSignal));
+        await poller.poll();
+        expect(fetchNew.mock.calls[1]?.[0]).toBe('10');
+      }
+    });
+
+    it('동기화가 도는 중이면 그 결과를 기다린다: 끝나기 전에는 알림함에 아무것도 없고, 성공으로 끝나면 띄우지 않는다(새로 돌리지도 않는다)', async () => {
+      const running = deferred<SyncResult>();
+      const { poller, inbox, present, ack, sync } = setup({ list: [stale('10')], inFlight: running.promise });
+      const result = poller.poll();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(idsOf(inbox)).toEqual([]);
+      expect(ack).not.toHaveBeenCalled();
+      running.resolve('sent');
+      expect(await result).toBe('ok');
+      expect(idsOf(inbox)).toEqual([]);
+      expect(present).not.toHaveBeenCalled();
+      expect(ack).toHaveBeenCalledWith(['10'], expect.any(AbortSignal));
+      expect(sync.run).not.toHaveBeenCalled();
+    });
+
+    it('도는 중인 동기화가 실패로 끝나면 알림을 그대로 보인다', async () => {
+      const { poller, inbox, present } = setup({ list: [stale('10')], inFlight: Promise.resolve('failed') });
+      await poller.poll();
+      expect(idsOf(inbox)).toEqual(['10']);
+      expect(present).toHaveBeenCalledTimes(1);
+    });
+
+    it('일정을 보낼 수 없는 폰(권한 꺼짐·캘린더 미선택·목)이면 알림함에도 시스템 알림에도 쓰지 않고 ack로 지운다', async () => {
+      for (const result of ['permission-denied', 'no-selection', 'mock'] as const) {
+        const { poller, inbox, present, ack } = setup({ list: [stale('10')], sync: result });
+        await poller.poll();
+        expect(idsOf(inbox)).toEqual([]);
+        expect(present).not.toHaveBeenCalled();
+        expect(ack).toHaveBeenCalledWith(['10'], expect.any(AbortSignal));
+      }
+    });
+
+    it('도는 동기화가 없으면 한 번 돌려 본다. 다른 종류 알림은 결과와 상관없이 보인다', async () => {
+      const { poller, inbox, present, sync } = setup({ list: [stale('10'), note('20', { kind: 'late-sms' })], sync: 'sent' });
+      await poller.poll();
+      expect(sync.run).toHaveBeenCalledTimes(1);
+      expect(idsOf(inbox)).toEqual(['20']);
+      expect(present.mock.calls.map(([item]) => item.id)).toEqual(['20']);
+    });
+
+    it('events-stale이 없으면 동기화를 건드리지 않는다', async () => {
+      const { poller, sync } = setup({ list: [note('20', { kind: 'late-sms' })], sync: 'sent' });
+      await poller.poll();
+      expect(sync.run).not.toHaveBeenCalled();
+    });
+
+    it('결과가 syncWaitMs 안에 나오지 않으면 알림을 그대로 보인다', async () => {
+      const { poller, inbox } = setup({ list: [stale('10')], inFlight: new Promise(() => undefined) });
+      expect(await poller.poll()).toBe('ok');
+      expect(idsOf(inbox)).toEqual(['10']);
+    });
+
+    it('기다리는 동안 stop()되면 cancelled이고 아무것도 반영하지 않는다', async () => {
+      const running = deferred<SyncResult>();
+      const { poller, inbox, ack } = setup({ list: [stale('10')], inFlight: running.promise });
+      const result = poller.poll();
+      await new Promise((r) => setTimeout(r, 20));
+      poller.stop();
+      running.resolve('failed');
+      expect(await result).toBe('cancelled');
+      expect(idsOf(inbox)).toEqual([]);
+      expect(ack).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('서버 id 기준값(cursor)', () => {
+    it('마지막 id가 서버 cursor보다 크면(서버가 바뀜·시계가 뒤로 감) 마지막 id를 버리고 처음부터 다시 받는다. 이미 가진 알림은 다시 담지 않는다', async () => {
+      const { poller, inbox, fetchNew, present } = setup({ list: [note('900')], cursor: '1000' });
+      await poller.poll();
+      expect(inbox.getState().lastId).toBe('900');
+      // 다른 서버: 기준값 500, since=900으로 물으면 빈 목록이 오지만 cursor가 더 작다 → since 없이 다시 묻는다.
+      fetchNew.mockResolvedValueOnce(page([], '500')).mockResolvedValueOnce(page([note('900'), note('510')], '500'));
+      expect(await poller.poll()).toBe('ok');
+      expect(fetchNew.mock.calls.slice(1).map(([since]) => since)).toEqual(['900', null]);
+      expect(idsOf(inbox)).toEqual(['900', '510']); // 900은 이미 있어 한 번만
+      expect(inbox.getState().lastId).toBe('900'); // 새로 받은 것 중 가장 큰 id
+      expect(present.mock.calls.map(([item]) => item.id)).toEqual(['900', '510']); // 900은 처음 한 번, 510만 새로
+    });
+
+    it('cursor가 마지막 id 이상이면 그대로 이어서 받는다. cursor가 없는 서버(옛 서버)면 비교하지 않는다', async () => {
+      const { poller, fetchNew } = setup({ list: [note('900')], cursor: '900' });
+      await poller.poll();
+      await poller.poll();
+      expect(fetchNew).toHaveBeenCalledTimes(2);
+      fetchNew.mockResolvedValueOnce(page([], null));
+      await poller.poll();
+      expect(fetchNew).toHaveBeenCalledTimes(3);
+    });
   });
 });

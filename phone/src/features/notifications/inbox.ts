@@ -23,17 +23,27 @@ export type Inbox = {
   subscribe(listener: () => void): () => void;
   /** 저장소에서 불러온다(한 번만 하고 같은 약속을 돌려준다). */
   load(): Promise<void>;
-  /** 새 알림만 담고(이미 받았거나 `lastId` 이하인 것은 건너뜀) 담은 것을 돌려준다. */
-  add(list: ServerNotification[]): Promise<InboxItem[]>;
+  /**
+   * 새 알림만 담고(이미 받았거나 `lastId` 이하인 것은 건너뜀) 담은 것을 돌려준다.
+   * `skip`에 든 id는 담지 않고 보여 주지도 않지만 받은 것으로 쳐서 `lastId`는 넘어간다(이미 해결된 알림을 숨기고 다시 받지 않을 때).
+   */
+  add(list: ServerNotification[], options?: { skip?: ReadonlySet<string> }): Promise<InboxItem[]>;
   markRead(id: string): void;
   markAllRead(): void;
   dismiss(id: string): void;
+  /** 이 종류의 알림을 모두 지운다(그 알림이 가리키던 일이 해결됐을 때). `lastId`는 그대로라 지운 알림이 다시 나타나지 않는다. */
+  dismissKind(kind: string): void;
+  /**
+   * `lastId`만 잊는다(담아 둔 알림은 그대로). 서버가 바뀌었거나 서버 시계가 뒤로 가서 `lastId`가 서버가 아는 id보다 커졌을 때 처음부터 다시 받는다.
+   * 이미 가진 알림은 `add`가 id로 걸러 다시 담지 않는다.
+   */
+  resetLastId(): void;
   /** 모두 비우고 `lastId`도 잊는다(차와 연결이 끊기거나 폰을 바꿔 다른 자리가 될 때). */
   clear(): void;
 };
 
 /** id는 앞자리 0이 없는 십진수 문자열이라 길이 → 사전순으로 견준다. */
-const compareIds = (a: string, b: string) => (a.length !== b.length ? a.length - b.length : a < b ? -1 : a > b ? 1 : 0);
+export const compareIds = (a: string, b: string) => (a.length !== b.length ? a.length - b.length : a < b ? -1 : a > b ? 1 : 0);
 
 const isString = (v: unknown): v is string => typeof v === 'string';
 
@@ -109,12 +119,12 @@ export function createInbox({
       return () => listeners.delete(listener);
     },
     load,
-    add: async (list) => {
+    add: async (list, { skip } = {}) => {
       await load();
       const known = new Set(state.items.map((i) => i.id));
       const lastId = state.lastId;
       const fresher = list
-        .filter((n) => !known.has(n.id) && (lastId === null || compareIds(n.id, lastId) > 0))
+        .filter((n) => !skip?.has(n.id) && !known.has(n.id) && (lastId === null || compareIds(n.id, lastId) > 0))
         .sort((a, b) => compareIds(a.id, b.id));
       let newest = lastId;
       for (const n of list) if (newest === null || compareIds(n.id, newest) > 0) newest = n.id;
@@ -138,6 +148,14 @@ export function createInbox({
     dismiss: (id) => {
       if (!state.items.some((i) => i.id === id)) return;
       set({ items: state.items.filter((i) => i.id !== id), lastId: state.lastId });
+    },
+    dismissKind: (kind) => {
+      if (!state.items.some((i) => i.kind === kind)) return;
+      set({ items: state.items.filter((i) => i.kind !== kind), lastId: state.lastId });
+    },
+    resetLastId: () => {
+      if (state.lastId === null) return;
+      set({ items: state.items, lastId: null });
     },
     clear: () => {
       epoch += 1;

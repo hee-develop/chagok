@@ -11,14 +11,14 @@ jest.mock('expo-notifications', () => ({
   requestPermissionsAsync: jest.fn(),
   scheduleNotificationAsync: jest.fn().mockResolvedValue('x'),
   addNotificationResponseReceivedListener: jest.fn(),
-  getLastNotificationResponseAsync: jest.fn().mockResolvedValue(null),
-  clearLastNotificationResponseAsync: jest.fn().mockResolvedValue(undefined),
+  getLastNotificationResponse: jest.fn().mockReturnValue(null),
+  clearLastNotificationResponse: jest.fn(),
 }));
 
 const mocked = Notifications as unknown as Record<string, jest.Mock>;
-const response = (data: Record<string, unknown>, actionIdentifier = 'expo.modules.notifications.actions.DEFAULT') => ({
+const response = (data: Record<string, unknown>, actionIdentifier = 'expo.modules.notifications.actions.DEFAULT', identifier = `req-${String(data.id)}`) => ({
   actionIdentifier,
-  notification: { date: 0, request: { identifier: 'x', trigger: null, content: { data } } },
+  notification: { date: 0, request: { identifier, trigger: null, content: { data } } },
 });
 
 describe('expoLocalNotifier', () => {
@@ -66,13 +66,49 @@ describe('expoLocalNotifier', () => {
     expect(remove).toHaveBeenCalled();
   });
 
-  it('알림으로 앱이 열렸다면(꺼져 있던 중의 누름) 마지막 응답을 한 번 전하고 지운다', async () => {
+  it('알림으로 앱이 열렸다면(꺼져 있던 중의 누름) 동기 API로 마지막 응답을 한 번 전하고 지운다', async () => {
     mocked.addNotificationResponseReceivedListener.mockReturnValue({ remove: jest.fn() });
-    mocked.getLastNotificationResponseAsync.mockResolvedValueOnce(response({ id: '10', kind: 'events-stale' }));
+    mocked.getLastNotificationResponse.mockReturnValueOnce(response({ id: '20', kind: 'events-stale' }));
     const handler = jest.fn();
     expoLocalNotifier.onTap(handler);
-    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(mocked.clearLastNotificationResponseAsync).toHaveBeenCalledTimes(1);
+    expect(mocked.clearLastNotificationResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it('같은 알림 응답은 한 번만 처리한다: 리스너로 받은 응답이 마지막 응답으로 남아 훅이 다시 붙어도 두 번 처리하지 않는다', async () => {
+    let listener: (r: unknown) => void = () => undefined;
+    mocked.addNotificationResponseReceivedListener.mockImplementation((l: (r: unknown) => void) => {
+      listener = l;
+      return { remove: jest.fn() };
+    });
+    const first = jest.fn();
+    expoLocalNotifier.onTap(first);
+    const tapped = response({ id: '30', kind: 'events-stale' });
+    listener(tapped);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(mocked.clearLastNotificationResponse).toHaveBeenCalled(); // 처리한 응답은 지운다
+    // 지우지 못했다고 해도(또는 지우기 전에 다시 붙어도) 같은 응답은 다시 전하지 않는다.
+    mocked.getLastNotificationResponse.mockReturnValueOnce(tapped);
+    const second = jest.fn();
+    expoLocalNotifier.onTap(second);
+    expect(second).not.toHaveBeenCalled();
+    // 다른 알림의 응답은 전한다.
+    listener(response({ id: '31', kind: 'events-stale' }));
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it('마지막 응답을 읽다 던져도 리스너는 동작한다', async () => {
+    let listener: (r: unknown) => void = () => undefined;
+    mocked.addNotificationResponseReceivedListener.mockImplementation((l: (r: unknown) => void) => {
+      listener = l;
+      return { remove: jest.fn() };
+    });
+    mocked.getLastNotificationResponse.mockImplementationOnce(() => {
+      throw new Error('x');
+    });
+    const handler = jest.fn();
+    expect(() => expoLocalNotifier.onTap(handler)).not.toThrow();
+    listener(response({ id: '40', kind: 'events-stale' }));
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 });

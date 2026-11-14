@@ -10,7 +10,7 @@ export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 export const isNotificationKind = (value: unknown): value is NotificationKind =>
   typeof value === 'string' && (NOTIFICATION_KINDS as readonly string[]).includes(value);
 
-/** 알림 한 건. `id`는 십진수 문자열이고 같은 서버 안에서 늘어나는 순서다(서버를 다시 켜도 시각 위에서 이어져 줄어들지 않는다). */
+/** 알림 한 건. `id`는 십진수 문자열이고 같은 서버 안에서 늘어나는 순서다(시각 위에서 이어져, 서버를 다시 켜도 시계가 뒤로 가지 않는 한 줄어들지 않는다. 폰은 `cursor`로 서버가 바뀐 것을 안다). */
 export type AppNotification = {
   id: string;
   kind: NotificationKind;

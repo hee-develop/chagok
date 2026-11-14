@@ -1,4 +1,7 @@
-/** 알림함 같은 작은 값을 폰에 오래 두는 곳. 기본은 AsyncStorage이고 테스트가 바꾼다. 실패는 호출하는 쪽이 삼킨다(저장이 안 돼도 이번 실행 동안은 메모리로 동작). */
+/**
+ * 알림함 같은 작은 값을 폰에 오래 두는 곳. 인터페이스는 일부러 `getItem`·`setItem`·`removeItem` 셋뿐이다 — J5a의 앱 공용 저장소(`storage/keyValueStore.ts`)가
+ * main에 들어오면 이 파일을 그쪽으로 합치고(같은 세 메서드로 맞추면 `inbox.ts`·`permission.ts`는 import만 바꾼다) 지운다.
+ * 기본은 AsyncStorage이고 테스트가 바꾼다. 실패는 호출하는 쪽이 삼킨다(저장이 안 돼도 이번 실행 동안은 메모리로 동작). */
 export type KeyValueStorage = {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;

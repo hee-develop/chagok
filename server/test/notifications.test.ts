@@ -138,6 +138,40 @@ describe('알림함(Outbox)', () => {
     expect(BigInt(later())).toBeGreaterThan(BigInt(y));
   });
 
+  it('IdClock.peek: id를 내지 않고, 지금까지 낸 가장 큰 id와 지금 시각 중 큰 값이다(시계가 뒤로 가도 줄지 않는다)', () => {
+    const clock = createIdClock(now);
+    expect(clock.peek()).toBe(String(clockMs * 1000));
+    expect(clock.peek()).toBe(String(clockMs * 1000)); // 호출해도 늘지 않는다
+    const issued = clock();
+    expect(clock.peek()).toBe(issued);
+    clockMs -= 60 * 60_000; // 시계가 한 시간 뒤로 감
+    expect(clock.peek()).toBe(issued);
+    expect(BigInt(clock())).toBeGreaterThan(BigInt(issued));
+  });
+
+  it('GET /notifications는 id 기준값(cursor)을 함께 준다: 폰이 자기 마지막 id가 이보다 크면 서버가 바뀐 것을 안다', async () => {
+    const t = fresh();
+    const a = await connect(t, '폰A');
+    const empty = await call(t.app, 'GET', '/notifications', { token: a.phoneToken });
+    expect(empty.body.cursor).toBe(String(T0 * 1000));
+    const made = t.notifier.notify(a.seatId, input());
+    const res = await call(t.app, 'GET', '/notifications?since=0', { token: a.phoneToken });
+    expect(res.body.cursor).toBe(made.ok ? made.id : '');
+    expect((await call(t.app, 'GET', '/notifications', { device: DEV_A })).body.cursor).toBe(res.body.cursor); // 토큰 없는 빈 목록에도 있다
+  });
+
+  it('dropKind: 그 자리의 그 종류만 지운다', () => {
+    const { notifier, outbox } = createNotifications({ now });
+    notifier.notify('s', input({ kind: 'events-stale' }));
+    notifier.notify('s', input({ kind: 'late-sms' }));
+    notifier.notify('t', input({ kind: 'events-stale' }));
+    expect(outbox.dropKind('s', 'events-stale')).toBe(1);
+    expect(outbox.list('s').map((n) => n.kind)).toEqual(['late-sms']);
+    expect(outbox.size('t')).toBe(1);
+    expect(outbox.dropKind('s', 'events-stale')).toBe(0);
+    expect(outbox.dropKind('nobody', 'events-stale')).toBe(0);
+  });
+
   it('parseSince: 없음·id·시각·잘못된 값', () => {
     expect(parseSince(undefined)).toBeUndefined();
     expect(parseSince('')).toBeUndefined();
@@ -182,9 +216,16 @@ describe('중복 억제와 notify 입력 검증', () => {
       input({ data: Object.fromEntries(Array.from({ length: 11 }, (_, i) => [`k${i}`, 'v'])) }),
       input({ dedupeKey: '' }),
       input({ dedupeKey: 'x'.repeat(101) }),
+      // FCM 예약 키(from·message_type·google*·gcm*)와 서버가 덮어쓰는 id·kind는 data 키로 쓸 수 없다(대소문자 무관).
+      ...['from', 'message_type', 'google.c.a.e', 'google.sent_time', 'gcm.notification.x', 'GCM.x', 'From', 'id', 'kind'].map((key) => input({ data: { [key]: 'v' } })),
     ];
     for (const b of bad) expect(notifier.notify('s', b as never)).toEqual({ ok: false, reason: 'invalid' });
     expect(outbox.size('s')).toBe(0);
+  });
+
+  it('예약 키와 비슷해도 예약어가 아니면 받는다(frommer·kind2·my.id)', () => {
+    const { notifier } = createNotifications({ now });
+    expect(notifier.notify('s', input({ data: { frommer: 'v', kind2: 'v', 'my.id': 'v', action: 'resend-events' } })).ok).toBe(true);
   });
 
   it('긴 제목·본문·data 값은 잘라 담는다', () => {
@@ -213,7 +254,7 @@ describe('토큰이 없는 요청과 자리 생명 주기', () => {
     const t = fresh();
     const a = await connect(t, '폰A');
     t.notifier.notify(a.seatId, input());
-    expect(await call(t.app, 'GET', '/notifications')).toEqual({ status: 200, body: { notifications: [], limit: MAX_LIST_SIZE } });
+    expect(await call(t.app, 'GET', '/notifications')).toEqual({ status: 200, body: { notifications: [], limit: MAX_LIST_SIZE, cursor: String(T0 * 1000) } });
     expect((await call(t.app, 'GET', '/notifications', { device: DEV_A })).body.notifications).toEqual([]);
     expect(await call(t.app, 'POST', '/notifications/ack', { device: DEV_A, body: { ids: ['1'] } })).toEqual({ status: 200, body: { acked: 0 } });
     expect(t.outbox.size(a.seatId)).toBe(1);

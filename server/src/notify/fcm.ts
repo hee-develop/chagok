@@ -112,9 +112,27 @@ export type ServiceAccount = { clientEmail: string; privateKey: string };
  * JWT: header `{ alg: RS256, typ: JWT }`, claim `{ iss, scope, aud: token 주소, iat, exp(iat+1시간) }`, 서명은 SHA256withRSA.
  * 요청: `POST https://oauth2.googleapis.com/token`, `application/x-www-form-urlencoded`, `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=<JWT>`.
  */
-export function createServiceAccountTokenProvider({ account, fetch: doFetch = globalThis.fetch as unknown as FetchLike, now = () => new Date() }: { account: ServiceAccount; fetch?: FetchLike; now?: () => Date }): () => Promise<string> {
+/** 접근 토큰 요청이 실패한 뒤 다시 시도하기까지 기다리는 시간: 30초에서 시작해 실패할 때마다 두 배, 최대 10분. 성공하면 처음으로 돌아간다. */
+export const TOKEN_RETRY_INITIAL_MS = 30_000;
+export const TOKEN_RETRY_MAX_MS = 10 * 60_000;
+
+export function createServiceAccountTokenProvider({
+  account,
+  fetch: doFetch = globalThis.fetch as unknown as FetchLike,
+  now = () => new Date(),
+  retryInitialMs = TOKEN_RETRY_INITIAL_MS,
+  retryMaxMs = TOKEN_RETRY_MAX_MS,
+}: {
+  account: ServiceAccount;
+  fetch?: FetchLike;
+  now?: () => Date;
+  retryInitialMs?: number;
+  retryMaxMs?: number;
+}): () => Promise<string> {
   let cached: { token: string; expiresAt: number } | null = null;
   let loading: Promise<string> | null = null;
+  // 요청이 실패하면 retryAt까지는 새 요청을 보내지 않고 그 오류를 그대로 던진다(알림마다 인증 서버를 두드리지 않게).
+  let failure: { retryAt: number; error: Error; delayMs: number } | null = null;
   const fetchToken = async () => {
     const iat = Math.floor(now().getTime() / 1000);
     const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
@@ -128,11 +146,24 @@ export function createServiceAccountTokenProvider({ account, fetch: doFetch = gl
     if (typeof json.access_token !== 'string' || json.access_token === '') throw new Error('FCM 인증 토큰 응답에 access_token이 없습니다');
     const expiresIn = typeof json.expires_in === 'number' && json.expires_in > 0 ? json.expires_in : 3600;
     cached = { token: json.access_token, expiresAt: now().getTime() + expiresIn * 1000 };
+    failure = null;
     return json.access_token;
+  };
+  const fetchWithBackoff = async () => {
+    try {
+      return await fetchToken();
+    } catch (e) {
+      // 던진 오류에는 서명·키 내용이 없다(상태 코드나 짧은 문구만). 이름과 메시지만 다음 호출에 다시 던진다.
+      const delayMs = failure === null ? retryInitialMs : Math.min(failure.delayMs * 2, retryMaxMs);
+      const error = e instanceof Error ? e : new Error('FCM 인증 토큰 요청 실패');
+      failure = { retryAt: now().getTime() + delayMs, error, delayMs };
+      throw error;
+    }
   };
   return async () => {
     if (cached && cached.expiresAt - 60_000 > now().getTime()) return cached.token;
-    loading ??= fetchToken().finally(() => {
+    if (failure !== null && now().getTime() < failure.retryAt) throw failure.error;
+    loading ??= fetchWithBackoff().finally(() => {
       loading = null;
     });
     return loading;

@@ -12,6 +12,15 @@ export const MAX_DATA_KEY_CHARS = 40;
 export const MAX_DATA_VALUE_CHARS = 200;
 export const MAX_DEDUPE_KEY_CHARS = 100;
 
+/**
+ * FCM `data` 키로 못 쓰는 예약어(공식 문서: 'from', 'message_type', 'google' 또는 'gcm'으로 시작하는 낱말)와, 폰에게 보낼 때 서버가 덮어쓰는 `id`·`kind`.
+ * 대소문자를 가리지 않고 거른다(`data`가 이 키를 가지면 `notify`가 `invalid`).
+ */
+export const isReservedDataKey = (key: string) => {
+  const lower = key.toLowerCase();
+  return lower === 'from' || lower === 'message_type' || lower === 'id' || lower === 'kind' || lower.startsWith('google') || lower.startsWith('gcm');
+};
+
 export type Notifier = {
   /**
    * 다른 묶음이 쓰는 서버 내부 함수: 한 자리(폰)에 알림을 만들어 모든 `PushSender`에 보낸다.
@@ -20,6 +29,8 @@ export type Notifier = {
   notify(seatId: string, input: NotifyInput): NotifyResult;
   /** 그 자리의 중복 억제 기록과 보낼 곳에 쌓아 둔 것을 버린다(자리 삭제·폰 바꾸기). */
   forget(seatId: string): void;
+  /** 알림 id의 현재 기준값(`IdClock.peek`). `GET /notifications`가 폰에게 알려 준다. */
+  cursor(): string;
 };
 
 export type NotifierOptions = {
@@ -30,13 +41,22 @@ export type NotifierOptions = {
   onError?: (error: unknown) => void;
 };
 
-/** id는 시각(밀리초 × 1000) 위에서 호출마다 1 이상 늘어난다: 서버를 다시 켜도 줄어들지 않아 폰의 `since`가 계속 맞는다. */
-export function createIdClock(now: () => Date): () => string {
+/** id는 시각(밀리초 × 1000) 위에서 호출마다 1 이상 늘어난다: 서버를 다시 켜도 시계가 뒤로 가지 않는 한 줄어들지 않아 폰의 `since`가 계속 맞는다. */
+export type IdClock = (() => string) & {
+  /**
+   * 지금까지 낸 가장 큰 id와 지금 시각 중 큰 값(아직 아무 id도 안 냈어도 같다). id를 내지 않는다.
+   * 폰이 자기가 기억한 마지막 id가 이 값보다 크면 서버가 바뀌었거나(다른 서버·재시작 뒤 시계가 뒤로 감) 마지막 id가 의미 없어진 것이다.
+   */
+  peek(): string;
+};
+
+export function createIdClock(now: () => Date): IdClock {
   let last = 0;
-  return () => {
+  const next = () => {
     last = Math.max(last + 1, now().getTime() * 1000);
     return String(last);
   };
+  return Object.assign(next, { peek: () => String(Math.max(last, now().getTime() * 1000)) });
 }
 
 const clip = (value: string, max: number) => (value.length > max ? value.slice(0, max) : value);
@@ -48,7 +68,7 @@ function sanitize(input: NotifyInput): Pick<AppNotification, 'kind' | 'title' | 
   const entries = Object.entries(input.data ?? {});
   if (entries.length > MAX_DATA_ENTRIES) return null;
   for (const [key, value] of entries) {
-    if (key === '' || typeof value !== 'string') return null;
+    if (key === '' || typeof value !== 'string' || isReservedDataKey(key)) return null;
     data[clip(key, MAX_DATA_KEY_CHARS)] = clip(value, MAX_DATA_VALUE_CHARS);
   }
   return { kind: input.kind, title: clip(input.title.trim(), MAX_TITLE_CHARS), body: clip(input.body, MAX_BODY_CHARS), data };
@@ -103,6 +123,7 @@ export function createNotifier({ now = () => new Date(), senders, dedupeTtlMs = 
       seen.delete(seatId);
       for (const sender of senders) sender.forget?.(seatId);
     },
+    cursor: () => nextId.peek(),
   };
 }
 

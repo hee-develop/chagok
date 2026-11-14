@@ -28,7 +28,7 @@ describe('useEventSync', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
-  const makeSync = (): EventSync => ({ run: jest.fn().mockResolvedValue('sent'), stop: jest.fn(), rememberSelection: jest.fn(), lastResult: () => null });
+  const makeSync = (): EventSync => ({ run: jest.fn().mockResolvedValue('sent'), stop: jest.fn(), rememberSelection: jest.fn(), lastResult: () => null, inFlight: () => null, subscribe: () => () => undefined });
 
   it('앱을 열 때 한 번, 앞으로 올 때(active)마다 보낸다. 뒤로 갈 때는 보내지 않는다', async () => {
     const sync = makeSync();

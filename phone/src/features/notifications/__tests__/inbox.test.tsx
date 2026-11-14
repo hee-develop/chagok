@@ -3,7 +3,7 @@ import { Text } from 'react-native';
 
 import { createInbox, INBOX_KEY, INBOX_TTL_MS, MAX_INBOX_ITEMS, useInbox } from '../inbox';
 import { createMemoryStorage } from '../keyValue';
-import { idsOf, note } from '../testSupport';
+import { idsOf, note } from '../../../__tests__/support/notifications';
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -107,6 +107,48 @@ describe('폰 알림함(createInbox)', () => {
     await next.load();
     expect(next.getState()).toMatchObject({ items: [], lastId: null });
     expect((await inbox.add([note('10')])).length).toBe(1); // lastId를 잊었으니 다시 담긴다
+  });
+});
+
+describe('폰 알림함: 종류 지우기·건너뛰기·마지막 id 버리기', () => {
+  it('dismissKind는 그 종류만 모두 지우고 lastId는 그대로라 지운 알림이 다시 나타나지 않는다. 지울 것이 없으면 알리지 않는다', async () => {
+    const inbox = createInbox({ storage: createMemoryStorage() });
+    await inbox.add([note('1'), note('2', { kind: 'late-sms' }), note('3')]);
+    const listener = jest.fn();
+    inbox.subscribe(listener);
+    inbox.dismissKind('events-stale');
+    expect(idsOf(inbox)).toEqual(['2']);
+    expect(inbox.getState().lastId).toBe('3');
+    expect(listener).toHaveBeenCalledTimes(1);
+    inbox.dismissKind('events-stale');
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(await inbox.add([note('1'), note('3')])).toEqual([]);
+  });
+
+  it('skip에 든 id는 담지도 돌려주지도 않지만 lastId는 넘어간다', async () => {
+    const inbox = createInbox({ storage: createMemoryStorage() });
+    const added = await inbox.add([note('1'), note('2')], { skip: new Set(['2']) });
+    expect(added.map((i) => i.id)).toEqual(['1']);
+    expect(idsOf(inbox)).toEqual(['1']);
+    expect(inbox.getState().lastId).toBe('2');
+    const onlySkipped = createInbox({ storage: createMemoryStorage() });
+    expect(await onlySkipped.add([note('5')], { skip: new Set(['5']) })).toEqual([]);
+    expect(onlySkipped.getState()).toMatchObject({ items: [], lastId: '5' });
+  });
+
+  it('resetLastId는 lastId만 잊고 알림은 남긴다. 이미 가진 id는 다시 담지 않고 새 id만 담는다', async () => {
+    const storage = createMemoryStorage();
+    const inbox = createInbox({ storage });
+    await inbox.add([note('900')]);
+    inbox.resetLastId();
+    expect(inbox.getState()).toMatchObject({ lastId: null });
+    expect(idsOf(inbox)).toEqual(['900']);
+    expect((await inbox.add([note('900'), note('510')])).map((i) => i.id)).toEqual(['510']);
+    expect(inbox.getState().lastId).toBe('900');
+    await flush();
+    const next = createInbox({ storage });
+    await next.load();
+    expect(next.getState().lastId).toBe('900');
   });
 });
 

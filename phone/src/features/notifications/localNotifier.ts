@@ -40,6 +40,25 @@ const prepare = () => {
   return prepared;
 };
 
+const clearLast = () => {
+  try {
+    Notifications.clearLastNotificationResponse();
+  } catch {
+    // 지우지 못해도 처리 기록이 두 번째 전달을 막는다.
+  }
+};
+
+/** 이미 처리한 응답(시스템 알림 request identifier). 앱이 떠 있는 동안만, 오래된 것부터 잊는다. */
+const handledResponses = new Set<string>();
+const MAX_HANDLED_RESPONSES = 100;
+/** 처음 보는 응답이면 기록하고 true, 이미 처리했으면 false. */
+const markHandled = (key: string) => {
+  if (handledResponses.has(key)) return false;
+  handledResponses.add(key);
+  while (handledResponses.size > MAX_HANDLED_RESPONSES) handledResponses.delete(handledResponses.values().next().value as string);
+  return true;
+};
+
 const tapOf = (response: Notifications.NotificationResponse): NotificationTap | null => {
   if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return null;
   const raw = response.notification.request.content.data as Record<string, unknown> | null | undefined;
@@ -64,20 +83,28 @@ export const expoLocalNotifier: LocalNotifier = {
   },
   onTap: (handler) => {
     void prepare();
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    // 같은 응답을 두 번 처리하지 않는다: 리스너로 이미 받은 응답이 '마지막 응답'으로 남아 있다가, 훅이 다시 붙을 때(재실행·다시 그리기) 한 번 더 오는 것을 막는다.
+    const deliver = (response: Notifications.NotificationResponse) => {
       const tap = tapOf(response);
-      if (tap) handler(tap);
+      if (tap === null) return;
+      const key = response.notification.request.identifier;
+      if (key && !markHandled(key)) return;
+      handler(tap);
+    };
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      deliver(response);
+      clearLast();
     });
-    // 앱이 꺼져 있다가 알림을 눌러 열렸다면 그 응답은 리스너가 붙기 전에 왔으니 한 번 꺼내서 전하고 지운다.
-    void Notifications.getLastNotificationResponseAsync()
-      .then(async (response) => {
-        const tap = response ? tapOf(response) : null;
-        if (tap) {
-          handler(tap);
-          await Notifications.clearLastNotificationResponseAsync();
-        }
-      })
-      .catch(() => undefined);
+    // 앱이 꺼져 있다가 알림을 눌러 열렸다면 그 응답은 리스너가 붙기 전에 왔으니 동기 API로 꺼내서 전하고 지운다(SDK 58: `getLastNotificationResponse`·`clearLastNotificationResponse`).
+    try {
+      const last = Notifications.getLastNotificationResponse();
+      if (last) {
+        deliver(last);
+        clearLast();
+      }
+    } catch {
+      // 마지막 응답을 못 읽어도 리스너는 동작한다.
+    }
     return () => subscription.remove();
   },
 };

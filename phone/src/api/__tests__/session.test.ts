@@ -155,6 +155,39 @@ describe('기기 id', () => {
   });
 });
 
+describe('토큰이 지워질 때의 알림(onTokenCleared)', () => {
+  it('clearToken(연결 끊기)과 401로 버릴 때 부르고, 해제하면 부르지 않는다. 리스너가 던져도 토큰은 지워진다', async () => {
+    const storage = memoryStorage('t');
+    const session = createSession(storage);
+    const cleared = jest.fn();
+    const off = session.onTokenCleared(cleared);
+    session.onTokenCleared(() => {
+      throw new Error('x');
+    });
+    await session.clearToken();
+    expect(cleared).toHaveBeenCalledTimes(1);
+    expect(await session.getToken()).toBeNull();
+    expect(storage.value()).toBeNull();
+    await session.setToken('u');
+    expect(cleared).toHaveBeenCalledTimes(1); // 저장은 알리지 않는다
+    await withSessionReset(session, jest.fn(async () => new Response(null, { status: 401 })))('http://x/notifications', { headers: { authorization: 'Bearer u' } });
+    expect(cleared).toHaveBeenCalledTimes(2);
+    off();
+    await session.setToken('v');
+    await session.clearToken();
+    expect(cleared).toHaveBeenCalledTimes(2);
+  });
+
+  it('오래된 요청의 401이 새 토큰을 지우지 않으면 알리지도 않는다', async () => {
+    const session = createSession(memoryStorage('stale'));
+    const cleared = jest.fn();
+    session.onTokenCleared(cleared);
+    await session.setToken('fresh');
+    await withSessionReset(session, jest.fn(async () => new Response(null, { status: 401 })))('http://x/events', { headers: { authorization: 'Bearer stale' } });
+    expect(cleared).not.toHaveBeenCalled();
+  });
+});
+
 describe('withSessionReset', () => {
   const respond = (status: number) => jest.fn(async () => new Response(null, { status }));
 
