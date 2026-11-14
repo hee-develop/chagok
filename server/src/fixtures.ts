@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { DayFixture, MockCalendar, MockPlace, PlaceSuggestion, PlacesCatalog, RememberedPlace } from './fixture-types.js';
+import type { DayFixture, FamilyMember, MockCalendar, MockPlace, PlaceSuggestion, PlacesCatalog, RememberedPlace } from './fixture-types.js';
 
 export type { DayFixture, MockCalendar, PlaceFixture, ScheduleFixture } from './fixture-types.js';
 
@@ -206,4 +206,33 @@ export function loadPlacesCatalog(
     }
   };
   return parsePlacesCatalog(read(placesLocation, '목 장소'), read(suggestionsLocation, '장소 추천'), read(rememberedLocation, '기억한 장소'));
+}
+
+/** 저장소 루트 fixtures/family/members.json: 미리 묶어 둔 가족(시연용 계정). 받는 쪽 앱은 아직 프로토타입이다. */
+export const FAMILY_MEMBERS_URL = new URL('../../fixtures/family/members.json', import.meta.url);
+
+/** 가족 목록을 검증한다. 한 명 이상, id·이름은 빈 글이 아니고 id는 겹치지 않는다. */
+export function parseFamilyMembers(value: unknown): FamilyMember[] {
+  const members = (value as { members?: unknown } | null)?.members;
+  if (!Array.isArray(members) || members.length === 0) throw new Error('가족 형식이 올바르지 않습니다: members 배열이 필요합니다');
+  const seen = new Set<string>();
+  return members.map((m, i) => {
+    const v = m as Record<string, unknown> | null;
+    if (!v || typeof v.id !== 'string' || v.id.trim() === '' || typeof v.name !== 'string' || v.name.trim() === '') {
+      throw new Error(`가족 형식이 올바르지 않습니다: members[${i}]에 id·name 문자열이 필요합니다`);
+    }
+    if (seen.has(v.id)) throw new Error(`가족 id가 겹칩니다: ${v.id}`);
+    seen.add(v.id);
+    return { id: v.id, name: v.name };
+  });
+}
+
+export function loadFamilyMembers(location: URL | string = FAMILY_MEMBERS_URL): FamilyMember[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(location, 'utf8'));
+  } catch (e) {
+    throw new Error(`가족 목록을 읽을 수 없습니다(${String(location)}): ${(e as Error).message}`);
+  }
+  return parseFamilyMembers(parsed);
 }

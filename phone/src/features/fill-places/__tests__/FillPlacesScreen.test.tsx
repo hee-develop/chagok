@@ -14,7 +14,7 @@ jest.mock('expo-router', () => {
   };
 });
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
-const empty: SetupSchedule = { id: 'lunch', title: '육전집 점심', start: '2026-11-06T04:00:00Z', end: '2026-11-06T05:00:00Z', place: null, locationText: null, noTravel: false, noTravelReason: null, care: null, suggestion: null };
+const empty: SetupSchedule = { id: 'lunch', title: '육전집 점심', start: '2026-11-06T04:00:00Z', end: '2026-11-06T05:00:00Z', place: null, locationText: null, noTravel: false, noTravelReason: null, care: null, suggestion: null, familyRequests: [] };
 const resolved: SetupSchedule = { ...empty, id: 'game', title: 'KIA 직관', place: { name: '챔피언스필드', lat: 35.1, lng: 126.8 } };
 const makeApi = (overrides: Partial<SchedulePlacesApi> = {}) => ({
   fetchSchedules: jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [empty, resolved] }),
@@ -178,4 +178,14 @@ it('차로 가는 일정에는 채비 줄을 두고, 적어 둔 채비는 보여
   expect(mockPush).toHaveBeenCalledWith({ pathname: '/setup/schedule-care', params: { scheduleId: 'kia', title: 'KIA 직관', care: '유니폼·응원봉·티켓' } });
   await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 채비 넣기' }));
   expect(mockPush).toHaveBeenLastCalledWith({ pathname: '/setup/schedule-care', params: { scheduleId: 'lunch', title: '육전집 점심', care: '' } });
+});
+
+it('차로 가는 일정에는 가족에게 보내기 줄을 두고, 보낸 가족은 전달됨으로 보인다', async () => {
+  const kia: SetupSchedule = { ...resolved, id: 'kia', familyRequests: [{ memberId: 'family-mom', name: '엄마', status: 'delivered', sentAt: '2026-11-06T00:20:00Z' }] };
+  const filtered: SetupSchedule = { ...empty, id: 'zoom', title: '주간 회의', noTravel: true, noTravelReason: 'online' };
+  await renderScreen(makeApi({ fetchSchedules: jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [empty, kia, filtered] }) }));
+  expect(await screen.findByText('엄마에게 전달됨')).toBeOnTheScreen();
+  expect(screen.queryByRole('button', { name: '주간 회의 가족에게 보내기' })).toBeNull();
+  await fireEvent.press(screen.getByRole('button', { name: 'KIA 직관 가족에게 보내기' }));
+  expect(mockPush).toHaveBeenCalledWith({ pathname: '/setup/family-send', params: { scheduleId: 'kia', title: 'KIA 직관' } });
 });

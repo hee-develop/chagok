@@ -1,0 +1,6 @@
+{
+  "members": [
+    { "id": "family-mom", "name": "엄마" },
+    { "id": "family-brother", "name": "동생" }
+  ]
+}
