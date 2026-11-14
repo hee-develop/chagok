@@ -13,6 +13,7 @@ import com.chagok.car.ui.CandidateRow
 import com.chagok.car.ui.CardContent
 import com.chagok.car.ui.TileRow
 import com.chagok.car.ui.TileView
+import java.text.BreakIterator
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -35,9 +36,14 @@ object Phrases {
 
     // 카드 머리 상태 칩(StatusChip). 다른 문구를 만들지 않는다.
     const val STATUS_BEFORE_DEPARTURE = "정차 중 · 출발 전"
+    const val STATUS_BEFORE_EXIT = "도착 · 내리기 전"
     const val STATUS_PAIRING = "휴대폰 연결 전"
     const val PAIRING_VOICE = "휴대폰과 연결해 주세요."
     const val PAIRING_SUB = "휴대폰 차곡 앱에서 QR을 찍거나 번호를 넣어 주세요."
+
+    // 하차 카드(일정 장소). 질문이 없고 한 번 말하고 끝난다.
+    const val GOT_IT = "챙겼어요"
+    const val EXIT_GREETING = "잘 다녀오세요."
 
     // 버튼 라벨은 운전자가 소리 내 말할 문장 그대로
     const val ACCEPT_DEPART = "응, 출발"
@@ -326,6 +332,122 @@ object Phrases {
         }
     }
 
+    /**
+     * 하차 카드(정책서 4·6·9장, 시안 Arrive): 일정 장소에 도착해 P단에 넣었을 때 한 번 말하고 [timeout](기본 [Rules.EXIT_CARD]) 뒤 닫힌다. 질문은 없다.
+     * 읽을 글은 앱 채비가 있으면 그것, 없으면 일정 메모다([MemoNote.forExit]). 문구의 "메모"는 앱 채비일 때 "채비"가 된다. 글을 이렇게 가른다(사용자 결정 2026-11-11).
+     * - 챙길 것 목록: '·' ',' '/'로 나뉜 항목이 둘 이상이거나 띄어쓰기 없는 짧은 말(한 단어)이면 "유니폼·응원봉·티켓 챙기세요!" + 채비 타일 + 한 줄 + [챙겼어요]
+     * - 문장형(예 '주차는 B2', '3루 출입구에서 만나기'): 챙길 것이라 단정하지 않고 탑승 카드와 같은 "{일정} 메모에 ‘…’가 있어요." + [챙겼어요](타일 없음)
+     * - 길거나 여러 줄: "{일정} 메모가 있어요." + [챙겼어요]
+     * - 글이 없거나 항목이 모두 비면('·'만 등): 인사 "잘 다녀오세요."(alert 한 문장, 버튼 없음)
+     * 큰 문구는 두 줄까지라 제목은 [shortTitle]로 줄인다. 오늘 요약 줄(주행 거리·충전·내비 조작)은 두지 않는다.
+     * 말은 [spoken] 대신 [exitSpoken]을 쓴다(한 줄은 화면에서 읽는 보조 정보다).
+     */
+    fun exitCard(schedule: Schedule, timeout: Duration = Rules.EXIT_CARD): CardContent {
+        val base = CardContent(
+            status = STATUS_BEFORE_EXIT,
+            voice = "",
+            hints = listOf(exitAutoCloseHint(timeout)),
+            autoDismiss = timeout,
+            fixedHeight = false,
+        )
+        val title = shortTitle(schedule.title)
+        return when (val text = exitText(schedule)) {
+            ExitText.Greeting -> base.copy(voice = EXIT_GREETING, alert = true)
+            is ExitText.Has -> base.copy(voice = "$title ${text.noun}가 있어요.", primary = GOT_IT)
+            is ExitText.Items -> base.copy(
+                voice = "${text.items.joinToString("·")} 챙기세요!",
+                tiles = listOf(TileView.Care(text.items)),
+                footnote = "‘$title’ 일정 ${text.noun}: ${text.raw}",
+                primary = GOT_IT,
+            )
+            is ExitText.Sentence -> base.copy(voice = "$title ${text.noun}에 ‘${text.raw}’${iGaJosa(text.raw)} 있어요.", primary = GOT_IT)
+        }
+    }
+
+    /** 하차 카드가 읽을 글의 갈래. [noun]은 메모 출처면 "메모", 앱 채비 출처면 "채비". */
+    private sealed interface ExitText {
+        data object Greeting : ExitText
+        data class Has(val noun: String) : ExitText
+        data class Items(val items: List<String>, val raw: String, val noun: String) : ExitText
+        data class Sentence(val raw: String, val noun: String) : ExitText
+    }
+
+    private fun exitText(schedule: Schedule): ExitText {
+        val exitNote = MemoNote.forExit(schedule)
+        val noun = if (exitNote.fromCare) "채비" else "메모"
+        return when (val memo = exitNote.note) {
+            MemoNote.None -> ExitText.Greeting
+            MemoNote.HasMemo -> ExitText.Has(noun)
+            is MemoNote.ReadAloud -> {
+                // 항목 끝의 문장부호('우산!')는 떼고 판정·표시한다. 문장부호만 있던 항목은 빈 항목이다.
+                val items = careItems(memo.text).map { it.trimEnd(*TRAILING_PUNCTUATION) }.filter { it.isNotEmpty() }
+                when {
+                    items.isEmpty() -> ExitText.Greeting
+                    // 링크·시각 꼴('meet.google.com/abc', '10:30/11:00')은 '/'로 나뉘어도 챙길 것 목록이 아니다.
+                    // 숫자가 든 한 단어('010-1234-5678', 'B2-15', '301호')는 번호·코드라 챙길 것으로 보지 않는다(구분자로 나뉜 둘 이상은 목록).
+                    !looksLikeLinkOrTime(memo.text) &&
+                        (items.size >= 2 || items.single().none { it.isWhitespace() || it.isDigit() }) ->
+                        ExitText.Items(items, memo.text, noun)
+                    else -> ExitText.Sentence(memo.text, noun)
+                }
+            }
+            is MemoNote.Care -> error("MemoNote.forExit는 Care를 돌려주지 않는다")
+        }
+    }
+
+    /**
+     * 하차 카드에서 말하는 문장. 화면 큰 문구와 같되 제목은 줄이지 않은 전체 제목이고(탑승 문구와 같게) TTS가 따옴표를 읽지 않게 ‘ ’는 뺀다.
+     * 카드는 5초 뒤 닫히고 말은 닫힐 때 멈추므로 말할 문장은 [Rules.MEMO_READ_MAX_CHARS]자(탑승 브리핑이 채비를 읽는 한계와 같은 상수) 안이어야 한다.
+     * 넘으면 앞에서부터 차례로 더 짧은 문장을 고른다. 항목은 화면에 남는다.
+     * - 목록: 항목을 읽는 문장 → "{일정} 챙길 것이 있어요."(앱 채비 출처면 "{일정} 채비가 있어요.")
+     * - 문장형: 메모를 읽는 문장 → "{일정} 메모가 있어요."(앱 채비 출처면 "{일정} 채비가 있어요.")
+     * - 마지막 문장도 넘으면 제목을 [shortTitle]로 줄인 같은 문장(그래도 넘으면 그대로 말한다)
+     */
+    fun exitSpoken(schedule: Schedule): String {
+        val text = exitText(schedule)
+        if (text == ExitText.Greeting) return EXIT_GREETING
+        val full = schedule.title
+        val short = shortTitle(full)
+        fun candidates(title: String): List<String> = when (text) {
+            ExitText.Greeting -> emptyList()
+            is ExitText.Has -> listOf("$title ${text.noun}가 있어요.")
+            is ExitText.Items -> listOf(
+                "${text.items.joinToString("·")} 챙기세요!",
+                if (text.noun == "채비") "$title 채비가 있어요." else "$title 챙길 것이 있어요.",
+            )
+            is ExitText.Sentence -> listOf(
+                "$title ${text.noun}에 ${text.raw}${iGaJosa(text.raw)} 있어요.",
+                "$title ${text.noun}가 있어요.",
+            )
+        }
+        val ordered = candidates(full) + candidates(short).takeLast(1)
+        return ordered.firstOrNull { it.length <= Rules.MEMO_READ_MAX_CHARS } ?: ordered.last()
+    }
+
+    /** 메모가 URL이나 시각 꼴을 담았는가. 그러면 '·' ',' '/' 로 나뉘어도 챙길 것 목록으로 보지 않는다. */
+    fun looksLikeLinkOrTime(memo: String): Boolean = LINK_OR_TIME.containsMatchIn(memo)
+
+    /** 하차 카드 힌트 "5초 뒤 자동으로 닫혀요". 시간은 카드의 닫힘 시간에서 가져온다. */
+    fun exitAutoCloseHint(timeout: Duration) = "${timeout.seconds}초 뒤 자동으로 닫혀요"
+
+    /**
+     * 큰 문구에 넣는 제목. 사람이 한 글자로 읽는 단위(자소 묶음)로 [max]자를 넘으면 앞 (max-1)자 + '…'로 줄여 문구가 두 줄 안에 들게 한다.
+     * 코드포인트가 아니라 [BreakIterator] 글자 경계로 자르므로 ZWJ 이모지·변형 선택자·결합 문자를 가르지 않는다.
+     */
+    fun shortTitle(title: String, max: Int = TITLE_MAX): String {
+        val boundaries = BreakIterator.getCharacterInstance()
+        boundaries.setText(title)
+        var count = 0
+        var cut = 0
+        var next = boundaries.next()
+        while (next != BreakIterator.DONE) {
+            count++
+            if (count == max - 1) cut = next
+            next = boundaries.next()
+        }
+        return if (count <= max) title else title.substring(0, cut).trimEnd() + "…"
+    }
+
     /** 일정을 불러오지 못했을 때 보이는 카드. 닫기 하나. */
     /**
      * 휴대폰과 연결하기 전 카드. QR과 숫자 6자리를 보이고 말하지 않는다. 버튼은 없다(연결되면 접힌다).
@@ -388,4 +510,16 @@ object Phrases {
         memo.split('·', ',', '，', '、', '/').map { it.trim() }.filter { it.isNotEmpty() }
 
     private const val MAX_TILE_ROWS = 3
+
+    /** 큰 문구에 넣는 제목의 최대 글자 수 */
+    private const val TITLE_MAX = 12
+
+    /**
+     * 링크·시각 꼴: 시각(10:30), 주소 머리(https://, www.), 도메인(끝이 알파벳 TLD: naver.com, a.co.kr, meet.google.com/abc).
+     * '1.5L/우산'의 '1.5L'처럼 끝이 숫자·단위인 꼴은 도메인이 아니다.
+     */
+    private val LINK_OR_TIME = Regex("""\d{1,2}:\d{2}|https?://|www\.|(?<![A-Za-z0-9-])([A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?![A-Za-z0-9-])""", RegexOption.IGNORE_CASE)
+
+    /** 하차 카드 항목 끝에서 떼는 문장부호 */
+    private val TRAILING_PUNCTUATION = charArrayOf('!', '?', '.', '…', '~', '！', '？', '。')
 }

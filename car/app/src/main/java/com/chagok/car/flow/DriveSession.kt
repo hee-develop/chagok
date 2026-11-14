@@ -117,6 +117,13 @@ data class Snapshot(
     val date: LocalDate,
     /** 일정을 불러오지 못했다는 안내를 마지막으로 한 날짜. 같은 날 프로세스가 다시 시작돼도 안내를 반복하지 않는다. */
     val noticeDate: LocalDate? = null,
+    /**
+     * 도착이 기록됐지만 아직 하차 카드를 못 보인 일정 ID(P단에 넣으면 카드를 보이고 지운다). 프로세스가 다시 떠도 이어지게 저장한다.
+     * 이전 저장분에는 없어 null.
+     */
+    val exitTargetId: String? = null,
+    /** [exitTargetId]의 도착을 기록한 시각. [Rules.EXIT_PENDING_MAX]가 지나면 대기를 버린다. 없으면 만료된 것으로 본다. */
+    val exitArrivedAt: Instant? = null,
 )
 
 /** 세션이 내보내는 출력. 어댑터는 이것을 실행하기만 한다. */
@@ -183,6 +190,8 @@ class DriveSession(
     restored: Snapshot? = null,
     /** 휴대폰과 연결돼 있는가. 연결 전에는 탑승해도 브리핑하지 않고 연결 카드(QR·숫자)만 보인다. */
     paired: Boolean = true,
+    /** 하차 카드를 띄워 두는 시간. 기본은 [Rules.EXIT_CARD]이고 debug E2E만 늘려 쓴다(release는 항상 기본). */
+    private val exitCardTimeout: () -> Duration = { Rules.EXIT_CARD },
 ) {
     private val zone get() = clock.zone
 
@@ -247,6 +256,16 @@ class DriveSession(
     /** P단에 넣으며 위치를 물었고 아직 답을 받지 않았다. 답이 오면 도착을 판단한다. */
     private var awaitingParkLocation = false
 
+    /**
+     * 도착이 기록됐고 하차 카드를 아직 보이지 않은 일정 ID(4장: 도착 뒤 실제로 달린 다음 P단에서만 말한다).
+     * 카드를 보이거나 버리거나, 새 길안내를 수락하거나, 초기화·날짜 변경·시동 끔·연결 해제·실제 탑승 판단이 시작되면 지운다.
+     */
+    private var exitTargetId: String? = restored?.exitTargetId
+    private var exitArrivedAt: Instant? = restored?.exitArrivedAt
+
+    /** 마지막으로 P단이 된 것이 달린 뒤였는가. 이미 P단일 때 도착이 기록되면 이것이 true일 때만 바로 하차 카드를 띄운다. */
+    private var lastParkWasRun = false
+
     private var paired = paired
 
     /** 연결 전 마지막으로 받은 연결 코드. 연결되면 버린다. */
@@ -272,10 +291,14 @@ class DriveSession(
         val isScheduleNotice: Boolean = false,
         /** 휴대폰 연결 카드인가. 시간이 지나도 접지 않고 연결되면 접는다. */
         val isPairing: Boolean = false,
+        /** 하차 카드인가. 질문이 없고 [챙겼어요] 또는 [Rules.EXIT_CARD] 뒤 닫힌다. */
+        val isExit: Boolean = false,
     )
 
     init {
         if (restored != null && restored.date == statusDate) statuses = restored.statuses
+        // 저장분의 날짜가 오늘이 아니면(어제 저장 뒤 자정을 넘겨 다시 뜸) 하차 대기도 지난 날의 것이라 버린다.
+        if (restored != null && restored.date != statusDate) clearExit()
         lastSaved = snapshot()
     }
 
@@ -286,7 +309,7 @@ class DriveSession(
     /** 지금 주행 중인가(기어 D·R 또는 주행 제한). 기어를 모르면 false. */
     val isDriving: Boolean get() = motion() == Motion.DRIVING
     private fun plan() = DayPlan(schedules, statuses)
-    private fun snapshot() = Snapshot(log, statuses, statusDate, noticeSpokenOn)
+    private fun snapshot() = Snapshot(log, statuses, statusDate, noticeSpokenOn, exitTargetId, exitArrivedAt)
 
     fun handle(event: Event): List<Effect> {
         val out = mutableListOf<Effect>()
@@ -319,6 +342,12 @@ class DriveSession(
             rollDate()
             statuses = plan().skipOverdue(now()).statuses
         }
+        // 도착 뒤 오래 지난 하차 대기는 버린다(도착 알림 뒤 다른 곳에서 한참 있다 P단에 넣어도 하차가 아니다).
+        if (exitTargetId != null) {
+            val arrivedAt = exitArrivedAt
+            // 시계가 뒤로 가 도착 시각이 지금보다 미래가 돼도 만료로 본다(BoardingLog.classify의 잠깐 정차 판정과 같은 취지).
+            if (arrivedAt == null || arrivedAt.isAfter(now()) || Duration.between(arrivedAt, now()) > Rules.EXIT_PENDING_MAX) clearExit()
+        }
         when (event) {
             Event.Boarded -> onBoarded(out)
             is Event.IgnitionChanged -> onIgnition(event.ignition, out)
@@ -329,6 +358,8 @@ class DriveSession(
             is Event.RestrictionChanged -> {
                 restricted = event.requiresDistractionOptimization
                 enforceDriving(out)
+                // 주행 제한이 풀려 P단에서 정차로 돌아오면 미뤄 둔 하차 카드를 보인다.
+                if (gear == Gear.PARK) showExitCard(out)
             }
             is Event.TravelTimeResult -> onTravelTime(event, out)
             is Event.RouteRequestResult -> onRouteResult(event.ok, out)
@@ -343,8 +374,8 @@ class DriveSession(
             is Event.CandidatePressed -> onCandidate(event.index, out)
             is Event.CardTimedOut -> if (card?.timerId == event.timerId) closeCard(out)
             Event.Reset -> onReset(out)
-            is Event.LocationChanged -> onLocation(event.position)
-            Event.DestinationArrived -> onDestinationArrived()
+            is Event.LocationChanged -> onLocation(event.position, out)
+            Event.DestinationArrived -> onDestinationArrived(out)
             is Event.ScheduleLoading, is Event.ScheduleLoaded -> if (loadedNow) onSchedulesLoaded(out)
             is Event.PairingCodeIssued -> onPairingCode(event, out)
             is Event.Paired -> onPaired(event.brief, out)
@@ -373,6 +404,8 @@ class DriveSession(
         val midnight = today.atStartOfDay(zone).toInstant()
         val spanning = schedules.filter { it.start.isBefore(midnight) && it.end.isAfter(now) }.map { it.id }.toSet()
         statuses = statuses.filterKeys { it in spanning }
+        // 지난 날의 하차 카드는 보이지 않는다.
+        clearExit()
     }
 
     /** 말은 정차 중에만 한다(6장). Suspend 중에도 하지 않는다. */
@@ -406,6 +439,9 @@ class DriveSession(
         pending = null
         acceptedRoute = false
         heldBoarding = false
+        // 시동을 끄면 내릴 때가 된 것이라 아직 못 보인 하차 카드는 접는다.
+        clearExit()
+        lastParkWasRun = false
         clearResult(out)
         if (card != null) closeCard(out, instant = true) else out += Effect.StopVoice
         forceSave = true
@@ -433,11 +469,18 @@ class DriveSession(
             heldBoarding = true
             return
         }
-        // 질문 카드가 떠 있으면 새 탑승은 무시한다. 일정 안내 카드는 다시 판단한다.
-        val notice = card?.isScheduleNotice == true
-        if (card != null && !notice) return
         val kind = log.classify(now(), zone)
+        // 질문 카드가 떠 있으면 새 탑승은 무시한다. 일정 안내 카드는 다시 판단한다.
+        // 하차 카드가 떠 있을 때의 탑승 신호는 5장 '잠깐 정차'를 따른다: 방금 P단에 넣은 뒤 10분 안이면 탑승이 아니라 카드를 그대로 둔다.
+        // 10분이 지난 진짜 탑승이면(도착 알림이 이미 정차 중에 와서 P단 기록이 오래된 경우 등) 이미 내릴 때가 지난 카드라 접고 탑승 판단을 이어 간다.
+        val notice = card?.isScheduleNotice == true
+        val exiting = card?.isExit == true
+        if (card != null && !notice && !exiting) return
         if (kind == BoardingKind.QUICK_STOP) return
+        // 진짜 탑승이 시작되면 못 보인 하차 카드는 더 보이지 않고, 그 P단은 더 '방금 달려 와 댄 P단'이 아니다.
+        clearExit()
+        lastParkWasRun = false
+        if (exiting) closeCard(out, instant = true)
         if (origin != ScheduleOrigin.FRESH && allowRefresh) {
             loadingSchedules = true
             loadGeneration = AWAITING_GENERATION
@@ -506,6 +549,7 @@ class DriveSession(
         pending = null
         acceptedRoute = false
         heldBoarding = false
+        clearExit()
         clearResult(out)
         if (card != null) closeCard(out, instant = true)
     }
@@ -543,6 +587,7 @@ class DriveSession(
         if (decision !is BoardingDecision.Card) return
         // 탑승은 카드를 실제로 띄울 때 기록한다. 판단 중에 D로 바뀌어 카드가 안 뜨면 그날 첫 탑승을 소진하지 않는다.
         log = log.boarded(now(), zone)
+        lastParkWasRun = false
         val question = decision.question
         if (question is Question.DepartLate) statuses = plan().markLate(question.target.id).statuses
 
@@ -568,13 +613,23 @@ class DriveSession(
             awaitingParkLocation = false
         }
         if (driving) drivenSincePark = true
-        if (newGear == Gear.PARK && previous != Gear.PARK) {
+        val parkedNow = newGear == Gear.PARK && previous != Gear.PARK
+        if (parkedNow) {
             // 달린 적이 있을 때만 '방금 P단에 넣음'이다. 앱을 켠 순간 이미 P단인 경우는 기록하지 않는다.
-            if (drivenSincePark) {
-                log = log.parked(now())
-                checkArrivalAtPark(out)
-            }
+            val ran = drivenSincePark
+            lastParkWasRun = ran
             drivenSincePark = false
+            if (ran) {
+                log = log.parked(now())
+                // 먼저 도착이 기록돼 기다리던 하차 카드를 보인다. 이 P단의 위치 도착 판단은 그다음이다(다른 카드가 떠 있으면 하차 카드를 보이지 않음).
+                showExitCard(out)
+                checkArrivalAtPark(out)
+            } else {
+                // 앱을 켠 순간 이미 P단(UNKNOWN→P)이거나 달리지 않고 넣은 P단은 하차가 아니라서 대기를 버린다. 도착이 없던 P단은 대기가 없어 아무 일 없다.
+                clearExit()
+            }
+        } else if (newGear != Gear.PARK) {
+            lastParkWasRun = false
         }
         enforceDriving(out)
     }
@@ -611,6 +666,11 @@ class DriveSession(
         val state = card ?: return
         if (state.isScheduleNotice) {
             if (!primary) closeCard(out)
+            return
+        }
+        if (state.isExit) {
+            // [챙겼어요]는 카드를 닫기만 한다(말하던 것도 멈춘다). 보조 버튼은 없다.
+            if (primary) closeCard(out)
             return
         }
         val question = state.question ?: return
@@ -702,6 +762,8 @@ class DriveSession(
         out += Effect.StopVoice
         out += Effect.CollapseCard()
         if (place == null) return
+        // 새 길안내를 수락하면 지난 도착의 하차 카드는 더 보이지 않는다.
+        clearExit()
         acceptedRoute = true
         routeScheduleId = scheduleId
         out += Effect.StartRoute(place)
@@ -714,40 +776,91 @@ class DriveSession(
     private fun checkArrivalAtPark(out: MutableList<Effect>) {
         val target = plan().target() ?: return
         if (target.place == null) return
-        if (arriveIfNear(target, lastPosition)) return
+        if (arriveIfNear(target, lastPosition, out)) return
         awaitingParkLocation = true
         out += Effect.RequestLocation
     }
 
-    private fun onLocation(position: LatLng) {
+    private fun onLocation(position: LatLng, out: MutableList<Effect>) {
         lastPosition = position
         if (!awaitingParkLocation) return
         awaitingParkLocation = false
         if (gear != Gear.PARK) return
-        plan().target()?.let { arriveIfNear(it, position) }
+        plan().target()?.let { arriveIfNear(it, position, out) }
     }
 
-    private fun arriveIfNear(target: Schedule, position: LatLng?): Boolean {
+    private fun arriveIfNear(target: Schedule, position: LatLng?, out: MutableList<Effect>): Boolean {
         val place = target.place ?: return false
         if (position == null || position.distanceTo(place.position) > Rules.ARRIVAL_RADIUS_METERS) return false
-        arrive(target.id)
+        arrive(target.id, out)
         return true
     }
 
     /** 내비 도착 알림: 차곡이 길안내를 시작한 일정만 도착으로 본다(다른 곳으로 간 길안내의 도착은 무시). */
-    private fun onDestinationArrived() {
+    private fun onDestinationArrived(out: MutableList<Effect>) {
         val id = routeScheduleId ?: return
-        arrive(id)
+        arrive(id, out)
     }
 
     /**
-     * 일정을 도착으로 바꾼다. 도착 순간에는 말하지 않는다(하차 체크는 2단계).
-     * 다음에 다시 타면 다음 일정을 한 줄로 묻는다(재탑승, 잠깐 정차 10분 안은 침묵).
+     * 일정을 도착으로 바꾼다(내비 도착과 P단 위치 도착이 모두 여기를 지난다). 도착 알림 자체에는 말이 없고, 하차 카드가 그 말이다.
+     * 새로 도착이 된 일정만 하차 대기([exitTargetId])로 세운다(이미 도착·건너뜀이거나 모르는 일정이면 상태도 카드도 그대로).
+     * 이미 P단이면([settleExitAtPark]) 바로 카드를 띄우거나 버리고, 아니면 도착 뒤 달린 다음 P단까지 기다린다.
+     * 다시 탈 때 다음 일정을 한 줄로 묻는 것(재탑승, 잠깐 정차 10분 안은 침묵)은 이와 별개다.
      */
-    private fun arrive(id: String) {
+    private fun arrive(id: String, out: MutableList<Effect>) {
+        val fresh = !plan().statusOf(id).isFinal && schedules.any { it.id == id }
         statuses = plan().markArrived(id).statuses
         if (routeScheduleId == id) routeScheduleId = null
         awaitingParkLocation = false
+        if (!fresh) return
+        // 먼저 기다리던 하차 카드가 있으면 그것을 우선하고 덮어쓰지 않는다(뒤 도착은 기록만 한다).
+        if (exitTargetId == null) {
+            exitTargetId = id
+            exitArrivedAt = now()
+        }
+        settleExitAtPark(out)
+    }
+
+    /**
+     * 도착이 기록된 순간 이미 P단이면: 그 P단이 달린 뒤이고 P단에 넣은 지 [Rules.EXIT_PENDING_MAX] 안일 때만 바로 하차 카드를 띄운다
+     * (주행 제한이 걸려 있으면 풀릴 때까지 기다린다). 앱을 켠 순간 이미 P단이었거나 달리지 않고 넣은 P단,
+     * 오래전에 넣은 P단에 늦게 온 도착이면 대기를 버린다. 주행 중·N단이면 다음 P단을 기다린다.
+     */
+    private fun settleExitAtPark(out: MutableList<Effect>) {
+        if (gear != Gear.PARK) return
+        val parkedAt = log.lastParkedAt
+        val recentPark = parkedAt != null && !parkedAt.isAfter(now()) && Duration.between(parkedAt, now()) <= Rules.EXIT_PENDING_MAX
+        if (!lastParkWasRun || !recentPark) clearExit() else showExitCard(out)
+    }
+
+    private fun clearExit() {
+        exitTargetId = null
+        exitArrivedAt = null
+    }
+
+    /**
+     * 하차 카드(일정 장소 하차)를 보인다. 대기 중인 도착이 없거나 정차 중이 아니면(주행·제한 중) 아무것도 하지 않고 대기는 남긴다.
+     * Suspend에 들어갈 때는 [suspend]가 대기를 이미 지웠다. 만료(도착 뒤 [Rules.EXIT_PENDING_MAX])는 이벤트마다 [handle]이 먼저 확인한다.
+     * 세션이 아는 다른 카드(탑승 질문·출발 제안·연결 카드·일정 안내)가 이미 떠 있거나 탑승 판단이 진행 중이거나 휴대폰 연결 전이면 하차 카드를 보이지 않고 대기를 버린다.
+     * (권한 설명 카드는 세션 밖 `MainActivity` 소관이라 세션은 모른다.)
+     * 말은 [Phrases.exitSpoken] 한 번뿐이고 듣지 않는다. 앱이 뒤에 있어도 말은 한다. 카드는 [exitCardTimeout] 뒤 닫히고, 말은 닫힐 때 멈춘다.
+     */
+    private fun showExitCard(out: MutableList<Effect>) {
+        val id = exitTargetId ?: return
+        if (suspended || motion() != Motion.STOPPED) return
+        clearExit()
+        // 탑승 판단이 진행 중(소요 시간을 기다리는 중)이어도 하차 카드는 보이지 않는다(곧 탑승 카드가 뜬다).
+        if (!paired || card != null || pending != null) return
+        val schedule = schedules.firstOrNull { it.id == id } ?: return
+        val timeout = exitCardTimeout()
+        val view = Phrases.exitCard(schedule, timeout)
+        val timerId = ++seq
+        card = CardState(view, null, timerId, isExit = true)
+        resultTimerId = null
+        out += Effect.ShowCard(view)
+        speak(out, Phrases.exitSpoken(schedule), thenListen = false)
+        out += Effect.ScheduleCardTimeout(timerId, timeout)
     }
 
     /** 길안내 요청 결과를 알린다. 정차 중일 때만 결과 한 줄을 보이고 말하며, 한 줄은 [Rules.RESULT_VISIBLE] 뒤 지운다. */
@@ -782,6 +895,8 @@ class DriveSession(
         heldBoarding = false
         noticeSpokenOn = null
         drivenSincePark = false
+        clearExit()
+        lastParkWasRun = false
         // 데모 시계가 바뀌었을 수 있어 칩 재판단 시각을 다시 맞춘다.
         chipDeadline = null
         if (card != null) closeCard(out, instant = true) else out += Effect.StopVoice

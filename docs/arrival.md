@@ -13,7 +13,7 @@ PT 핵심 흐름 "탑승 브리핑 → 응 → 길안내 → **도착 → 다음
 
 - 위치는 FusedLocation(SDK 신청 '준비 중', 런타임 권한 필요) 대신 내비가 아는 현재 위치를 씁니다. 내비에 연결되지 않았으면 묻지 않고, 그때는 내비 도착 알림만으로 도착을 봅니다.
 - 거리는 `LatLng.distanceTo`(대원 거리, haversine)로 잽니다.
-- 도착 순간에는 말하지 않고 카드도 띄우지 않습니다. 하차 체크(P단 → 채비)는 2단계 후보입니다.
+- 도착 알림 순간에는 말도 카드도 없습니다. 도착이 기록된 뒤 P단에 넣으면 하차 카드("도착 · 내리기 전")를 한 번 보입니다(`docs/exit-card.md`). 두 도착 경로 모두 `DriveSession.arrive` 한 곳을 지나며 거기서 하차 대기를 세웁니다.
 
 ## 다시 탈 때 (재탑승, 5장)
 
@@ -31,7 +31,7 @@ PT 핵심 흐름 "탑승 브리핑 → 응 → 길안내 → **도착 → 다음
 
 ## 검증
 
-- `cd car && ./gradlew :app:testDebugUnitTest`(`DriveSessionTest` 도착·재탑승, `DistanceTest`, `PhrasesTest` 한 줄 카드)
+- `cd car && ./gradlew :app:testDebugUnitTest`(`DriveSessionTest` 도착·재탑승, `DriveSessionExitCardTest` 하차 카드, `DistanceTest`, `PhrasesTest` 한 줄 카드)
 - 계측 E2E(`DepartRouteTest` 내비 도착·P단 위치 도착 뒤 다시 탐, `BoardingBriefingTest` 같은 날 두 번째 탑승)
 - `pnpm e2e:car`의 `arrival-next.yaml`(PT 장면 4: 육전집 도착 → KIA 직관 한 줄 → 경기장 100m 앞 P단 도착 → 콩물 픽업 한 줄)
 - 실제 내비 도착 알림·위치 답은 `docs/sdk-check.md` 수동 확인 목록입니다.

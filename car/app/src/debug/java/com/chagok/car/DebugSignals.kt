@@ -14,9 +14,10 @@ import java.time.Instant
  *
  * - `paired`: true면 휴대폰과 연결된 것으로 두고(말하지 않음), false면 연결을 풀어(서버도) 연결 카드를 띄운다. 가장 먼저 처리한다.
  *   연결 상태는 차에 저장돼 남는다. 연결 카드가 없는 기존 흐름의 E2E는 시작할 때 `paired=true`를 넣는다
- * - `now`: ISO8601 시각. 데모 시계와 일정 기준 시각을 그 시각으로 맞추고 상태를 비운다(연결 다음에 처리)
+ * - `now`: ISO8601 시각. 데모 시계와 일정 기준 시각을 그 시각으로 맞추고 상태를 비운다(연결 다음에 처리). `exitcard`도 `real`로 되돌린다
  * - `trip`: 소요 시간 조회 결과를 초 단위로(`2400`). `none`이면 "모름", `real`이면 실제 내비([DebugInjection])
  * - `route`: 길안내 요청 결과 `ok`·`fail`. `real`이면 실제 내비([DebugInjection])
+ * - `exitcard`: 하차 카드가 떠 있는 시간을 초 단위로(`30`, E2E가 문구를 확인하게). `real`이면 정책 기준값(5초)
  * - `listen`: `off`면 말이 끝나도 실제 STT를 열지 않는다. `real`이면 연다
  * - `ignition`: LOCK·OFF·ACC·ON·START
  * - `gear`: P·R·N·D
@@ -29,9 +30,14 @@ import java.time.Instant
 object DebugSignals {
     fun apply(host: SessionHost, value: (String) -> String?) {
         value("paired")?.let { host.setPaired(it.toBoolean()) }
-        value("now")?.let { host.resetDemo(Instant.parse(it)) }
+        value("now")?.let {
+            host.resetDemo(Instant.parse(it))
+            // 데모 초기화는 하차 카드 시간도 되돌린다(flow가 중간에 실패해도 늘어난 시간이 남지 않게). 같은 신호의 exitcard는 아래에서 다시 정한다.
+            DebugInjection.exitCardSeconds = null
+        }
         value("trip")?.let { DebugInjection.tripSeconds = tripOf(it) }
         value("route")?.let { DebugInjection.routeOk = routeOf(it) }
+        value("exitcard")?.let { DebugInjection.exitCardSeconds = exitCardOf(it) }
         value("listen")?.let { DebugInjection.realListening = listenOf(it) }
         value("ignition")?.let { host.post(Event.IgnitionChanged(Ignition.valueOf(it.uppercase()))) }
         value("gear")?.let { host.post(Event.GearChanged(gearOf(it))) }
@@ -64,6 +70,11 @@ object DebugSignals {
         "real" -> null
         "none" -> DebugInjection.NO_TRIP
         else -> text.toLong().also { require(it > 0) { "trip은 양수 초여야 합니다: $text" } }
+    }
+
+    internal fun exitCardOf(text: String): Long? = when (text.lowercase()) {
+        "real" -> null
+        else -> text.toLong().also { require(it > 0) { "exitcard는 양수 초여야 합니다: $text" } }
     }
 
     private fun routeOf(text: String): Boolean? = when (text.lowercase()) {

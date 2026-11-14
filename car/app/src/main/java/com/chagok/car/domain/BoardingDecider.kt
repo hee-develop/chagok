@@ -66,6 +66,9 @@ data class Briefing(
 /** 앱에서 적은 채비 한 줄과 그 일정 제목. */
 data class CareItem(val title: String, val text: String)
 
+/** 하차 카드가 읽을 글과 그 출처(앱 채비인가 캘린더 메모인가). */
+data class ExitNote(val note: MemoNote, val fromCare: Boolean)
+
 sealed interface MemoNote {
     data object None : MemoNote
     data class ReadAloud(val text: String) : MemoNote
@@ -92,6 +95,16 @@ sealed interface MemoNote {
             val others = day.filter { it.id != target?.id }.sortedBy { it.start }.mapNotNull { it.careItem() }
             val items = listOfNotNull(targetCare) + others
             return if (items.isEmpty()) of(target?.memo) else Care(items)
+        }
+
+        /**
+         * 하차 카드가 읽을 것. 일정에 앱 채비가 있으면 메모 대신 채비를, 없으면 메모를 같은 규칙([of])에 넣는다
+         * (탑승 브리핑이 앱 채비를 메모보다 먼저 읽는 것과 같은 우선순위). 채비는 [Care] 묶음이 아니라 글 하나로 본다.
+         * [ExitNote.fromCare]는 문구가 "메모"가 아니라 "채비"로 나가게 하려는 표시다.
+         */
+        fun forExit(schedule: Schedule): ExitNote {
+            val care = schedule.care?.trim()?.takeIf { it.isNotEmpty() }
+            return if (care != null) ExitNote(of(care), fromCare = true) else ExitNote(of(schedule.memo), fromCare = false)
         }
 
         private fun Schedule.careItem(): CareItem? = care?.trim()?.takeIf { it.isNotEmpty() }?.let { CareItem(title, it) }

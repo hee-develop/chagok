@@ -286,4 +286,202 @@ class PhrasesTest {
         assertEquals("17:00 KIA 직관", Phrases.nextChipBody(game, SEOUL))
         assertEquals("다음", Phrases.NEXT_CHIP_LABEL)
     }
+
+    // ---- 하차 카드(일정 장소) ----
+
+    private fun exitSched(title: String = "KIA 직관", memo: String? = null, care: String? = null) =
+        Schedule("x", title, at("17:00"), at("19:00"), place = OFFICE, memo = memo, care = care)
+
+    private fun exit(title: String = "KIA 직관", memo: String? = null, care: String? = null) =
+        Phrases.exitCard(exitSched(title, memo, care))
+
+    private fun spokenOf(title: String = "KIA 직관", memo: String? = null, care: String? = null) =
+        Phrases.exitSpoken(exitSched(title, memo, care))
+
+    @Test fun `하차 카드 목록 메모는 챙기세요 문장과 채비 타일과 메모 한 줄을 둔다`() {
+        val card = exit(memo = "유니폼·응원봉·티켓")
+        assertEquals("도착 · 내리기 전", card.status)
+        assertEquals("유니폼·응원봉·티켓 챙기세요!", card.voice)
+        assertEquals(listOf<TileView>(TileView.Care(listOf("유니폼", "응원봉", "티켓"))), card.tiles)
+        assertEquals("‘KIA 직관’ 일정 메모: 유니폼·응원봉·티켓", card.footnote)
+        assertEquals("챙겼어요", card.primary)
+        assertNull(card.secondary)
+        assertTrue(!card.alert)
+        assertEquals(Rules.EXIT_CARD, card.autoDismiss)
+        assertEquals(listOf("5초 뒤 자동으로 닫혀요"), card.hints)
+        assertTrue(!card.fixedHeight)
+    }
+
+    @Test fun `하차 카드 쉼표와 슬래시 구분도 목록이고 띄어쓰기 없는 한 단어도 챙기세요다`() {
+        assertEquals("유니폼·티켓 챙기세요!", exit(memo = "유니폼, 티켓").voice)
+        assertEquals("유니폼·티켓 챙기세요!", exit(memo = "유니폼/티켓").voice)
+        val one = exit(memo = "우산")
+        assertEquals("우산 챙기세요!", one.voice)
+        assertEquals(listOf<TileView>(TileView.Care(listOf("우산"))), one.tiles)
+    }
+
+    @Test fun `하차 카드 한 줄 문장형 메모는 탑승 카드와 같은 문장이고 타일이 없다`() {
+        val card = exit(memo = "주차는 B2")
+        assertEquals("KIA 직관 메모에 ‘주차는 B2’가 있어요.", card.voice)
+        assertTrue(card.tiles.isEmpty())
+        assertNull(card.footnote)
+        assertEquals("챙겼어요", card.primary)
+        assertEquals("KIA 직관 메모에 ‘3루 출입구에서 만나기’가 있어요.", exit(memo = "3루 출입구에서 만나기").voice)
+    }
+
+    @Test fun `하차 카드 링크나 시각 꼴은 슬래시가 있어도 목록으로 보지 않는다`() {
+        assertEquals("KIA 직관 메모에 ‘meet.google.com/abc 접속’이 있어요.", exit(memo = "meet.google.com/abc 접속").voice)
+        assertEquals("KIA 직관 메모에 ‘10:30/11:00 입장’이 있어요.", exit(memo = "10:30/11:00 입장").voice)
+    }
+
+    @Test fun `하차 카드 길거나 여러 줄 메모는 메모가 있다고만 한다`() {
+        val long = exit(memo = "가".repeat(31))
+        assertEquals("KIA 직관 메모가 있어요.", long.voice)
+        assertTrue(long.tiles.isEmpty())
+        assertEquals("챙겼어요", long.primary)
+        assertEquals("KIA 직관 메모가 있어요.", exit(memo = "유니폼\n응원봉").voice)
+    }
+
+    @Test fun `하차 카드 메모가 없거나 항목이 모두 비면 인사만 하고 버튼이 없다`() {
+        listOf(null, "", "  ", "·", "·,/").forEach { memo ->
+            val card = exit(memo = memo)
+            assertEquals("잘 다녀오세요.", card.voice)
+            assertTrue(card.alert)
+            assertNull(card.primary)
+            assertTrue(card.tiles.isEmpty())
+            assertNull(card.footnote)
+        }
+    }
+
+    @Test fun `하차 카드 큰 문구의 제목은 12자로 줄이고 말하는 문장에서는 따옴표를 뺀다`() {
+        val card = exit(title = "아주아주 긴 일정 제목입니다 정말로", memo = "주차는 B2")
+        assertEquals("아주아주 긴 일정 제… 메모에 ‘주차는 B2’가 있어요.", card.voice)
+        assertEquals("가나다라마바사아자차카타", Phrases.shortTitle("가나다라마바사아자차카타"))
+        assertEquals("가나다라마바사아자차카…", Phrases.shortTitle("가나다라마바사아자차카타파"))
+        assertEquals("고객 미팅 메모에 주차는 B2가 있어요.", spokenOf(title = "고객 미팅", memo = "주차는 B2"))
+    }
+
+    @Test fun `하차 카드 앱 채비가 있으면 메모 대신 채비를 같은 규칙으로 읽고 문구는 채비라고 한다`() {
+        val list = exit(memo = "주차는 B2", care = "유니폼·응원봉·티켓")
+        assertEquals("유니폼·응원봉·티켓 챙기세요!", list.voice)
+        assertEquals("‘KIA 직관’ 일정 채비: 유니폼·응원봉·티켓", list.footnote)
+        assertEquals("KIA 직관 채비에 ‘주차 먼저 확인’이 있어요.", exit(memo = "유니폼", care = "주차 먼저 확인").voice)
+        assertEquals("KIA 직관 채비가 있어요.", exit(care = "가".repeat(40)).voice)
+        // 앱 채비가 비어 있으면(공백) 메모를 읽는다.
+        assertEquals("우산 챙기세요!", exit(memo = "우산", care = "  ").voice)
+        // 채비가 있고 메모가 없어도 읽는다.
+        assertEquals("우산 챙기세요!", exit(care = "우산").voice)
+    }
+
+    @Test fun `하차 카드 힌트 시간은 카드 닫힘 시간을 따른다`() {
+        val card = Phrases.exitCard(Schedule("x", "KIA 직관", at("17:00"), at("19:00"), place = OFFICE), Duration.ofSeconds(30))
+        assertEquals(Duration.ofSeconds(30), card.autoDismiss)
+        assertEquals(listOf("30초 뒤 자동으로 닫혀요"), card.hints)
+    }
+
+    @Test fun `하차 카드 말하는 문장은 줄이지 않은 전체 제목을 쓴다`() {
+        val title = "아주아주 긴 일정 제목입니다 정말로"
+        assertEquals("$title 메모가 있어요.", spokenOf(title = title, memo = "가".repeat(31)))
+        assertEquals("아주아주 긴 일정 제… 메모가 있어요.", exit(title = title, memo = "가".repeat(31)).voice)
+    }
+
+    @Test fun `하차 카드 말이 30자를 넘으면 목록은 챙길 것이 있다고만 하고 화면은 그대로다`() {
+        val memo = "유니폼·응원봉·티켓·보조배터리·손수건·물티슈·모자"
+        assertEquals("KIA 직관 챙길 것이 있어요.", spokenOf(memo = memo))
+        assertEquals("KIA 직관 채비가 있어요.", spokenOf(care = memo))
+        assertEquals("유니폼·응원봉·티켓·보조배터리·손수건·물티슈·모자 챙기세요!", exit(memo = memo).voice)
+        // 짧으면 그대로 읽는다
+        assertEquals("유니폼·응원봉·티켓 챙기세요!", spokenOf(memo = "유니폼·응원봉·티켓"))
+        assertEquals("잘 다녀오세요.", spokenOf())
+    }
+
+    @Test fun `하차 카드 문장형이 길면 챙길 것이 아니라 메모가 있다고만 말한다`() {
+        // 문장형 메모는 챙길 것이라 단정하지 않는다: '챙길 것이 있어요.'는 목록에만 쓴다.
+        assertEquals("KIA 직관 메모가 있어요.", spokenOf(memo = "3루 출입구에서 친구 만나기"))
+        assertEquals("KIA 직관 채비가 있어요.", spokenOf(care = "3루 출입구에서 친구 만나기"))
+        // 길이가 30자 이하면 그대로 읽는다(따옴표는 뺀다).
+        assertEquals("KIA 직관 메모에 주차는 B2가 있어요.", spokenOf(memo = "주차는 B2"))
+    }
+
+    @Test fun `하차 카드 말할 문장이 30자를 넘으면 제목을 12자로 줄인 문장을 말한다`() {
+        val title = "아주아주 긴 일정 제목입니다 정말로 좋아요"
+        val short = "아주아주 긴 일정 제…"
+        assertEquals("$short 메모가 있어요.", spokenOf(title = title, memo = "가".repeat(31)))
+        assertEquals("$short 채비가 있어요.", spokenOf(title = title, care = "가".repeat(31)))
+        // 문장형·목록의 대체 문장도 제목이 길면 줄인다.
+        assertEquals("$short 메모가 있어요.", spokenOf(title = title, memo = "3루 출입구에서 만나기"))
+        assertEquals("$short 챙길 것이 있어요.", spokenOf(title = title, memo = "유니폼·응원봉·티켓·보조배터리·손수건·물티슈·모자"))
+        // 전체 제목으로도 30자 안이면 줄이지 않는다.
+        val mid = "열두 글자를 넘는 제목입니다"
+        assertEquals("$mid 메모가 있어요.", spokenOf(title = mid, memo = "가".repeat(31)))
+        // 제목이 짧고 항목이 길어도 항목을 읽는 문장이 30자 안이면 그대로다.
+        assertEquals("유니폼·응원봉·티켓 챙기세요!", spokenOf(title = title, memo = "유니폼·응원봉·티켓"))
+    }
+
+    @Test fun `하차 카드 항목 끝의 문장부호는 떼고 목록으로 판정하고 보인다`() {
+        val one = exit(memo = "우산!")
+        assertEquals("우산 챙기세요!", one.voice)
+        assertEquals(listOf<TileView>(TileView.Care(listOf("우산"))), one.tiles)
+        assertEquals("‘KIA 직관’ 일정 메모: 우산!", one.footnote)
+        assertEquals("우산 챙기세요!", spokenOf(memo = "우산?"))
+        assertEquals("유니폼·티켓 챙기세요!", exit(memo = "유니폼!, 티켓.").voice)
+        // 문장부호만 있는 항목은 빈 항목이다.
+        assertEquals("우산 챙기세요!", exit(memo = "우산·!").voice)
+        assertEquals("잘 다녀오세요.", exit(memo = "!").voice)
+        // 문장은 문장부호가 있어도 문장형이다.
+        assertEquals("KIA 직관 메모에 ‘비 와요!’가 있어요.", exit(memo = "비 와요!").voice)
+    }
+
+    @Test fun `하차 카드 도메인 꼴은 슬래시가 없어도 문장형이고 숫자 단위 꼴은 링크가 아니다`() {
+        assertEquals("KIA 직관 메모에 ‘naver.com’가 있어요.", exit(memo = "naver.com").voice)
+        assertEquals("KIA 직관 메모에 ‘a.co.kr’가 있어요.", exit(memo = "a.co.kr").voice)
+        assertEquals("KIA 직관 메모에 ‘예매 meet.google.com’가 있어요.", exit(memo = "예매 meet.google.com").voice)
+        assertTrue(Phrases.looksLikeLinkOrTime("meet.google.com/abc"))
+        assertTrue(!Phrases.looksLikeLinkOrTime("1.5L/우산"))
+        assertEquals("1.5L·우산 챙기세요!", exit(memo = "1.5L/우산").voice)
+        assertEquals("2.5kg·우산 챙기세요!", exit(memo = "2.5kg, 우산").voice)
+        assertEquals("우산 챙기세요!", exit(memo = "우산").voice)
+    }
+
+    @Test fun `하차 카드 큰 문구와 한 줄의 제목은 모두 12자로 줄인다`() {
+        val card = exit(title = "아주아주 긴 일정 제목입니다 정말로", memo = "유니폼·티켓")
+        assertEquals("‘아주아주 긴 일정 제…’ 일정 메모: 유니폼·티켓", card.footnote)
+    }
+
+    @Test fun `하차 카드 숫자가 든 한 단어는 번호나 코드라 챙길 것으로 보지 않는다`() {
+        mapOf("010-1234-5678" to "이", "B2-15" to "가", "301호" to "가", "AB1234" to "가").forEach { (memo, josa) ->
+            val card = exit(memo = memo)
+            assertEquals("KIA 직관 메모에 ‘$memo’$josa 있어요.", card.voice)
+            assertTrue(card.tiles.isEmpty())
+        }
+        // 구분자로 나뉜 둘 이상은 숫자가 있어도 목록이다.
+        assertEquals("B2-15·301호 챙기세요!", exit(memo = "B2-15·301호").voice)
+        assertEquals("우산 챙기세요!", exit(memo = "우산").voice)
+    }
+
+    @Test fun `제목을 줄일 때 서로게이트 쌍을 가르지 않는다`() {
+        val title = "가나다라마바사아자차\uD83D\uDE00타파하"
+        val short = Phrases.shortTitle(title)
+        assertEquals("가나다라마바사아자차\uD83D\uDE00…", short)
+        assertTrue(!short.contains('\uFFFD'))
+        assertEquals("\uD83D\uDE00".repeat(12), Phrases.shortTitle("\uD83D\uDE00".repeat(12)))
+    }
+
+    @Test fun `제목을 줄일 때 변형 선택자와 결합 문자를 글자에서 떼지 않는다`() {
+        val heart = "\u2764\uFE0F"
+        // 11번째 글자가 변형 선택자가 붙은 하트: 하트와 선택자를 함께 남긴다.
+        assertEquals("가나다라마바사아자차$heart…", Phrases.shortTitle("가나다라마바사아자차${heart}타파하"))
+        assertEquals(heart.repeat(12), Phrases.shortTitle(heart.repeat(12)))
+        // 자모가 풀어쓰인(NFD) 한글도 한 글자다.
+        val nfd = java.text.Normalizer.normalize("가나다라마바사아자차카타파", java.text.Normalizer.Form.NFD)
+        assertEquals(java.text.Normalizer.normalize("가나다라마바사아자차카…", java.text.Normalizer.Form.NFD), Phrases.shortTitle(nfd))
+    }
+
+    @Test fun `제목을 줄일 때 ZWJ 이모지를 가르지 않는다`() {
+        // JDK 20 미만의 BreakIterator는 ZWJ 열을 묶지 못한다. 실기기(Android ICU)와 JDK 20 이상에서만 확인한다.
+        org.junit.Assume.assumeTrue(System.getProperty("java.specification.version")!!.substringAfter("1.").toInt() >= 20)
+        val family = "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67"
+        assertEquals("가나다라마바사아자차$family…", Phrases.shortTitle("가나다라마바사아자차${family}타파하"))
+        assertEquals(family.repeat(12), Phrases.shortTitle(family.repeat(12)))
+    }
 }

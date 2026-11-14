@@ -22,6 +22,8 @@ object SnapshotCodec {
             .put("statuses", statuses)
             .put("log", log)
             .put("noticeDate", snapshot.noticeDate?.toString() ?: JSONObject.NULL)
+            .put("exitTargetId", snapshot.exitTargetId ?: JSONObject.NULL)
+            .put("exitArrivedAt", snapshot.exitArrivedAt?.toEpochMilli() ?: JSONObject.NULL)
             .toString()
     }
 
@@ -42,6 +44,11 @@ object SnapshotCodec {
             parkedAfterDriveSinceBoarding = logJson.optBoolean("parkedAfterDriveSinceBoarding", false),
         )
         val noticeDate = if (root.isNull("noticeDate")) null else LocalDate.parse(root.getString("noticeDate"))
-        Snapshot(log, statuses, date, noticeDate)
+        // 하차 카드 대기는 나중에 생긴 칸이라 이전 저장분에는 없다(없으면 null).
+        // 이 칸만 손상돼도(타입이 다르거나 한쪽만 있음) 탑승 기록·일정 상태는 살리고 하차 대기만 버린다.
+        // 문자열 타입일 때만 받는다(getString은 숫자도 문자열로 바꿔 주므로 쓰지 않는다).
+        val exitTargetId = root.opt("exitTargetId") as? String
+        val exitArrivedAt = runCatching { if (root.isNull("exitArrivedAt")) null else Instant.ofEpochMilli(root.getLong("exitArrivedAt")) }.getOrNull()
+        Snapshot(log, statuses, date, noticeDate, exitTargetId, exitArrivedAt)
     }.getOrNull()
 }
