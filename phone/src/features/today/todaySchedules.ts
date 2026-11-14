@@ -1,3 +1,5 @@
+import type { FilteredEvent } from '../calendar-sync/filteredEvents';
+import { mergeScheduleItems, type ScheduleItem } from '../fill-places/scheduleItems';
 import type { SetupSchedule } from '../fill-places/schedulePlacesApi';
 
 const SEOUL_OFFSET_MS = 9 * 60 * 60_000;
@@ -10,7 +12,7 @@ export const isMissingPlace = (s: SetupSchedule) => !s.place && !s.noTravel;
  * 서버가 말하는 '오늘'(anchor의 서울 날짜)에 걸친 일정인가: 시작이 그 날짜이거나, 전날 시작해 anchor 시각에 아직 끝나지 않은 일정.
  * 서버의 /schedules/today와 같은 규칙이라 차가 읽는 오늘과 폰이 보이는 오늘이 어긋나지 않는다.
  */
-export function isTodaySchedule(s: SetupSchedule, anchorIso: string): boolean {
+export function isTodaySchedule(s: { start: string; end: string }, anchorIso: string): boolean {
   const anchor = new Date(anchorIso).getTime();
   const start = new Date(s.start).getTime();
   const day = seoulDay(anchor);
@@ -19,13 +21,15 @@ export function isTodaySchedule(s: SetupSchedule, anchorIso: string): boolean {
 
 /**
  * 오늘 탭이 보이는 구성.
- * - today: 오늘 일정(이동 없음 포함, 시작순)
+ * - today: 서버가 아는 오늘 일정(이동 없음 포함, 시작순)
+ * - items: today와 폰이 거른 오늘 일정(서버로 보내지 않은 것)을 시작순으로 합친 줄. 오늘 탭은 이 줄을 그린다
  * - otherMissing: 오늘이 아니면서 아직 끝나지 않았고 장소가 빈 일정(다가오는 일정)
- * - missingCount: 오늘 + 다른 날을 합친 장소 빈 일정 수
+ * - missingCount: 오늘 + 다른 날을 합친 장소 빈 일정 수(거른 일정은 이동 없음이라 세지 않는다)
  */
-export function splitSchedules(schedules: SetupSchedule[], anchorIso: string) {
+export function splitSchedules(schedules: SetupSchedule[], anchorIso: string, filtered: readonly FilteredEvent[] = []) {
   const anchor = new Date(anchorIso).getTime();
   const today = schedules.filter((s) => isTodaySchedule(s, anchorIso));
   const otherMissing = schedules.filter((s) => !isTodaySchedule(s, anchorIso) && isMissingPlace(s) && new Date(s.end).getTime() > anchor);
-  return { today, otherMissing, missingCount: today.filter(isMissingPlace).length + otherMissing.length };
+  const items: ScheduleItem[] = mergeScheduleItems(today, filtered.filter((e) => isTodaySchedule(e, anchorIso)));
+  return { today, items, otherMissing, missingCount: today.filter(isMissingPlace).length + otherMissing.length };
 }

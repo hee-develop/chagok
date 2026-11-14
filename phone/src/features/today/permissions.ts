@@ -41,7 +41,7 @@ export type PermissionsState = { status: 'loading' } | { status: 'error' } | { s
 
 /**
  * 권한 상태를 읽는다. 화면이 포커스를 얻을 때와 앱이 다시 앞으로 올 때(설정에서 켜고 돌아온 경우) 새로 읽는다.
- * 읽지 못하면 error(권한을 모르는 채로 일정을 막지 않도록 호출한 쪽이 판단한다).
+ * 처음부터 읽지 못하면 error(권한을 모르는 채로 일정을 막지 않도록 호출한 쪽이 판단한다). 다시 읽는 동안에는 직전 결과를 유지한다.
  */
 export function usePermissions(source: PermissionsSource = devicePermissions) {
   const [state, setState] = useState<PermissionsState>({ status: 'loading' });
@@ -53,7 +53,8 @@ export function usePermissions(source: PermissionsSource = devicePermissions) {
       const map = await source.read();
       if (generation.current === mine) setState({ status: 'ready', map });
     } catch {
-      if (generation.current === mine) setState({ status: 'error' });
+      // 이미 읽어 둔 결과가 있으면 다시 읽다 실패해도 그대로 둔다(화면이 출렁이지 않게). 처음부터 못 읽었을 때만 오류다.
+      if (generation.current === mine) setState((prev) => (prev.status === 'ready' ? prev : { status: 'error' }));
     }
   }, [source]);
 

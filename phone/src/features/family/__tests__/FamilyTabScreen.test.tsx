@@ -3,7 +3,7 @@ import type { ReactElement } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { FamilyTabScreen } from '../FamilyTabScreen';
-import { GAME, LUNCH, makePermissions, makeScheduleApi } from '../../today/testSupport';
+import { GAME, LUNCH, makePermissions, makeScheduleApi } from '../../../__tests__/support/todaySupport';
 
 const mockNavigate = jest.fn();
 jest.mock('expo-router', () => {

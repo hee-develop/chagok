@@ -25,6 +25,8 @@ type Props = {
   timeoutMs?: number;
   /** 선택을 서버에 저장한 직후 부른다(일정 보내기를 시작하는 자리). 기다리지 않는다. */
   onSaved?: (selectedIds: string[]) => void;
+  /** 첫 설정 밖(설정 탭의 [캘린더 고르기])에서 열렸다: 단계 표시('1 / 4')를 빼고, 저장하면 2단계 대신 이전 화면으로 되돌아가며, [나중에 할게요]는 [닫기]가 된다. */
+  standalone?: boolean;
 };
 
 type LoadState = { status: 'loading' } | { status: 'error' } | { status: 'denied' } | { status: 'ready'; calendars: DeviceCalendar[] };
@@ -37,6 +39,7 @@ export function CalendarSelectScreen({
   restore = fetchCalendarSelection,
   timeoutMs = REQUEST_TIMEOUT_MS,
   onSaved,
+  standalone = false,
 }: Props) {
   const saveSelection: SaveSelection = save ?? ((ids, revision, signal) => saveCalendarSelection(ids, revision, signal, source.kind));
   const router = useRouter();
@@ -127,6 +130,13 @@ export function CalendarSelectScreen({
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
+  // 첫 설정이면 2단계로, 탭에서 열었으면 왔던 화면으로 돌아간다.
+  const next = () => {
+    if (!standalone) router.push(NEXT_ROUTE);
+    else if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
+
   const connect = async () => {
     if (load.status !== 'ready' || saveRequest.current || selectedIds.length === 0) return;
     const controller = new AbortController();
@@ -137,7 +147,7 @@ export function CalendarSelectScreen({
       await requestWithTimeout((signal) => saveSelection(selectedIds, revisions.current(), signal), timeoutMs, controller);
       if (saveRequest.current !== controller) return;
       onSaved?.(selectedIds);
-      router.push(NEXT_ROUTE);
+      next();
     } catch {
       if (saveRequest.current === controller) setSaveError(true);
     } finally {
@@ -153,7 +163,7 @@ export function CalendarSelectScreen({
     saveRequest.current = null;
     pending?.abort();
     setSaving(false);
-    router.push(NEXT_ROUTE);
+    next();
   };
 
   const count = selectedIds.length;
@@ -163,7 +173,7 @@ export function CalendarSelectScreen({
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <SetupHeader step={1} />
+        <SetupHeader step={standalone ? undefined : 1} />
         <View style={styles.titles}>
           <Text accessibilityRole="header" style={[styles.title, font(600)]}>
             {t.title}
@@ -243,7 +253,7 @@ export function CalendarSelectScreen({
           )}
         </Pressable>
         <Pressable accessibilityRole="button" onPress={later} style={styles.later}>
-          <Text style={[styles.laterText, font(400)]}>{t.later}</Text>
+          <Text style={[styles.laterText, font(400)]}>{standalone ? t.close : t.later}</Text>
         </Pressable>
       </View>
     </View>

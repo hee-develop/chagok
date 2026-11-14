@@ -37,6 +37,11 @@ if (!today || !has(today.events, 'E2E Today Meeting')) {
   throw new Error('GET /events에 오늘 일정(E2E Today Meeting)이 없습니다: ' + JSON.stringify(today));
 }
 
+// 장소 칸이 온라인(Zoom)인 일정은 폰이 거르므로 서버에 있으면 안 된다(제목이 폰 밖으로 나가지 않는다).
+if (has(today.events, 'E2E Online Standup')) {
+  throw new Error('온라인 일정(E2E Online Standup)이 서버로 보내졌습니다: ' + JSON.stringify(today));
+}
+
 var meeting = null;
 for (var i = 0; i < today.events.length; i++) {
   if (today.events[i].title === 'E2E Today Meeting') meeting = today.events[i];

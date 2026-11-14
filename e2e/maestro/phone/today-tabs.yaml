@@ -19,7 +19,7 @@ appId: ${APP_ID}
 - assertVisible: '1 / 4'
 - takeScreenshot: 01-first-run-setup
 
-# 2) 1~3단계를 건너뛰어 4단계에 닿으면 첫 설정을 끝낸 것으로 기록한다.
+# 2) 1~3단계를 건너뛰어 4단계에 닿는다. 연결하지 않고 [건너뛰기]를 눌러도 첫 설정을 끝낸 것으로 보고 오늘 탭으로 간다.
 - tapOn: '나중에 할게요'
 - extendedWaitUntil:
     visible: '자주 가는 곳을 알려주세요'
@@ -33,22 +33,34 @@ appId: ${APP_ID}
     visible: '차와 연결해요'
     timeout: 15000
 - assertVisible: '4 / 4'
+- assertVisible: '건너뛰기'
 - takeScreenshot: 02-reached-step-4
+- tapOn: '건너뛰기'
+- extendedWaitUntil:
+    visible: '오늘 일정'
+    timeout: 20000
+- assertNotVisible: '4 / 4'
+- assertNotVisible: '차와 연결해요'
+- assertVisible: '차와 연결되지 않았어요'
+- takeScreenshot: 03-today-after-skip
 
-# 3) 앱을 껐다 다시 열면 탭(오늘)으로 들어간다.
-- stopApp
-- openLink: ${EXPO_URL}
-- runFlow:
-    file: expo-dev-menu.yaml
-    env:
-      SCREEN_TITLE: '오늘 일정'
+# 3) 앱을 껐다 다시 열어도 탭(오늘)으로 들어간다.
+# 껐다 켠 직후 Expo Go가 우리 주소를 열지 못하고 홈 화면에 머무는 일이 있어(에뮬레이터), device-calendar flow처럼 다시 연다.
+- retry:
+    maxRetries: 3
+    commands:
+      - stopApp
+      - openLink: ${EXPO_URL}
+      - runFlow:
+          file: expo-dev-menu.yaml
+          env:
+            SCREEN_TITLE: '오늘 일정'
 - assertNotVisible: '1 / 4'
 - takeScreenshot: 03-today
 
 # 4) 오늘 탭: 차 연결 상태(연결 안 됨), 받은 가족 요청 빈 상태, 오늘 일정
 - assertVisible: '차와 연결되지 않았어요'
 - assertVisible: '차 연결하기'
-- assertVisible: '아직 받은 요청이 없어요.'
 - extendedWaitUntil:
     visible: '육전집 점심'
     timeout: 20000
@@ -57,13 +69,23 @@ appId: ${APP_ID}
 - assertVisible: '장소가 빈 일정이 .*개 있어요'
 # 캘린더는 목 출처라 권한 안내가 없다.
 - assertNotVisible: '캘린더를 켜면 오늘 일정을 차에 보내 드려요.'
+# 받은 가족 요청은 화면 아래에 있어 스크롤해서 본다(빈 상태만).
+- scrollUntilVisible:
+    element: '아직 받은 요청이 없어요.'
+    direction: DOWN
+    timeout: 20000
+- takeScreenshot: 03b-today-bottom
+- scrollUntilVisible:
+    element: '주간 회의'
+    direction: UP
+    timeout: 20000
 
 # 5) 일정을 누르면 그 자리에서 장소·채비를 적는다(첫 설정 단계 표시 없이 열린다).
 - scrollUntilVisible:
-    element: '육전집 점심 일정 펼치기'
+    element: '육전집 점심 .*'
     direction: DOWN
     timeout: 20000
-- tapOn: '육전집 점심 일정 펼치기'
+- tapOn: '육전집 점심 .*'
 - extendedWaitUntil:
     visible: '육전집 점심 장소 넣기'
     timeout: 10000
@@ -101,10 +123,13 @@ appId: ${APP_ID}
     visible: '일정 장소 찾기'
     timeout: 15000
 - assertNotVisible: '3 / 4'
-- back
+# 검색 입력에 키보드가 떠 있으면 시스템 뒤로가기는 키보드만 닫으므로 화면의 [취소]로 돌아간다.
+- tapOn: '취소'
+# 다시 읽는 동안에도 읽어 둔 목록을 그대로 두므로 스크롤 위치와 펼친 줄이 남는다(제목 '오늘 일정'은 위로 지나가 있을 수 있다).
 - extendedWaitUntil:
-    visible: '오늘 일정'
+    visible: '육전집 점심 장소 넣기'
     timeout: 15000
+- assertNotVisible: '일정 장소 찾기'
 
 # 7) 가족 탭: 보내기 입구와 묶기 자리
 - tapOn:
@@ -135,8 +160,29 @@ appId: ${APP_ID}
 - assertVisible: '차 연결하기'
 - takeScreenshot: 08-settings
 
-# 10) 차 연결 입구는 기존 연결 화면으로 간다.
+# 10) 차 연결 입구는 기존 연결 화면을 단계 표시('4 / 4') 없이 연다. 연결하지 않고 뒤로 가면 설정 탭이다.
 - tapOn: '차 연결하기'
 - extendedWaitUntil:
     visible: '차와 연결해요'
+    timeout: 15000
+- assertNotVisible: '4 / 4'
+- assertNotVisible: '건너뛰기'
+- takeScreenshot: 09-pair-from-tab
+- back
+- extendedWaitUntil:
+    visible: '주행 중에는 차곡이 먼저 말하지 않아요.'
+    timeout: 15000
+
+# 11) 캘린더 고르기 입구도 단계 표시('1 / 4') 없이 열리고 [닫기]로 설정 탭에 돌아온다.
+- tapOn: '캘린더 고르기'
+- extendedWaitUntil:
+    visible: '캘린더를 골라 주세요'
+    timeout: 15000
+- assertNotVisible: '1 / 4'
+- assertVisible: '닫기'
+- assertNotVisible: '나중에 할게요'
+- takeScreenshot: 10-calendar-from-tab
+- tapOn: '닫기'
+- extendedWaitUntil:
+    visible: '주행 중에는 차곡이 먼저 말하지 않아요.'
     timeout: 15000

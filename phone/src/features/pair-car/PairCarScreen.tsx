@@ -18,6 +18,8 @@ type Props = {
   onSkip?: () => void;
   /** 주면 연결된 뒤 [완료]가 기본 이동(3단계 일정 목록) 대신 이것을 부른다. */
   onDone?: () => void;
+  /** 첫 설정 밖(오늘·설정 탭의 [차 연결하기])에서 열렸다: 단계 표시('4 / 4')를 빼고, [완료]는 되돌아간다(`onDone`이 있으면 그것). */
+  standalone?: boolean;
 };
 
 type Issue = 'invalidCode' | 'failed' | 'cameraDenied' | 'notChagokQr' | 'seatLimit' | 'locked';
@@ -33,7 +35,7 @@ const issueOf = (error: unknown): Issue => {
  * 첫 설정 4단계: 차 화면의 QR을 찍거나 숫자 6자리를 넣어 차와 연결한다. 서버가 그 코드의 차를 이 사용자에게 묶으면
  * 차가 2초 안에 알아채 연결 카드를 접고, 방금 넣은 일정·장소·채비로 탑승 브리핑을 한다(계약: docs/pairing.md).
  */
-export function PairCarScreen({ api = pairingApi, timeoutMs = REQUEST_TIMEOUT_MS, onSkip, onDone }: Props) {
+export function PairCarScreen({ api = pairingApi, timeoutMs = REQUEST_TIMEOUT_MS, onSkip, onDone, standalone = false }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
@@ -98,11 +100,17 @@ export function PairCarScreen({ api = pairingApi, timeoutMs = REQUEST_TIMEOUT_MS
   };
 
   const ready = code.length === 6 && !claiming;
+  const done = () => {
+    if (onDone) onDone();
+    else if (!standalone) router.replace('/setup/fill-places');
+    else if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <SetupHeader step={4} />
+        <SetupHeader step={standalone ? undefined : 4} />
         {paired ? (
           <View style={styles.titles} accessibilityLiveRegion="polite">
             <Text accessibilityRole="header" style={[styles.title, font(600)]}>{`✓ ${t.paired}`}</Text>
@@ -174,7 +182,7 @@ export function PairCarScreen({ api = pairingApi, timeoutMs = REQUEST_TIMEOUT_MS
           </View>
         ) : null}
         {paired ? (
-          <Pressable accessibilityRole="button" onPress={() => (onDone ? onDone() : router.replace('/setup/fill-places'))} style={styles.primary}>
+          <Pressable accessibilityRole="button" onPress={done} style={styles.primary}>
             <Text style={[styles.primaryText, font(600)]}>{t.done}</Text>
           </Pressable>
         ) : (

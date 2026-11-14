@@ -1,28 +1,66 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
 import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { colors } from '../../../ui/theme';
+
 import { HttpError } from '../../../api/request';
+import type { FilteredEvent } from '../../calendar-sync/filteredEvents';
+import type { SchedulePlacesApi } from '../../fill-places/schedulePlacesApi';
 import { TodayScreen } from '../TodayScreen';
-import { DENTIST, GRANTED, LUNCH, makeConnection, makePermissions, makeScheduleApi } from '../testSupport';
+import { DENTIST, GRANTED, LUNCH, makeConnection, makePermissions, makeScheduleApi, SEAT } from '../../../__tests__/support/todaySupport';
 
 const mockPush = jest.fn();
+// 화면 포커스를 테스트가 켜고 끈다(탭을 바꿨다 돌아오는 상황).
+const mockFocus = { focused: true, listeners: new Set<(focused: boolean) => void>() };
 jest.mock('expo-router', () => {
-  const { useEffect } = jest.requireActual('react');
+  const { useEffect, useState } = jest.requireActual('react');
   return {
     useRouter: () => ({ push: mockPush }),
-    useFocusEffect: (callback: () => void) => useEffect(callback, [callback]),
+    useFocusEffect: (callback: () => void | (() => void)) => {
+      const [focused, setFocused] = useState(mockFocus.focused);
+      useEffect(() => {
+        mockFocus.listeners.add(setFocused);
+        return () => { mockFocus.listeners.delete(setFocused); };
+      }, []);
+      useEffect(() => (focused ? callback() : undefined), [focused, callback]);
+    },
   };
 });
+const setFocus = async (focused: boolean) => {
+  mockFocus.focused = focused;
+  await act(async () => { mockFocus.listeners.forEach((listener) => listener(focused)); });
+};
 
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
 const renderWith = (ui: ReactElement) => render(<SafeAreaProvider initialMetrics={insets}>{ui}</SafeAreaProvider>);
 const setup = (props: Partial<React.ComponentProps<typeof TodayScreen>> = {}) =>
   renderWith(<TodayScreen scheduleApi={makeScheduleApi()} connectionSource={makeConnection(true)} permissionsSource={makePermissions()} {...props} />);
-const rowButton = (title: string) => screen.getByRole('button', { name: `${title} 일정 펼치기` });
+// 줄 이름은 '제목 시간 상태', 펼치기는 힌트다.
+const rowName = (title: string) => new RegExp(`^${title} (\\d+월 \\d+일 \\(.\\) )?\\d{2}:\\d{2} `);
+const rowButton = (title: string) => screen.getByRole('button', { name: rowName(title) });
+const findRowButton = (title: string) => screen.findByRole('button', { name: rowName(title) });
 
-beforeEach(() => mockPush.mockReset());
+// WCAG 대비(상대 휘도). 흐린 줄의 글자가 4.5:1 아래로 내려가지 않는지 본다.
+const luminance = (hex: string) => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+};
+const contrast = (a: string, b: string) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi! + 0.05) / (lo! + 0.05);
+};
+const textColorOf = (node: ReturnType<typeof screen.getByText>) => StyleSheet.flatten(node.props.style).color as string;
+
+const ONLINE_EVENT: FilteredEvent = { id: 'evt-online', title: '온라인 스탠드업', start: '2026-11-06T02:00:00Z', end: '2026-11-06T02:30:00Z', reason: 'online' };
+const ROOM_EVENT: FilteredEvent = { id: 'evt-room', title: '3층 회의실 점검', start: '2026-11-08T02:00:00Z', end: '2026-11-08T03:00:00Z', reason: 'meetingRoom' };
+
+beforeEach(() => {
+  mockPush.mockReset();
+  mockFocus.focused = true;
+});
 
 describe('오늘 탭: 정상', () => {
   it('오늘 일정을 시간순으로 보이고 다른 날 일정은 오늘 목록에 넣지 않는다', async () => {
@@ -44,16 +82,36 @@ describe('오늘 탭: 정상', () => {
     expect(other.getByText('11월 8일 (일)')).toBeOnTheScreen();
   });
 
-  it('이동 없음 일정은 흐리게 보이고 글로도 이동 없음을 적는다. 장소 있는 일정은 흐리지 않다', async () => {
+  it('이동 없음 일정은 opacity 대신 색으로 낮추되 상태 글자 대비가 4.5:1 이상이고 글로도 이동 없음을 적는다. 장소 있는 일정은 그대로다', async () => {
     await setup();
     await screen.findByText('주간 회의');
-    const dimmed = StyleSheet.flatten(screen.getByTestId('today-row-head-online').props.style);
-    expect(dimmed.opacity).toBeLessThan(1);
-    const normal = StyleSheet.flatten(screen.getByTestId('today-row-head-game').props.style);
-    expect(normal.opacity).toBeUndefined();
-    expect(within(screen.getByTestId('today-row-online')).getByText('이동 없음 · 온라인 회의')).toBeOnTheScreen();
+    const head = (id: string) => StyleSheet.flatten(screen.getByTestId(`today-row-head-${id}`).props.style);
+    // opacity로 낮추면 글자 대비가 같이 떨어지므로 쓰지 않는다.
+    expect(head('online').opacity).toBeUndefined();
+    expect(head('online').backgroundColor).toBe(colors.notice);
+    expect(head('game').backgroundColor).toBeUndefined();
+    const status = within(screen.getByTestId('today-row-online')).getByText('이동 없음 · 온라인 회의');
+    expect(contrast(textColorOf(status), colors.notice)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(textColorOf(within(screen.getByTestId('today-row-online')).getByText('주간 회의')), colors.notice)).toBeGreaterThanOrEqual(4.5);
+    // 같은 행의 평범한 줄보다 제목이 옅다(색으로 구분된다).
+    expect(textColorOf(within(screen.getByTestId('today-row-online')).getByText('주간 회의')))
+      .not.toBe(textColorOf(within(screen.getByTestId('today-row-game')).getByText('KIA 직관')));
     expect(within(screen.getByTestId('today-row-game')).getByText('챔피언스필드')).toBeOnTheScreen();
     expect(within(screen.getByTestId('today-row-game')).getByText('채비 · 유니폼·응원봉')).toBeOnTheScreen();
+  });
+
+  it('줄의 접근성 이름에 제목·시간·상태(이동 없음·장소 없음)가 들어가고 펼치기는 힌트로 따로 읽힌다', async () => {
+    await setup();
+    await screen.findByText('주간 회의');
+    const online = screen.getByTestId('today-row-head-online');
+    expect(online.props.accessibilityLabel).toBe('주간 회의 15:00 이동 없음 · 온라인 회의');
+    expect(online.props.accessibilityHint).toBe('누르면 장소·채비·가족에게 보내기를 펼쳐요');
+    expect(screen.getByTestId('today-row-head-lunch').props.accessibilityLabel).toBe('육전집 점심 13:00 장소 없음');
+    expect(screen.getByTestId('today-row-head-game').props.accessibilityLabel).toBe('KIA 직관 18:00 챔피언스필드');
+    // 펼치면 상태와 힌트가 바뀐다.
+    await fireEvent.press(rowButton('육전집 점심'));
+    expect(screen.getByTestId('today-row-head-lunch').props.accessibilityState).toMatchObject({ expanded: true });
+    expect(screen.getByTestId('today-row-head-lunch').props.accessibilityHint).toBe('누르면 접어요');
   });
 
   it('받은 가족 요청은 서버에 받는 쪽이 없어 빈 상태만 보인다', async () => {
@@ -75,13 +133,13 @@ describe('오늘 탭: 일정을 누르면 장소와 채비를 바로 적는다',
     expect(screen.getByRole('button', { name: '육전집 점심 채비 넣기' })).toBeOnTheScreen();
     expect(screen.getByRole('button', { name: '육전집 점심 가족에게 보내기' })).toBeOnTheScreen();
     // 다시 누르면 접힌다.
-    await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 일정 접기' }));
+    await fireEvent.press(rowButton('육전집 점심'));
     expect(screen.queryByRole('button', { name: '육전집 점심 장소 넣기' })).toBeNull();
   });
 
   it('장소 넣기·채비·가족에게 보내기는 첫 설정 화면을 오늘 탭 출처(from=today)로 연다', async () => {
     await setup();
-    await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 일정 펼치기' }));
+    await fireEvent.press(await findRowButton('육전집 점심'));
     await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 장소 넣기' }));
     expect(mockPush).toHaveBeenLastCalledWith({ pathname: '/setup/schedule-place-search', params: { scheduleId: 'lunch', from: 'today' } });
     await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 채비 넣기' }));
@@ -90,13 +148,13 @@ describe('오늘 탭: 일정을 누르면 장소와 채비를 바로 적는다',
     expect(mockPush).toHaveBeenLastCalledWith({ pathname: '/setup/family-send', params: { scheduleId: 'lunch', title: '육전집 점심', from: 'today' } });
   });
 
-  it('이동 없음을 서버에 저장하고 줄을 바로 흐리게 바꾼다', async () => {
+  it('이동 없음을 서버에 저장하고 줄을 바로 흐린 색으로 바꾼다', async () => {
     const api = makeScheduleApi();
     await setup({ scheduleApi: api });
-    await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 일정 펼치기' }));
+    await fireEvent.press(await findRowButton('육전집 점심'));
     await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 이동 없음' }));
     await waitFor(() => expect(api.savePlace).toHaveBeenCalledWith('lunch', { noTravel: true }, expect.any(AbortSignal)));
-    await waitFor(() => expect(StyleSheet.flatten(screen.getByTestId('today-row-head-lunch').props.style).opacity).toBeLessThan(1));
+    await waitFor(() => expect(StyleSheet.flatten(screen.getByTestId('today-row-head-lunch').props.style).backgroundColor).toBe(colors.notice));
     // 빈 일정이 하나 줄어 배너 개수가 바뀐다(치과만 남는다).
     expect(await screen.findByText('장소가 빈 일정이 1개 있어요')).toBeOnTheScreen();
   });
@@ -105,7 +163,7 @@ describe('오늘 탭: 일정을 누르면 장소와 채비를 바로 적는다',
     const api = makeScheduleApi([DENTIST], { savePlace: jest.fn().mockResolvedValue({ id: 'dentist', place: { name: '예시치과의원', lat: 1, lng: 2 }, locationText: '예시치과의원', noTravel: false, noTravelReason: null }) });
     await setup({ scheduleApi: api });
     // 오늘 일정이 없어도 다른 날 빈 일정에서 같은 방식으로 적는다.
-    await fireEvent.press(await screen.findByRole('button', { name: '치과 일정 펼치기' }));
+    await fireEvent.press(await findRowButton('치과'));
     expect(screen.getByText('예시치과의원')).toBeOnTheScreen();
     await fireEvent.press(screen.getByRole('button', { name: '치과 여기 맞아요' }));
     await waitFor(() => expect(api.savePlace).toHaveBeenCalledWith('dentist', { placeId: 'mock-dental' }, expect.any(AbortSignal)));
@@ -117,7 +175,7 @@ describe('오늘 탭: 일정을 누르면 장소와 채비를 바로 적는다',
   it('저장이 실패하면 같은 저장을 다시 시도할 수 있다', async () => {
     const savePlace = jest.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ id: 'lunch', place: null, locationText: null, noTravel: true, noTravelReason: null });
     await setup({ scheduleApi: makeScheduleApi(undefined, { savePlace }) });
-    await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 일정 펼치기' }));
+    await fireEvent.press(await findRowButton('육전집 점심'));
     await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 이동 없음' }));
     expect(await screen.findByText('저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeOnTheScreen();
     await fireEvent.press(screen.getByText('다시 시도'));
@@ -149,10 +207,11 @@ describe('오늘 탭: 상태 5종(일정 구역)', () => {
     expect(await screen.findByText('육전집 점심')).toBeOnTheScreen();
   });
 
-  it('오류: 서버가 4xx로 거절해도 같은 오류 상태다', async () => {
-    const fetchSchedules = jest.fn().mockRejectedValue(new HttpError(500, 'boom'));
+  it.each([[500], [404]])('오류: 조회가 HTTP %i로 실패해도 같은 오류 상태다', async (status) => {
+    const fetchSchedules = jest.fn().mockRejectedValue(new HttpError(status, 'boom'));
     await setup({ scheduleApi: makeScheduleApi(undefined, { fetchSchedules }) });
     expect(await screen.findByText('일정을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeOnTheScreen();
+    expect(screen.getByText('다시 시도')).toBeOnTheScreen();
   });
 
   it('권한 없음: 캘린더가 꺼져 있으면 일정을 요청하지 않고 켜는 법을 안내한다', async () => {
@@ -186,48 +245,250 @@ describe('오늘 탭: 꺼진 권한 안내', () => {
     expect(screen.queryByTestId('permission-guide')).toBeNull();
   });
 
-  it('꺼진 권한은 켜면 되는 일을 한 줄씩 보인다(차와 연결되지 않았으면 카메라도)', async () => {
-    await setup({ connectionSource: makeConnection(false), permissionsSource: makePermissions({ calendar: 'ask', camera: 'denied' }) });
+  it('캘린더는 아직 묻지 않은 상태에서도 [켜기]를 보인다(홈에 꼭 필요하다)', async () => {
+    await setup({ connectionSource: makeConnection(false), permissionsSource: makePermissions({ calendar: 'ask', camera: 'granted' }) });
     const guide = within(await screen.findByTestId('permission-guide'));
     expect(guide.getByText('캘린더를 켜면 오늘 일정을 차에 보내 드려요.')).toBeOnTheScreen();
-    expect(guide.getByText('카메라를 켜면 차 화면의 QR을 찍어 바로 연결할 수 있어요.')).toBeOnTheScreen();
+    expect(guide.getByRole('button', { name: '캘린더 켜기' })).toBeOnTheScreen();
   });
 
-  it('차와 이미 연결돼 있으면 카메라 안내는 숨긴다', async () => {
+  it('카메라는 한 번도 묻지 않았으면(ask) 홈에 보이지 않는다', async () => {
+    await setup({ connectionSource: makeConnection(false), permissionsSource: makePermissions({ calendar: 'granted', camera: 'ask' }) });
+    await screen.findByText('차와 연결되지 않았어요');
+    expect(screen.queryByTestId('permission-guide')).toBeNull();
+    expect(screen.queryByText(/카메라를 켜면/)).toBeNull();
+  });
+
+  it('거부한 카메라는 차와 연결되지 않았을 때 [설정 열기]로 보인다', async () => {
+    const permissions = makePermissions({ calendar: 'granted', camera: 'denied' });
+    await setup({ connectionSource: makeConnection(false), permissionsSource: permissions });
+    const guide = within(await screen.findByTestId('permission-guide'));
+    expect(guide.getByText('카메라를 켜면 차 화면의 QR을 찍어 바로 연결할 수 있어요.')).toBeOnTheScreen();
+    await fireEvent.press(guide.getByRole('button', { name: '카메라 설정 열기' }));
+    expect(permissions.openSettings).toHaveBeenCalled();
+  });
+
+  it('차와 이미 연결돼 있으면 거부한 카메라도 안내하지 않는다', async () => {
     await setup({ connectionSource: makeConnection(true), permissionsSource: makePermissions({ calendar: 'ask', camera: 'denied' }) });
     await screen.findByText('연결 화면 열기');
     const guide = within(screen.getByTestId('permission-guide'));
     expect(guide.queryByText(/카메라를 켜면/)).toBeNull();
     expect(guide.getByText(/캘린더를 켜면/)).toBeOnTheScreen();
   });
+
+  it('권한 안내는 홈 맨 위, 그 아래가 연결 상태다(정책 10.4)', async () => {
+    await setup({ connectionSource: makeConnection(false), permissionsSource: makePermissions({ calendar: 'denied', camera: 'granted' }) });
+    await screen.findByTestId('permission-guide');
+    await screen.findByTestId('car-connection');
+    // 렌더 트리에서 testID가 나오는 순서를 본다.
+    const ids: string[] = [];
+    const walk = (node: unknown): void => {
+      if (!node || typeof node !== 'object') return;
+      const n = node as { props?: { testID?: string }; children?: unknown[] };
+      if (n.props?.testID) ids.push(n.props.testID);
+      n.children?.forEach(walk);
+    };
+    const tree = screen.toJSON();
+    (Array.isArray(tree) ? tree : [tree]).forEach(walk);
+    expect(ids.indexOf('permission-guide')).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf('permission-guide')).toBeLessThan(ids.indexOf('car-connection'));
+  });
+
+  it('권한을 다시 확인하다 실패해도 직전 결과를 그대로 둔다(안내가 사라졌다 나타나지 않는다)', async () => {
+    const permissions = makePermissions({ calendar: 'denied', camera: 'granted' });
+    await setup({ connectionSource: makeConnection(false), permissionsSource: permissions });
+    expect(await screen.findByTestId('permission-guide')).toBeOnTheScreen();
+    permissions.read.mockRejectedValueOnce(new Error('boom'));
+    await setFocus(false);
+    await setFocus(true);
+    await waitFor(() => expect(permissions.read).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('permission-guide')).toBeOnTheScreen();
+    expect(screen.getByText('캘린더를 켜면 오늘 일정을 볼 수 있어요.')).toBeOnTheScreen();
+  });
 });
 
 describe('오늘 탭: 차 연결 상태', () => {
-  it('연결됨: 상태와 연결 화면 버튼을 보인다', async () => {
+  it('연결됨: 자리 이름·연결 시각과 연결 화면 버튼을 보인다', async () => {
     await setup({ connectionSource: makeConnection(true) });
     expect(await screen.findByText('✓ 차와 연결돼 있어요')).toBeOnTheScreen();
+    expect(screen.getByTestId('car-connection-detail')).toHaveTextContent(`${SEAT.name} · 11월 6일 (금) 09:30에 연결했어요`);
     await fireEvent.press(screen.getByRole('button', { name: '연결 화면 열기' }));
-    expect(mockPush).toHaveBeenCalledWith('/setup/pair-car');
+    expect(mockPush).toHaveBeenCalledWith({ pathname: '/setup/pair-car', params: { from: 'tab' } });
   });
 
   it('연결 안 됨: [차 연결하기]로 연결 화면에 간다', async () => {
     await setup({ connectionSource: makeConnection(false) });
     expect(await screen.findByText('차와 연결되지 않았어요')).toBeOnTheScreen();
+    expect(screen.queryByTestId('car-connection-detail')).toBeNull();
     await fireEvent.press(screen.getByRole('button', { name: '차 연결하기' }));
-    expect(mockPush).toHaveBeenCalledWith('/setup/pair-car');
+    expect(mockPush).toHaveBeenCalledWith({ pathname: '/setup/pair-car', params: { from: 'tab' } });
   });
 
-  it('확인하는 동안 진행 표시, 실패하면 다시 확인으로 복구한다', async () => {
+  it('확인에 실패하면 오류를 보이고 [다시 확인]으로 복구한다', async () => {
     const source = makeConnection(new Error('offline'));
     await setup({ connectionSource: source });
     expect(await screen.findByText('연결 상태를 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeOnTheScreen();
-    source.isConnected.mockResolvedValueOnce(true);
+    source.status.mockResolvedValueOnce(SEAT);
     await fireEvent.press(screen.getByText('다시 확인'));
     expect(await screen.findByText('✓ 차와 연결돼 있어요')).toBeOnTheScreen();
   });
 
   it('연결 상태 확인이 끝나기 전에는 진행 표시를 보인다', async () => {
-    await setup({ connectionSource: { isConnected: jest.fn(() => new Promise(() => {})) } });
+    await setup({ connectionSource: { status: jest.fn(() => new Promise(() => {})) } });
     expect(await screen.findByLabelText('연결 상태를 확인하는 중')).toBeOnTheScreen();
+  });
+});
+
+describe('오늘 탭: 폰이 거른 일정(이동 없음)', () => {
+  const lunchApi = () => makeScheduleApi([LUNCH]);
+
+  it('거른 일정이 오늘이면 시간순으로 흐린 줄에 이동 없음과 이유를 적어 보이고, 오늘이 아닌 거른 일정은 보이지 않는다', async () => {
+    await setup({ scheduleApi: lunchApi(), filteredEvents: [ROOM_EVENT, ONLINE_EVENT] });
+    await screen.findByText('육전집 점심');
+    const section = within(screen.getByTestId('today-schedules'));
+    expect(section.getAllByText(/^(육전집 점심|온라인 스탠드업)$/).map((n) => n.props.children)).toEqual(['온라인 스탠드업', '육전집 점심']);
+    const row = within(screen.getByTestId('today-row-evt-online'));
+    expect(row.getByText('이동 없음 · 온라인 회의')).toBeOnTheScreen();
+    expect(row.getByText('11:00')).toBeOnTheScreen();
+    expect(screen.queryByText('3층 회의실 점검')).toBeNull();
+    // 거른 줄은 이동 없음이라 '장소가 빈 일정'에 세지 않는다.
+    expect(screen.getByText('장소가 빈 일정이 1개 있어요')).toBeOnTheScreen();
+    expect(StyleSheet.flatten(screen.getByTestId('today-row-head-evt-online').props.style).opacity).toBeUndefined();
+  });
+
+  it('서버에 일정이 하나도 없어도 거른 일정만 보이면 빈 상태 대신 그 줄을 보인다', async () => {
+    await setup({ scheduleApi: makeScheduleApi([]), filteredEvents: [ONLINE_EVENT] });
+    expect(await screen.findByText('온라인 스탠드업')).toBeOnTheScreen();
+    expect(screen.queryByText('오늘은 차로 갈 일정이 없어요.')).toBeNull();
+  });
+
+  it('줄을 누르면 확인이 나오고 취소하면 아무것도 바뀌지 않는다. [바꾸기]를 눌러야 바뀐다', async () => {
+    const mark = jest.fn().mockResolvedValue('ok');
+    await setup({ scheduleApi: lunchApi(), filteredEvents: [ONLINE_EVENT], travelMark: { mark } });
+    await fireEvent.press(await screen.findByRole('button', { name: /^온라인 스탠드업 / }));
+    expect(screen.getByText('‘온라인 스탠드업’ 일정을 이동 일정으로 바꿀까요?')).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole('button', { name: '취소' }));
+    expect(screen.queryByText('‘온라인 스탠드업’ 일정을 이동 일정으로 바꿀까요?')).toBeNull();
+    expect(mark).not.toHaveBeenCalled();
+
+    await fireEvent.press(screen.getByRole('button', { name: /^온라인 스탠드업 / }));
+    await fireEvent.press(screen.getByRole('button', { name: '바꾸기' }));
+    await waitFor(() => expect(mark).toHaveBeenCalledWith('온라인 스탠드업'));
+  });
+
+  it('바꾼 뒤에는 되돌리기를 보이고, 서버 목록을 다시 읽고, 되돌리기를 누르면 되돌린다', async () => {
+    const mark = jest.fn().mockResolvedValue('ok');
+    const undo = jest.fn().mockResolvedValue('ok');
+    const api = lunchApi();
+    await setup({ scheduleApi: api, filteredEvents: [ONLINE_EVENT], travelMark: { mark, undo } });
+    await fireEvent.press(await screen.findByRole('button', { name: /^온라인 스탠드업 / }));
+    await fireEvent.press(screen.getByRole('button', { name: '바꾸기' }));
+    expect(await screen.findByText('‘온라인 스탠드업’ 일정을 이동 일정으로 바꿨어요.')).toBeOnTheScreen();
+    await waitFor(() => expect(api.fetchSchedules).toHaveBeenCalledTimes(2));
+    await fireEvent.press(screen.getByRole('button', { name: '온라인 스탠드업 되돌리기' }));
+    await waitFor(() => expect(undo).toHaveBeenCalledWith('온라인 스탠드업'));
+    await waitFor(() => expect(api.fetchSchedules).toHaveBeenCalledTimes(3));
+  });
+
+  it('바꾸지 못하면 안내하고 줄은 그대로 남는다', async () => {
+    const mark = jest.fn().mockResolvedValue('failed');
+    await setup({ scheduleApi: lunchApi(), filteredEvents: [ONLINE_EVENT], travelMark: { mark } });
+    await fireEvent.press(await screen.findByRole('button', { name: /^온라인 스탠드업 / }));
+    await fireEvent.press(screen.getByRole('button', { name: '바꾸기' }));
+    expect(await screen.findByText('바꾸지 못했어요. 일정은 그대로예요. 잠시 뒤 다시 시도해 주세요.')).toBeOnTheScreen();
+    expect(screen.getByText('온라인 스탠드업')).toBeOnTheScreen();
+  });
+
+  it('서버가 같은 id의 일정을 알면 서버 줄만 보이고 거른 줄은 겹쳐 나오지 않는다', async () => {
+    await setup({ scheduleApi: lunchApi(), filteredEvents: [{ ...ONLINE_EVENT, id: 'lunch', title: '육전집 점심' }] });
+    await screen.findByText('육전집 점심');
+    expect(screen.getAllByText('육전집 점심')).toHaveLength(1);
+  });
+});
+
+describe('오늘 탭: 저장 오류와 다시 읽기', () => {
+  const press = async (name: string | RegExp) => fireEvent.press(await screen.findByRole('button', { name }));
+
+  it('일정이 바뀐 것(4xx) 저장 오류는 [다시 시도] 없이 [닫기]만 두고 목록을 다시 읽는다', async () => {
+    const savePlace = jest.fn().mockRejectedValue(new HttpError(409, 'changed'));
+    const api = makeScheduleApi(undefined, { savePlace });
+    await setup({ scheduleApi: api });
+    await fireEvent.press(await findRowButton('육전집 점심'));
+    await press('육전집 점심 이동 없음');
+    expect(await screen.findByText('일정이 바뀌었어요. 목록에서 다시 확인해 주세요.')).toBeOnTheScreen();
+    expect(screen.queryByText('다시 시도')).toBeNull();
+    await waitFor(() => expect(api.fetchSchedules).toHaveBeenCalledTimes(2));
+    expect(savePlace).toHaveBeenCalledTimes(1);
+    await press('닫기');
+    expect(screen.queryByText('일정이 바뀌었어요. 목록에서 다시 확인해 주세요.')).toBeNull();
+  });
+
+  it('그 밖의 저장 실패(네트워크·5xx)는 [다시 시도]를 두고 닫기는 없다', async () => {
+    const savePlace = jest.fn().mockRejectedValue(new HttpError(503, 'down'));
+    await setup({ scheduleApi: makeScheduleApi(undefined, { savePlace }) });
+    await fireEvent.press(await findRowButton('육전집 점심'));
+    await press('육전집 점심 이동 없음');
+    expect(await screen.findByText('저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeOnTheScreen();
+    expect(screen.getByText('다시 시도')).toBeOnTheScreen();
+    expect(screen.queryByText('닫기')).toBeNull();
+  });
+
+  it('탭에서 나갔다 돌아오면 일정을 다시 읽고, 다시 읽는 동안 이미 읽은 목록은 그대로 보인다', async () => {
+    let resolveSecond: (value: unknown) => void = () => {};
+    const fetchSchedules = jest.fn()
+      .mockResolvedValueOnce({ anchor: '2026-11-06T00:30:00Z', schedules: [LUNCH] })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+    await setup({ scheduleApi: makeScheduleApi(undefined, { fetchSchedules }) });
+    expect(await screen.findByText('육전집 점심')).toBeOnTheScreen();
+    await setFocus(false);
+    await setFocus(true);
+    await waitFor(() => expect(fetchSchedules).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('육전집 점심')).toBeOnTheScreen();
+    expect(screen.queryByLabelText('일정을 불러오는 중')).toBeNull();
+    await act(async () => { resolveSecond({ anchor: '2026-11-06T00:30:00Z', schedules: [{ ...LUNCH, title: '육전집 저녁' }] }); });
+    expect(await screen.findByText('육전집 저녁')).toBeOnTheScreen();
+    expect(screen.queryByText('육전집 점심')).toBeNull();
+  });
+
+  it('늦게 온 이전 조회 응답은 버린다(포커스를 잃어 취소한 조회가 새 목록을 덮지 못한다)', async () => {
+    const resolvers: ((value: unknown) => void)[] = [];
+    const signals: AbortSignal[] = [];
+    const fetchSchedules = jest.fn((signal: AbortSignal) => { signals.push(signal); return new Promise<Awaited<ReturnType<SchedulePlacesApi['fetchSchedules']>>>((resolve) => { resolvers.push(resolve as (value: unknown) => void); }); });
+    await setup({ scheduleApi: makeScheduleApi(undefined, { fetchSchedules }) });
+    await waitFor(() => expect(fetchSchedules).toHaveBeenCalledTimes(1));
+    await setFocus(false);
+    expect(signals[0]!.aborted).toBe(true);
+    await setFocus(true);
+    await waitFor(() => expect(fetchSchedules).toHaveBeenCalledTimes(2));
+    await act(async () => { resolvers[1]!({ anchor: '2026-11-06T00:30:00Z', schedules: [{ ...LUNCH, title: '새 일정' }] }); });
+    expect(await screen.findByText('새 일정')).toBeOnTheScreen();
+    // 먼저 보낸 조회가 뒤늦게 돌아와도 화면은 새 목록 그대로다.
+    await act(async () => { resolvers[0]!({ anchor: '2026-11-06T00:30:00Z', schedules: [{ ...LUNCH, title: '옛 일정' }] }); });
+    expect(screen.getByText('새 일정')).toBeOnTheScreen();
+    expect(screen.queryByText('옛 일정')).toBeNull();
+  });
+
+  it('저장 중에 탭을 바꿔도 저장 요청은 취소되지 않고 끝까지 간다. 돌아오면 저장 뒤 상태를 읽는다', async () => {
+    let finishSave: (value: unknown) => void = () => {};
+    const saveSignals: AbortSignal[] = [];
+    const saved = { id: 'lunch', place: null, locationText: null, noTravel: true, noTravelReason: null };
+    const savePlace = jest.fn((_id: string, _change: unknown, signal: AbortSignal) => { saveSignals.push(signal); return new Promise<typeof saved>((resolve) => { finishSave = resolve as (value: unknown) => void; }); });
+    const fetchSchedules = jest.fn()
+      .mockResolvedValueOnce({ anchor: '2026-11-06T00:30:00Z', schedules: [LUNCH] })
+      .mockResolvedValueOnce({ anchor: '2026-11-06T00:30:00Z', schedules: [{ ...LUNCH, ...saved }] });
+    await setup({ scheduleApi: makeScheduleApi(undefined, { savePlace, fetchSchedules }) });
+    await fireEvent.press(await findRowButton('육전집 점심'));
+    await press('육전집 점심 이동 없음');
+    await waitFor(() => expect(savePlace).toHaveBeenCalledTimes(1));
+
+    await setFocus(false);
+    expect(saveSignals[0]!.aborted).toBe(false);
+    await setFocus(true);
+    // 저장이 끝나기 전에는 다시 읽지 않는다(저장 전 상태를 읽어 되돌리지 않게).
+    expect(fetchSchedules).toHaveBeenCalledTimes(1);
+    await act(async () => { finishSave(saved); });
+    await waitFor(() => expect(fetchSchedules).toHaveBeenCalledTimes(2));
+    expect(saveSignals[0]!.aborted).toBe(false);
+    await waitFor(() => expect(within(screen.getByTestId('today-row-lunch')).getByText('이동 없음')).toBeOnTheScreen());
   });
 });

@@ -10,6 +10,8 @@ export const colors = {
   card: '#ffffff',
   notice: '#f0f0f0',
   unchecked: '#7d7d7d',
+  /** 이동 없음처럼 흐리게 보이는 줄의 글자색. 배경 `notice`(#f0f0f0) 위에서도 4.5:1 이상이다(opacity로 낮추면 대비가 깨져 색으로 낮춘다). */
+  dimmed: '#666666',
   onPrimary: '#ffffff',
   primary: '#111111',
   primaryDisabled: '#9a9a9a',

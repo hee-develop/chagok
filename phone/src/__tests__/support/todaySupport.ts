@@ -1,6 +1,6 @@
-import type { CarConnectionSource } from './carConnection';
-import type { PermissionMap, PermissionsSource } from './permissions';
-import type { SchedulePlacesApi, SetupSchedule } from '../fill-places/schedulePlacesApi';
+import type { CarConnectionSource } from '../../features/today/carConnection';
+import type { PermissionMap, PermissionName, PermissionsSource, PermissionStatus } from '../../features/today/permissions';
+import type { SchedulePlacesApi, SetupSchedule } from '../../features/fill-places/schedulePlacesApi';
 
 /** 서울 2026-11-06 09:30. 서버가 '오늘'로 보는 기준 시각이다. */
 export const ANCHOR = '2026-11-06T00:30:00Z';
@@ -34,16 +34,20 @@ export const makeScheduleApi = (schedules: SetupSchedule[] = [LUNCH, ONLINE, GAM
 
 export const GRANTED: PermissionMap = { calendar: 'granted', camera: 'granted' };
 
-export const makePermissions = (map: PermissionMap = GRANTED, overrides: Partial<PermissionsSource> = {}) => {
+type PermissionsMock = { read: jest.Mock<Promise<PermissionMap>, []>; request: jest.Mock<Promise<PermissionStatus>, [PermissionName]>; openSettings: jest.Mock };
+
+export const makePermissions = (map: PermissionMap = GRANTED, overrides: Partial<PermissionsSource> = {}): PermissionsMock & PermissionsSource => {
   let current = map;
   return {
     read: jest.fn(async () => current),
-    request: jest.fn(async (name: keyof PermissionMap) => { current = { ...current, [name]: 'granted' as const }; return 'granted' as const; }),
+    request: jest.fn(async (name: PermissionName) => { current = { ...current, [name]: 'granted' as const }; return 'granted' as const; }),
     openSettings: jest.fn(),
     ...overrides,
-  } satisfies PermissionsSource;
+  } as PermissionsMock & PermissionsSource;
 };
 
-export const makeConnection = (connected: boolean | Error = true): CarConnectionSource & { isConnected: jest.Mock } => ({
-  isConnected: jest.fn(async () => { if (connected instanceof Error) throw connected; return connected; }),
+/** 연결됨이면 자리 이름·연결 시각, 연결 안 됨이면 null, Error면 던진다(`GET /pair`의 200·401·오류). */
+export const SEAT = { name: 'Pixel 9', pairedAt: '2026-11-06T00:30:00Z' } as const;
+export const makeConnection = (connected: boolean | Error = true): CarConnectionSource & { status: jest.Mock } => ({
+  status: jest.fn(async () => { if (connected instanceof Error) throw connected; return connected ? SEAT : null; }),
 });

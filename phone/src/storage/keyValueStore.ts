@@ -1,4 +1,7 @@
-/** 폰 안에만 두는 작은 값(첫 설정 완료 여부, 연결한 차 id)을 읽고 쓰는 자리. 비밀 값은 두지 않는다. */
+/**
+ * 폰 안에만 두는 작은 값(첫 설정 완료 여부, '이동 일정이에요' 예외 이름)을 읽고 쓰는 자리. 비밀 값은 두지 않는다(토큰은 expo-secure-store).
+ * AsyncStorage를 부르는 곳은 이 파일 한 군데다.
+ */
 export interface KeyValueStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
@@ -9,10 +12,11 @@ export interface KeyValueStore {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const loadAsyncStorage = () => (require('@react-native-async-storage/async-storage') as typeof import('@react-native-async-storage/async-storage')).default;
 
+// async라서 모듈을 불러오지 못해도 던지지 않고 거부(reject)된다. 부르는 쪽은 catch로 다룬다.
 export const deviceStore: KeyValueStore = {
-  get: (key) => loadAsyncStorage().getItem(key),
-  set: (key, value) => loadAsyncStorage().setItem(key, value),
-  remove: (key) => loadAsyncStorage().removeItem(key),
+  get: async (key) => loadAsyncStorage().getItem(key),
+  set: async (key, value) => loadAsyncStorage().setItem(key, value),
+  remove: async (key) => loadAsyncStorage().removeItem(key),
 };
 
 export function createMemoryStore(initial: Record<string, string> = {}): KeyValueStore & { dump(): Record<string, string> } {

@@ -9,10 +9,13 @@ import { CalendarPermissionError, MOCK_CALENDARS, type CalendarSource } from '..
 import { REQUEST_TIMEOUT_MS } from '../../../api/request';
 
 const mockPush = jest.fn();
+const mockBack = jest.fn();
+const mockReplace = jest.fn();
+let mockCanGoBack = true;
 const mockPut = jest.fn();
 jest.mock('../../../api/client', () => ({ api: { calendars: { selection: { $put: (...a: unknown[]) => mockPut(...a) } } } }));
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, back: mockBack, replace: mockReplace, canGoBack: () => mockCanGoBack }),
 }));
 
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
@@ -27,6 +30,9 @@ const row = (name: string, account: string) => screen.getByRole('checkbox', { na
 
 beforeEach(() => {
   mockPush.mockReset();
+  mockBack.mockReset();
+  mockReplace.mockReset();
+  mockCanGoBack = true;
   mockPut.mockReset();
   noSaved.mockClear();
 });
@@ -436,5 +442,37 @@ describe('저장 뒤 일정 보내기', () => {
     await fireEvent.press(screen.getByText('나중에 할게요'));
     expect(save).not.toHaveBeenCalled();
     expect(onSaved).not.toHaveBeenCalled();
+  });
+});
+
+describe('standalone(설정 탭의 [캘린더 고르기])', () => {
+  it('단계 표시(1 / 4)가 없고 [나중에 할게요] 대신 [닫기]가 있다', async () => {
+    await renderScreen(<CalendarSelectScreen standalone source={source} save={jest.fn()} restore={noSaved} />);
+    expect(await screen.findByText('캘린더를 골라 주세요')).toBeOnTheScreen();
+    expect(screen.queryByText('1 / 4')).toBeNull();
+    expect(screen.queryAllByTestId('progress-bar-filled')).toHaveLength(0);
+    expect(screen.getByText('닫기')).toBeOnTheScreen();
+    expect(screen.queryByText('나중에 할게요')).toBeNull();
+  });
+
+  it('저장하면 일정을 보내기 시작하고 2단계가 아니라 왔던 화면으로 돌아간다', async () => {
+    const save = jest.fn().mockResolvedValue({});
+    const onSaved = jest.fn();
+    await renderScreen(<CalendarSelectScreen standalone source={source} save={save} restore={noSaved} onSaved={onSaved} />);
+    await fireEvent.press(await screen.findByRole('button', { name: '캘린더 3개 연결하기' }));
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('[닫기]는 저장하지 않고 돌아가고, 돌아갈 곳이 없으면 오늘 탭으로 간다', async () => {
+    const save = jest.fn();
+    mockCanGoBack = false;
+    await renderScreen(<CalendarSelectScreen standalone source={source} save={save} restore={noSaved} />);
+    await screen.findByText('캘린더 3개 연결하기');
+    await fireEvent.press(screen.getByText('닫기'));
+    expect(save).not.toHaveBeenCalled();
+    expect(mockReplace).toHaveBeenCalledWith('/');
+    expect(mockPush).not.toHaveBeenCalled();
   });
 });

@@ -38,7 +38,7 @@ export function SettingsScreen({ connectionSource = carConnectionSource, permiss
       <Section heading={t.calendarHeading}>
         <Card>
           <Text style={[styles.hint, font(400)]}>{t.calendarHint}</Text>
-          <OutlineButton label={t.pickCalendar} onPress={() => router.push('/setup/calendar')} />
+          <OutlineButton label={t.pickCalendar} onPress={() => router.push({ pathname: '/setup/calendar', params: { from: 'tab' } })} />
         </Card>
       </Section>
 

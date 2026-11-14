@@ -1,3 +1,5 @@
+import { deviceStore } from '../../storage/keyValueStore';
+
 /**
  * "이동 일정이에요"로 바꾼 일정 이름 목록(정책서 10.3: 바꾸면 같은 이름 일정은 다음부터 거르지 않는다).
  * 폰 저장소(AsyncStorage)에 둔다. 이름만 담고 일정 내용은 담지 않는다.
@@ -44,12 +46,10 @@ export const LOAD_TIMEOUT_MS = 5_000;
 /** 앞뒤 공백 제거·연속 공백 하나·대소문자 무시. 서버의 장소 이름 정규화와 같은 규칙이다. */
 export const normalizeTitle = (title: string) => title.trim().replace(/\s+/g, ' ').toLowerCase();
 
-// 네이티브 모듈이라 처음 쓸 때 불러온다(테스트·저장소가 없는 환경에서 앱이 죽지 않게).
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const loadAsyncStorage = () => (require('@react-native-async-storage/async-storage') as { default: KeyValueStorage }).default;
+// AsyncStorage는 `storage/keyValueStore.ts` 한 곳에서만 불러온다.
 const defaultStorage: KeyValueStorage = {
-  getItem: async (key) => loadAsyncStorage().getItem(key),
-  setItem: async (key, value) => loadAsyncStorage().setItem(key, value),
+  getItem: (key) => deviceStore.get(key),
+  setItem: (key, value) => deviceStore.set(key, value),
 };
 
 export function createTravelExceptions(

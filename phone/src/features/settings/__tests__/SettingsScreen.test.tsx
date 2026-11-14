@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react-native
 import type { ReactElement } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { makeConnection, makePermissions } from '../../today/testSupport';
+import { makeConnection, makePermissions } from '../../../__tests__/support/todaySupport';
 import { SettingsScreen } from '../SettingsScreen';
 
 const mockPush = jest.fn();
@@ -30,9 +30,9 @@ describe('설정 탭', () => {
   it('차 연결 입구와 캘린더 고르기 입구가 각 화면으로 이어진다', async () => {
     await setup();
     await fireEvent.press(await screen.findByRole('button', { name: '차 연결하기' }));
-    expect(mockPush).toHaveBeenLastCalledWith('/setup/pair-car');
+    expect(mockPush).toHaveBeenLastCalledWith({ pathname: '/setup/pair-car', params: { from: 'tab' } });
     await fireEvent.press(screen.getByRole('button', { name: '캘린더 고르기' }));
-    expect(mockPush).toHaveBeenLastCalledWith('/setup/calendar');
+    expect(mockPush).toHaveBeenLastCalledWith({ pathname: '/setup/calendar', params: { from: 'tab' } });
   });
 
   it('스위치(플러스 모드·늦을 때 연락·음성만)와 캘린더에 장소 적기는 두지 않는다', async () => {
@@ -50,7 +50,7 @@ describe('설정 탭', () => {
     expect(screen.getByRole('button', { name: '카메라 설정 열기' })).toBeOnTheScreen();
   });
 
-  it('권한 상태를 읽는 동안 진행 표시, 읽지 못하면 다시 확인으로 복구한다', async () => {
+  it('처음부터 권한을 읽지 못하면 오류를 보이고 [다시 확인]으로 복구한다', async () => {
     const read = jest.fn().mockRejectedValueOnce(new Error('native')).mockResolvedValueOnce({ calendar: 'granted', camera: 'granted' });
     await setup({ permissionsSource: makePermissions(undefined, { read }) });
     expect(await screen.findByText('권한을 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeOnTheScreen();

@@ -1,51 +1,54 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 
-import { api as serverApi } from '../../api/client';
-import { HttpError, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
+import { REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
 import { deviceStore, type KeyValueStore } from '../../storage/keyValueStore';
-import type { PairingApi } from '../pair-car/pairingApi';
+import { pairingApi, type PairingApi } from '../pair-car/pairingApi';
 
-/** 마지막으로 연결한 차의 익명 id. 서버에 그 차가 아직 연결돼 있는지 물을 때 쓴다. */
-export const PAIRED_CAR_KEY = 'chagok.pairedCarId.v1';
+/**
+ * J1 이전 버전이 연결한 차 id를 폰에 남기던 키. 지금은 폰 토큰으로 서버에 묻고 폰 응답에는 차 id가 없으므로 값을 쓰지 않는다.
+ * 예전에 저장된 값이 있으면 상태를 확인할 때 한 번 지운다.
+ */
+export const LEGACY_PAIRED_CAR_KEY = 'chagok.pairedCarId.v1';
 
-export type ConnectionState = { status: 'checking' } | { status: 'error' } | { status: 'connected' } | { status: 'notConnected' };
+export type ConnectionState =
+  | { status: 'checking' }
+  | { status: 'error' }
+  /** name은 연결된 자리 이름(이 폰의 기기 이름), pairedAt은 연결한 시각(ISO). */
+  | { status: 'connected'; name: string; pairedAt: string }
+  | { status: 'notConnected' };
 
 /**
  * 폰이 차와 연결돼 있는가. 오늘·설정 탭이 이 인터페이스만 본다.
- * 지금 구현은 연결할 때 저장해 둔 차 id로 서버(GET /pairing/cars/:carId)에 묻는다.
- * 연결 API가 바뀌면(J1) 이 파일의 구현만 바꾸면 된다.
+ * 구현은 폰 토큰으로 `GET /pair`를 묻는다: 200이면 연결됨(자리 이름·연결 시각), 401(토큰이 없거나 서버가 모름)이면 null, 그 밖의 오류는 던진다.
  */
 export interface CarConnectionSource {
-  isConnected(signal: AbortSignal): Promise<boolean>;
+  status(signal: AbortSignal): Promise<{ name: string; pairedAt: string } | null>;
 }
 
-export function createCarConnectionSource(store: KeyValueStore = deviceStore): CarConnectionSource {
+export function createCarConnectionSource(
+  api: Pick<PairingApi, 'status'> = pairingApi,
+  store: KeyValueStore = deviceStore,
+): CarConnectionSource {
+  let cleaned = false;
   return {
-    isConnected: async (signal) => {
-      const carId = await store.get(PAIRED_CAR_KEY).catch(() => null);
-      if (!carId) return false;
-      const res = await serverApi.pairing.cars[':carId'].$get({ param: { carId } }, { init: { signal } });
-      if (!res.ok) throw new HttpError(res.status, `GET /pairing/cars/:carId ${res.status}`);
-      return (await res.json()).paired;
+    status: async (signal) => {
+      if (!cleaned) {
+        cleaned = true;
+        await store.remove(LEGACY_PAIRED_CAR_KEY).catch(() => undefined);
+      }
+      const status = await api.status(signal);
+      return status ? { name: status.name, pairedAt: status.pairedAt } : null;
     },
   };
 }
 
 export const carConnectionSource = createCarConnectionSource();
 
-/** 연결에 성공하면 그 차 id를 저장한다. 연결 화면은 그대로 두고 api 한 겹만 감싼다. 저장 실패는 연결 결과에 영향을 주지 않는다. */
-export function recordPairedCar(inner: PairingApi, store: KeyValueStore = deviceStore): PairingApi {
-  return {
-    claim: async (code, signal) => {
-      const result = await inner.claim(code, signal);
-      await store.set(PAIRED_CAR_KEY, result.carId).catch(() => {});
-      return result;
-    },
-  };
-}
-
-/** 화면이 포커스를 얻을 때마다 연결 상태를 새로 읽는다. 늦게 온 이전 응답은 버린다. */
+/**
+ * 화면이 포커스를 얻을 때마다 연결 상태를 새로 읽는다. 늦게 온 이전 응답은 버린다.
+ * 이미 결과가 있으면 다시 읽는 동안 그 결과를 그대로 두어 탭을 오갈 때 카드가 깜빡이지 않는다.
+ */
 export function useCarConnection({
   source = carConnectionSource,
   timeoutMs = REQUEST_TIMEOUT_MS,
@@ -57,9 +60,9 @@ export function useCarConnection({
   useFocusEffect(useCallback(() => {
     const controller = new AbortController();
     current.current = controller;
-    setState({ status: 'checking' });
-    void requestWithTimeout((signal) => source.isConnected(signal), timeoutMs, controller).then(
-      (connected) => { if (current.current === controller) setState({ status: connected ? 'connected' : 'notConnected' }); },
+    setState((prev) => (prev.status === 'connected' || prev.status === 'notConnected' ? prev : { status: 'checking' }));
+    void requestWithTimeout((signal) => source.status(signal), timeoutMs, controller).then(
+      (found) => { if (current.current === controller) setState(found ? { status: 'connected', ...found } : { status: 'notConnected' }); },
       () => { if (current.current === controller) setState({ status: 'error' }); },
     );
     return () => {

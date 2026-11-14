@@ -5,6 +5,9 @@ import { strings } from '../../i18n/ko';
 import { colors, useFont } from '../../ui/theme';
 import type { SchedulePlaceChange, SetupSchedule } from './schedulePlacesApi';
 
+/** 일정 하나를 다루는 화면들(장소 검색·채비·가족 보내기). */
+type ScheduleRoute = '/setup/schedule-place-search' | '/setup/schedule-care' | '/setup/family-send';
+
 type Props = {
   schedule: SetupSchedule;
   /** 저장 중이면 모든 버튼을 막는다(저장은 한 번에 하나). */
@@ -25,9 +28,9 @@ export function ScheduleActions({ schedule, saving, onSave, onNavigate, origin =
   const font = useFont();
   const t = strings.fillPlaces;
   const from = origin === 'today' ? { from: 'today' } : {};
-  const go = (pathname: string, params: Record<string, string>) => {
+  const go = (pathname: ScheduleRoute, params: Record<string, string>) => {
     onNavigate?.();
-    router.push({ pathname, params: { ...params, ...from } } as never);
+    router.push({ pathname, params: { ...params, ...from } });
   };
 
   return (

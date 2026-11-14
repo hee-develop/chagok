@@ -6,7 +6,7 @@ import { FamilySendScreen } from '../../family/FamilySendScreen';
 import { ScheduleCareScreen } from '../../fill-places/ScheduleCareScreen';
 import { PlaceSearchScreen } from '../../places/PlaceSearchScreen';
 import { makeApi as makePlacesApi } from '../../places/testSupport';
-import { makeScheduleApi } from '../testSupport';
+import { makeScheduleApi } from '../../../__tests__/support/todaySupport';
 
 const mockBack = jest.fn();
 const mockReplace = jest.fn();

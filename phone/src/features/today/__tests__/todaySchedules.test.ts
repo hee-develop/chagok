@@ -1,4 +1,5 @@
-import { DENTIST, GAME, LUNCH, ONLINE, ANCHOR } from '../testSupport';
+import { DENTIST, GAME, LUNCH, ONLINE, ANCHOR } from '../../../__tests__/support/todaySupport';
+import type { FilteredEvent } from '../../calendar-sync/filteredEvents';
 import { isMissingPlace, isTodaySchedule, splitSchedules } from '../todaySchedules';
 
 describe('isTodaySchedule', () => {
@@ -41,5 +42,31 @@ describe('splitSchedules', () => {
     expect(isMissingPlace(DENTIST)).toBe(true);
     expect(isMissingPlace(ONLINE)).toBe(false);
     expect(isMissingPlace(GAME)).toBe(false);
+  });
+});
+
+describe('splitSchedules: 폰이 거른 일정', () => {
+  const event = (id: string, start: string, end: string): FilteredEvent => ({ id, title: id, start, end, reason: 'online' });
+  const standup = event('standup', '2026-11-06T02:00:00Z', '2026-11-06T02:30:00Z');
+  const nextDay = event('next-day', '2026-11-08T02:00:00Z', '2026-11-08T03:00:00Z');
+
+  it('오늘 거른 일정은 서버 일정과 시작순으로 섞어 items에 넣고 오늘이 아닌 것은 뺀다', () => {
+    const split = splitSchedules([LUNCH, GAME], ANCHOR, [nextDay, standup]);
+    expect(split.items.map((i) => `${i.kind}:${i.id}`)).toEqual(['filtered:standup', 'server:lunch', 'server:game']);
+    // today(서버가 아는 오늘 일정)는 그대로다.
+    expect(split.today.map((s) => s.id)).toEqual(['lunch', 'game']);
+  });
+
+  it('거른 일정은 이동 없음이라 장소 빈 일정 개수에 세지 않는다', () => {
+    expect(splitSchedules([LUNCH], ANCHOR, [standup]).missingCount).toBe(1);
+  });
+
+  it('거른 목록을 주지 않으면 서버 일정만 items가 된다', () => {
+    expect(splitSchedules([LUNCH, ONLINE], ANCHOR).items.map((i) => i.kind)).toEqual(['server', 'server']);
+  });
+
+  it('서버가 같은 id의 일정을 알면 서버 줄만 남긴다', () => {
+    const split = splitSchedules([LUNCH], ANCHOR, [event('lunch', LUNCH.start, LUNCH.end)]);
+    expect(split.items.map((i) => `${i.kind}:${i.id}`)).toEqual(['server:lunch']);
   });
 });

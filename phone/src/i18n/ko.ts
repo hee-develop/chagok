@@ -12,6 +12,7 @@ export const ko = {
     readOnlyNotice: '일정은 읽기만 해요. 온라인 회의나 회의실 일정은 걸러서 차에 보내지 않아요.',
     connect: (count: number) => `캘린더 ${count}개 연결하기`,
     later: '나중에 할게요',
+    close: '닫기',
     saveFailed: SAVE_FAILED,
     loadFailed: '캘린더를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.',
     permissionDenied: '캘린더 접근을 허용해 주세요. 허용해야 일정을 차에 보낼 수 있어요.',
@@ -89,7 +90,6 @@ export const ko = {
     family: '가족',
     places: '장소',
     settings: '설정',
-    barLabel: '아래 탭',
   },
   // 꺼진 권한과 켜면 되는 일을 한 줄씩. 지금 앱이 쓰는 권한만 둔다(캘린더·카메라).
   permissions: {
@@ -103,8 +103,6 @@ export const ko = {
     turnOnLabel: (name: string) => `${name} 켜기`,
     openSettingsLabel: (name: string) => `${name} 설정 열기`,
     granted: '켜져 있어요',
-    off: '꺼져 있어요',
-    loading: '권한을 확인하는 중',
     checkFailed: '권한을 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요.',
     retry: '다시 확인',
   },
@@ -113,6 +111,8 @@ export const ko = {
     checking: '연결 상태를 확인하는 중',
     connected: '차와 연결돼 있어요',
     connectedHint: '차에 타면 오늘 일정을 알려 드려요.',
+    // 서버가 돌려준 자리 이름(이 폰의 기기 이름)과 연결한 시각
+    connectedDetail: (name: string, when: string) => `${name} · ${when}에 연결했어요`,
     notConnected: '차와 연결되지 않았어요',
     notConnectedHint: '연결하면 차에 탈 때 오늘 일정을 알려 드려요.',
     checkFailed: '연결 상태를 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요.',
@@ -131,8 +131,11 @@ export const ko = {
     missingBanner: (count: number) => `장소가 빈 일정이 ${count}개 있어요`,
     missingBannerHint: '일정을 눌러 장소를 넣으면 차에서 묻지 않고 바로 안내해요.',
     otherDaysHeading: '다른 날 장소가 빈 일정',
-    expand: (title: string) => `${title} 일정 펼치기`,
-    collapse: (title: string) => `${title} 일정 접기`,
+    // 스크린리더가 읽는 줄 이름(제목·시간·상태)과, 누르면 무엇이 되는지 안내(힌트)
+    rowLabel: (title: string, when: string, status: string) => `${title} ${when} ${status}`,
+    expandHint: '누르면 장소·채비·가족에게 보내기를 펼쳐요',
+    collapseHint: '누르면 접어요',
+    close: '닫기',
     noTravelChip: '이동 없음',
     saving: '저장하는 중',
     inboxHeading: '받은 가족 요청',
