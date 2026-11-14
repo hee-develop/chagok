@@ -51,6 +51,7 @@ export type EventSync = {
   run(): Promise<SyncResult>;
   /** 진행 중인 요청을 취소하고 대기 중인 재실행을 버린다. */
   stop(): void;
+
   /** 선택을 서버에 저장한 직후 알린다. 서버가 선택을 잃으면 이 값으로 다시 저장한다(앱이 떠 있는 동안만 기억). */
   rememberSelection(selectedIds: string[]): void;
   /** 가장 최근 실행의 결과(화면에서 상태를 보여 주거나 디버깅할 때). */
@@ -59,6 +60,22 @@ export type EventSync = {
   inFlight(): Promise<SyncResult> | null;
   /** 한 번 읽어 보내는 일이 끝날 때마다(성공·실패·취소 모두) 결과를 알린다. 해제 함수를 돌려준다. 알림·홈 안내가 결과를 따라가는 데 쓴다. */
   subscribe(listener: (result: SyncResult) => void): () => void;
+};
+
+/** 앱이 쓰는 일정 보내기: `EventSync`에 '기억 지우기'가 더해졌다(화면·훅이 쓰는 `EventSync` 모양은 그대로다). */
+export type ResettableEventSync = EventSync & {
+  /**
+   * `stop()`에 더해 이 폰이 기억하던 것을 잊는다: 직전에 보낸 내용(같은 내용 생략 기준), 기억해 둔 캘린더 선택, 마지막 결과.
+   * 차 연결을 끊은 뒤 다른 자리(다른 차)로 이어 붙을 때 옛 자리에서 하던 대로 선택·일정을 다시 보내지 않게 한다.
+   * reset 뒤에 취소돼 끝나는 옛 실행은 마지막 결과(`lastResult()`)를 다시 남기지 않는다(reset 직후 `null`이 유지된다).
+   */
+  reset(): void;
+  /**
+   * 일정 보내기를 붙잡아 둔다: 해제 함수를 부를 때까지 `run()`은 아무것도 보내지 않고 `cancelled`로 끝난다(여러 번 붙잡아도 되고 모두 풀려야 다시 돈다).
+   * 연결 끊기처럼 서버에서 자리를 지우는 동안 새 보내기가 시작돼, 토큰이 지워진 뒤 토큰 없이 다시 보내며 연결 전 버킷에 일정을 만들지 않게 하려는 것이다.
+   * 붙잡는 순간 진행 중인 요청도 취소한다.
+   */
+  hold(): () => void;
 };
 
 const devLog = (message: string) => {
@@ -91,13 +108,16 @@ export function createEventSync({
   timeoutMs = REQUEST_TIMEOUT_MS,
   now = () => new Date(),
   log = devLog,
-}: EventSyncOptions = {}): EventSync {
+}: EventSyncOptions = {}): ResettableEventSync {
   let running: Promise<SyncResult> | null = null;
   let again = false;
   let current: AbortController | null = null;
   let lastSent: { key: string; at: number } | null = null;
   let remembered: string[] | null = null;
   let last: SyncResult | null = null;
+  /** reset할 때마다 올린다. reset 전에 시작한 실행이 늦게 끝나도 `last`를 되살리지 않으려는 세대 번호. */
+  let epoch = 0;
+  let held = 0;
   const listeners = new Set<(result: SyncResult) => void>();
   const revisions = createRevisionClock();
 
@@ -184,10 +204,12 @@ export function createEventSync({
   const loop = async (): Promise<SyncResult> => {
     for (;;) {
       again = false;
-      last = await once();
+      const startedEpoch = epoch;
+      const result = await once();
+      if (startedEpoch === epoch) last = result; // reset 전에 시작한 실행의 결과는 남기지 않는다
       for (const listener of [...listeners]) {
         try {
-          listener(last);
+          listener(result);
         } catch {
           // 구독자가 던져도 동기화는 이어 간다.
         }
@@ -195,13 +217,14 @@ export function createEventSync({
       if (!again) {
         // 판단과 해제를 같은 동기 구간에서 해야 그 사이에 들어온 호출이 사라지지 않는다.
         running = null;
-        return last;
+        return result;
       }
     }
   };
 
   return {
     run() {
+      if (held > 0) return Promise.resolve<SyncResult>('cancelled');
       if (running) {
         again = true;
         return running;
@@ -213,6 +236,27 @@ export function createEventSync({
       again = false;
       current?.abort();
       current = null;
+    },
+    reset() {
+      again = false;
+      current?.abort();
+      current = null;
+      lastSent = null;
+      remembered = null;
+      last = null;
+      epoch += 1;
+    },
+    hold() {
+      held += 1;
+      again = false;
+      current?.abort();
+      current = null;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        held -= 1;
+      };
     },
     rememberSelection(selectedIds) {
       remembered = [...selectedIds];

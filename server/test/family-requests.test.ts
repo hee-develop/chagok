@@ -9,6 +9,7 @@ import {
   type PatchableStatus,
   type Status,
 } from '../src/family/requests.js';
+import { pruneSilentSeats } from '../src/jobs.js';
 import { createScheduler } from '../src/scheduler.js';
 import { FAMILY_REQUESTS_EXPIRE_JOB, registerFamilyRequestJobs } from '../src/family/jobs.js';
 import { MAX_REQUESTS_PER_MEMBER } from '../src/family/limits.js';
@@ -774,6 +775,35 @@ describe('자리 이벤트와 요청', () => {
     expect((await call(s.t, 'GET', '/requests', memberOnly(s.mom))).body.received.map((r: any) => r.id)).toEqual([req.id]);
     expect((await call(s.t, 'GET', '/requests', memberOnly(s.dad))).body.sent[0].reachable).toBe(false);
     expect((await call(s.t, 'GET', '/family', memberOnly(s.mom))).body.family.members).toHaveLength(4);
+  });
+});
+
+describe('J6 정기 정리와 가족 저장소(자리 삭제 이벤트)', () => {
+  it('무소식 자리 정리(pruneSilentSeats)가 자리를 지우면 가족 저장소도 같은 removed 이벤트로 정리된다: 그 차 앞 요청은 지우고 구성원·구성원 앞 요청은 남긴다', async () => {
+    const s = await setup();
+    const toKidCar = await send(s, s.dad, rideBody({ carRef: s.carRef(s.kid) }));
+    const toKidMember = await send(s, s.mom, careBody({ memberId: s.kid.memberId }));
+    expect(await carList(s, s.kid, s.kid)).toHaveLength(2);
+    const stored = s.t.familyRequests.storedRequests();
+
+    // 엄마·아빠는 2시간 반 뒤 일정을 보내고, 아들 폰만 조용하다. 3시간 뒤 '2시간 무소식' 기준으로 정리한다(같은 날이라 요청 날짜는 그대로).
+    s.t.clock.ms = T0 + 150 * MINUTE;
+    for (const who of [s.mom, s.dad]) expect((await call(s.t, 'PUT', '/events', { token: who.phoneToken, body: { events: [] } })).status).toBe(200);
+    s.t.clock.ms = T0 + 180 * MINUTE;
+    const removed = pruneSilentSeats({ seats: s.t.seats, now: new Date(s.t.clock.ms), afterMs: 120 * MINUTE });
+    expect(removed).toEqual([s.kid.seatId]);
+    expect(s.t.seats.seat(s.kid.seatId as string)).toBeNull();
+
+    // 가족 저장소: 아들 차 앞으로 간 요청은 지워지고(차에 아들 자리가 없어짐), 아들 앞 요청과 구성원은 구성원 비밀값으로 남는다.
+    expect(s.t.familyRequests.storedRequests()).toBe(stored - 1);
+    const received = (await call(s.t, 'GET', '/requests', memberOnly(s.kid))).body.received as any[];
+    expect(received.map((r) => [r.id, r.reachable])).toEqual([[toKidMember.id, false]]);
+    expect(received.some((r) => r.id === toKidCar.id)).toBe(false);
+    expect((await call(s.t, 'GET', '/family', memberOnly(s.mom))).body.family.members).toHaveLength(4);
+    // 다른 자리(엄마·아빠)는 그대로다.
+    expect(s.t.seats.seat(s.mom.seatId as string)).not.toBeNull();
+    expect(s.t.seats.seat(s.dad.seatId as string)).not.toBeNull();
+    expect((await call(s.t, 'GET', '/pair', as(s.mom))).status).toBe(200);
   });
 });
 

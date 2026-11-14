@@ -1,3 +1,4 @@
+import { createArrivalsStore, type ArrivalsStore } from './arrivals.js';
 import { createSelectionStore, type SelectionStore } from './routes/calendars.js';
 import { createEventsStore, type EventsStore } from './routes/events.js';
 import { createFamilyStore, type FamilyStore } from './routes/family.js';
@@ -11,8 +12,8 @@ import { DEFAULT_SEAT_ID, type SeatEvent } from './seats.js';
 export type Override = { place: StoredPlace | null; noTravel: boolean };
 
 /**
- * 운전자 자리 하나가 가진 데이터. 일정·캘린더 선택·자주 가는 곳·가족 요청·일정별 보정과 채비·장소 기억이 자리별로 따로 쌓인다.
- * 장소 기억(`memory`)이 여기 있고, 앞으로 생길 도착 횟수·이동 없음 기억 저장소도 여기에 붙인다(자리를 지우면 함께 지워진다).
+ * 운전자 자리 하나가 가진 데이터. 일정·캘린더 선택·자주 가는 곳·가족 요청·일정별 보정과 채비·장소 기억·도착 횟수가 자리별로 따로 쌓인다.
+ * 앞으로 생길 이동 없음 기억 저장소도 여기에 붙인다(자리를 지우면 함께 지워진다).
  */
 export type SeatData = {
   events: EventsStore;
@@ -26,6 +27,27 @@ export type SeatData = {
   cares: Map<string, string>;
   /** 장소 기억: 일정의 장소 칸 글자(또는 들은 이름) → 장소, 애매 여부. 폰을 바꿔도 남고 연결을 끊으면 자리와 함께 지워진다. */
   memory: PlaceMemoryStore;
+  /** 장소별 도착 횟수(장소·횟수·마지막 날짜만). 폰을 바꿔도 같은 자리에 남는 기억이다. */
+  arrivals: ArrivalsStore;
+};
+
+/**
+ * 자리 데이터 항목마다 **폰 바꾸기(`replaced`) 때 어떻게 되는지** 선언한다. 자리를 지울 때(연결 끊기·차 초기화·무소식 정리)는 항목에 상관없이
+ * 자리 데이터 전체가 한 번에 버려진다(`apply('removed')`가 `bySeat`에서 자리를 지움). 그래서 새 항목을 `SeatData`에 더하면
+ * - 지우는 코드를 따로 짤 필요가 없고(자리 데이터 안에 두기만 하면 연결 끊기·초기화·정리에 자동으로 포함된다),
+ * - 이 표에 폰 바꾸기 때의 처리를 **반드시** 적어야 한다(`Record<keyof SeatData, …>`라 빠뜨리면 타입 오류).
+ * `keep`은 기억이라 폰을 바꿔도 남기고(정책서 10.1·10.9), `reset`은 옛 폰의 캘린더에서 온 것이라 비우고 새 폰의 연결 전 버킷으로 바꾼다.
+ * `reset` 항목은 `apply('replaced')`가 직접 비운다(항목마다 비우는 방법이 달라 아래 구현을 같이 고친다).
+ */
+export const SEAT_DATA_POLICY: Record<keyof SeatData, 'keep' | 'reset'> = {
+  events: 'reset',
+  selection: 'reset',
+  favorites: 'keep',
+  family: 'keep',
+  overrides: 'reset',
+  cares: 'reset',
+  memory: 'keep',
+  arrivals: 'keep',
 };
 
 export type BucketDenied = 'rate-limited';
@@ -52,6 +74,12 @@ export type SeatDataRegistry = {
   reserveEvents(data: SeatData, bytes: number): boolean;
   /** 자리를 지운다. */
   remove(seatId: string): void;
+  /**
+   * 만료된 것을 지금 정리한다(정기 작업): 모든 자리(기본 자리 포함)와 연결 전 버킷의 날짜 지난 일정을 버리고(일정이 바뀌면 그 일정에 딸린 보정·채비도 따라 지워진다),
+   * TTL이 지난 연결 전 버킷과 오래된 버킷 생성 기록을 버린다. 일정이 날짜가 지나 지워질 때 그 일정에 붙은 가족 요청(`family`)과 낡은 도착 일정 id 기억(`arrivals`)도 함께 지운다.
+   * 지운 일정·가족 요청·도착 일정 id 기억 수와 버린 버킷 수.
+   */
+  purgeExpired(): { eventsRemoved: number; bucketsDropped: number; familyRequestsRemoved: number; arrivalKeysForgotten: number };
   /** 자리 이벤트(생성·교체·삭제)를 데이터에 반영한다. 연결 상태를 가진 SeatStore를 구독시킨다. */
   apply(event: SeatEvent): void;
 };
@@ -110,6 +138,7 @@ export function createSeatDataRegistry({
       overrides: new Map(),
       cares: new Map(),
       memory: createPlaceMemoryStore(now, memoryMax),
+      arrivals: createArrivalsStore(now),
     };
     // 폰 일정이 교체되거나 비워지면, 더는 없는 일정 id의 보정·채비를 버린다(픽스처 id의 것은 남긴다).
     data.events.subscribe((ids) => {
@@ -131,12 +160,18 @@ export function createSeatDataRegistry({
   const bucketCreates = new Map<string, number[]>();
   const purgeBuckets = () => {
     const at = now().getTime();
-    for (const [id, b] of buckets) if (b.lastWrittenAt + bucketTtlMs <= at) buckets.delete(id);
+    let dropped = 0;
+    for (const [id, b] of buckets) {
+      if (b.lastWrittenAt + bucketTtlMs > at) continue;
+      buckets.delete(id);
+      dropped += 1;
+    }
     for (const [source, list] of bucketCreates) {
       const recent = list.filter((t) => t > at - bucketCreateWindowMs);
       if (recent.length === 0) bucketCreates.delete(source);
       else bucketCreates.set(source, recent);
     }
+    return dropped;
   };
   /** 버킷을 꺼내 버킷 표에서 지운다(새 자리가 이어받거나 바꾸기가 반영하면 끝). */
   const takeBucket = (deviceId: string | null) => {
@@ -155,6 +190,7 @@ export function createSeatDataRegistry({
       d.overrides.size === 0 &&
       d.cares.size === 0 &&
       d.memory.size() === 0 &&
+      d.arrivals.list().length === 0 &&
       saved.home === null &&
       saved.work === null &&
       saved.others.length === 0 &&
@@ -232,6 +268,18 @@ export function createSeatDataRegistry({
     },
     remove: (seatId) => {
       if (seatId !== DEFAULT_SEAT_ID) bySeat.delete(seatId);
+    },
+    purgeExpired: () => {
+      const bucketsDropped = purgeBuckets();
+      let eventsRemoved = 0;
+      let familyRequestsRemoved = 0;
+      let arrivalKeysForgotten = 0;
+      for (const d of [...bySeat.values(), ...[...buckets.values()].map((b) => b.data)]) {
+        eventsRemoved += d.events.purgeExpired();
+        familyRequestsRemoved += d.family.purgeExpired();
+        arrivalKeysForgotten += d.arrivals.purgeExpired();
+      }
+      return { eventsRemoved, bucketsDropped, familyRequestsRemoved, arrivalKeysForgotten };
     },
     apply: (event) => {
       if (event.type === 'removed') {

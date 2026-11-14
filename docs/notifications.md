@@ -82,7 +82,16 @@
 - `createScheduler({ now, intervalMs = 5분, onError })`. `register({ name, run(now) })`로 작업을 더하고, `start()`가 `setInterval` 하나를 켜고(`unref`라 프로세스 종료를 막지 않음) `stop()`이 끈다. `tick()`은 등록된 작업을 한 번 차례로 돈다(도는 중이면 겹쳐 돌지 않고 그 실행을 기다린다). 한 작업이 던져도 다음 작업은 돈다(`onError`에는 작업 이름과 오류만).
 - 작업은 `now`를 받아 **스스로 '이번에 할 일인가'를 판정**하고 자주 불려도 안전해야 한다.
 - **시작은 서버 프로세스(`server/src/index.ts`)만 한다.** `createApp`·`createNotificationRuntime`은 타이머를 켜지 않으므로 테스트에서는 꺼져 있다. `NOTIFY_SCHEDULER=0`이면 서버도 켜지 않는다.
-- 등록된 작업은 지금 `events-stale` 하나다. 날짜 지난 가족 요청 삭제는 `family-requests-expire`(`family/jobs.ts`, J10a)가 `index.ts`에서 등록한다. 정책서 11장의 나머지 정기 작업(새벽에 지난 일정 삭제, 30일 동안 일정이 안 온 자리 삭제)은 **J6**가 `createNotificationRuntime`이 돌려주는 `runtime.scheduler.register(...)`로 더한다(`index.ts`에서 `runtime.scheduler`를 쓰면 된다). 모든 자리를 훑는 `SeatStore.allSeats()`를 이번에 더했다.
+- **등록된 작업**(정책서 11장 '서버 정기 작업'):
+
+  | 작업 | 등록한 곳 | 언제 | 하는 일 |
+  | --- | --- | --- | --- |
+  | `events-stale` | `createNotificationRuntime` | 서울 20:00~22:00 창, 자리마다 하루 한 번 | 마지막 일정 수신 24시간 이상인 자리에 '일정을 못 받고 있어요' 알림 |
+  | `family-requests-expire` | `registerFamilyRequestJobs`(`family/jobs.ts`, `index.ts`가 부름) | 스케줄러 주기마다(5분, 반복해도 안전) | 날짜 지난 가족 요청·만료된 초대 코드·오래 쓰지 않은 구성원 삭제(J10a, 메모리 정리가 새벽 하루 한 번으로 늦어지지 않게 `dailyAtDawn`이 아닌 매 주기 판정) |
+  | `purge-expired` | `registerMaintenanceJobs`(`jobs.ts`, `index.ts`가 부름) | 서울 04:00 이후 하루 한 번 | 지난 일정·딸린 보정·채비·옛 가족 요청(`SeatData.family`), 낡은 도착 일정 기억, 만료된 코드·버킷 삭제 |
+  | `prune-silent-seats` | 같은 곳 | 같은 새벽 판정 | 30일 동안 일정이 안 온 자리 삭제 |
+
+  판정·경계는 [차–폰 연결 문서](pairing.md#정리와-정기-작업-serversrcjobsts)에 있습니다. 날짜 지난 **가족 요청** 삭제는 가족 요청 묶음(`family-requests-expire`)이 같은 스케줄러에 `register`로 더했습니다. 모든 자리를 훑는 `SeatStore.allSeats()`와 자리 id로 지우는 `SeatStore.removeSeat()`를 정기 작업이 씁니다.
 
 ## 폰 (`phone/src/features/notifications/`)
 
@@ -166,7 +175,7 @@
 
 ## 이어 붙일 지점
 
-- **J6(정기 작업)**: `createNotificationRuntime`의 `scheduler.register({ name, run(now) })`로 새벽 삭제·30일 정리를 더한다. 자리를 지울 때 `SeatStore`가 `removed` 이벤트를 내면 알림함도 저절로 비워진다.
+- **정기 작업(J6, 반영됨)**: `jobs.ts`의 `registerMaintenanceJobs`가 같은 스케줄러에 새벽 삭제·30일 정리를 더했다. 자리를 지울 때 `SeatStore`가 `removed` 이벤트를 내면 알림함도 저절로 비워진다. 새 정기 작업(가족 요청 삭제 등)은 `scheduler.register({ name, run(now) })`로 더하고, 하루 한 번 새벽에 돌 작업은 `dailyAtDawn(name, run)`을 쓰면 된다.
 - **J9(늦을 때 연락)·J10(가족)**: `notifier.notify(seatId, { kind: 'late-sms' | 'family-status', ... , dedupeKey })`로 알림을 넣고, 폰에서 `registerTapHandler(kind, ...)`로 누름 처리(문자 창·요청 상태 화면)를 더한다. `notifier`는 `createApp`에 넘긴 `notifications.notifier`다(`index.ts`는 `runtime.notifications`). `data`에 예약 키(`from`·`message_type`·`google*`·`gcm*`·`id`·`kind`)를 쓰지 않는다.
 - **J5a(홈·아래 탭 묶음)는 병합했다.** 이어 붙인 곳:
   1. **알림 권한**: `askNotificationPermissionOnce()`를 `phone/src/app/setup/pair-car.tsx`의 `finishSetup()`(4단계 [건너뛰기]·[완료] 공통, 정책 10.4 '첫 설정 끝')과 탭에서 연 연결 화면이 연결에 성공했을 때(`PairCarScreen`의 `onPaired`) 부른다. 창이 뜬 채로 기다리지 않고 오늘 탭으로 가며 거부·오류도 이동을 막지 않는다. 이전에 J7이 `onDone`에 넣은 호출은 `finishSetup()`으로 옮겼다(`onDone`은 이제 완료 표시·이동까지 맡는다).

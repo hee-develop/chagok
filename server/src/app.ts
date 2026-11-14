@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import type { DayFixture, FamilyMember, MockCalendar, PlacesCatalog } from './fixture-types.js';
+import { createArrivalsRoute, createFrequentRoute } from './routes/arrivals.js';
 import { createCalendarsRoute, type SelectionStore } from './routes/calendars.js';
 import { createEmptyEnergySources } from './energy/fixtureSources.js';
 import type { EnergySources } from './energy/types.js';
@@ -19,7 +20,7 @@ import { createPlacesRoute, type FavoritesStore } from './routes/places.js';
 import { createNotifications, type Notifications } from './notify/notifier.js';
 import { MEMORY_WRITE_MAX, MEMORY_WRITE_WINDOW_MS } from './placeSearch/limits.js';
 import { createMockPlaceSearch, createRateLimiter, type PlaceSearch, type RateLimiterOptions } from './placeSearch/index.js';
-import { createSeatDataRegistry } from './seatData.js';
+import { createSeatDataRegistry, type SeatDataRegistry } from './seatData.js';
 import { connectionAddress, createSeatGuard } from './seatScope.js';
 import { createSeatStore, type SeatStore } from './seats.js';
 
@@ -78,6 +79,12 @@ export type AppOptions = {
   placeSearchRateLimit?: Omit<RateLimiterOptions, 'now'>;
   /** `PUT /places/memory`의 요청 주소별 속도 제한. 기본값은 placeSearch/limits.ts(분당 30회). 테스트에서 바꾼다. */
   placeMemoryRateLimit?: Omit<RateLimiterOptions, 'now'>;
+  /**
+   * 자리 데이터 저장소. 없으면 인스턴스마다 새로 만든다(그때는 `events`·`store`·`favorites`·`familyStore`·`capacity`가 쓰인다).
+   * 서버 시작 코드(`index.ts`)는 정기 정리 작업(`jobs.ts`)이 같은 저장소를 비우도록 밖에서 만들어 넘긴다.
+   * **넘기면 `events`·`store`·`favorites`·`familyStore`·`capacity`를 함께 줄 수 없다**(함께 주면 오류. 기본 자리 저장소·용량은 `createSeatDataRegistry`의 `defaults`·옵션으로 정한다).
+   */
+  seatData?: SeatDataRegistry;
   /** 연결 전 버킷 수·TTL·생성 속도 제한과 일정 저장 용량 예산(연결된 자리/버킷 따로, 버킷 하나의 상한). 기본값은 seatData.ts. 테스트에서 바꾼다. */
   capacity?: Omit<NonNullable<Parameters<typeof createSeatDataRegistry>[0]>, 'now' | 'fixtureIds' | 'defaults'>;
   /**
@@ -106,6 +113,7 @@ export const createApp = ({
   familyMembers,
   familyStore,
   seats = createSeatStore(now),
+  seatData,
   notifications = createNotifications({ now }),
   familyRequests = createFamilyRequests({ now, seats, notifier: notifications.notifier }),
   clientAddress = connectionAddress,
@@ -120,14 +128,23 @@ export const createApp = ({
   placeSearchRateLimit,
   placeMemoryRateLimit,
 }: AppOptions) => {
+  // `seatData`를 넘기면 기본 자리의 저장소·용량은 그 저장소가 이미 정했으므로, 같은 일을 하는 옵션을 함께 주면 조용히 무시되지 않게 오류로 알린다.
+  if (seatData !== undefined) {
+    const conflicting = Object.entries({ events, store, favorites, familyStore, capacity }).filter(([, v]) => v !== undefined).map(([k]) => k);
+    if (conflicting.length > 0) {
+      throw new Error(`createApp: seatData와 ${conflicting.join('·')}는 함께 쓸 수 없습니다(seatData를 만들 때 defaults·용량 옵션으로 넘기세요)`);
+    }
+  }
   // 일정·선택·자주 가는 곳·가족 요청·보정·채비는 운전자 자리마다 따로 쌓인다. 토큰 없이 기기 id만 있는 폰은 그 기기의 연결 전 버킷을,
   // 식별이 전혀 없는 요청은 기본 자리를 쓴다(픽스처·데모·차량 E2E 경로).
-  const registry = createSeatDataRegistry({
-    now,
-    fixtureIds: new Set(fixture.schedules.map((s) => s.id)),
-    defaults: { events, selection: store, favorites, family: familyStore },
-    ...capacity,
-  });
+  const registry =
+    seatData ??
+    createSeatDataRegistry({
+      now,
+      fixtureIds: new Set(fixture.schedules.map((s) => s.id)),
+      defaults: { events, selection: store, favorites, family: familyStore },
+      ...capacity,
+    });
   seats.subscribe((event) => registry.apply(event));
   // 자리가 지워지거나(끊기·차 초기화·정리) 폰이 바뀌면 옛 폰이 읽지 않은 알림은 새 폰에 넘기지 않고 버린다.
   seats.subscribe((event) => {
@@ -154,6 +171,8 @@ export const createApp = ({
     .route('/calendars', createCalendarsRoute(calendars, guard))
     .route('/places', createPlacesRoute(places, guard, searchDeps))
     .route('/places', createPlaceResolveRoute(guard, searchDeps))
+    .route('/places', createFrequentRoute(places, guard, seats))
+    .route('/arrivals', createArrivalsRoute(guard, seats, { now }))
     .route('/events', createEventsRoute(guard, { now, isLoopback, loopbackOnly: eventsLoopbackOnly, onReceived: onEventsReceived }))
     .route('/family', createFamilyRoute(familyMembers, guard))
     .route('/family', createFamilyGroupRoute(familyGuard, familyRequests, { now, clientAddress }))

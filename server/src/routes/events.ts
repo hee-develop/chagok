@@ -46,6 +46,8 @@ export const eventsBytes = (events: PhoneEvent[]) => JSON.stringify(events).leng
 export type EventsStore = {
   /** 받은 적이 없으면 null. 오늘(서울) 이전에 끝난 일정은 지우고 돌려준다. */
   get(): SavedEvents | null;
+  /** 날짜가 지난 일정을 지금 버린다(읽을 때마다 하던 정리를 정기 작업이 부른다). 버린 일정 수. */
+  purgeExpired(): number;
   /** 일정 전체를 바꾼다(오늘 0시 전에 끝난 일정은 이때도 버린다). */
   replace(events: PhoneEvent[]): SavedEvents;
   /** 개발·데모용 초기화: 받은 적 없는 상태로 되돌린다(기본 자리는 일정 출처가 픽스처로 복귀하고, 실제 자리는 '0건'이다). */
@@ -79,17 +81,24 @@ export function createEventsStore(now: () => Date = () => new Date()): EventsSto
     const ids = new Set((saved?.events ?? []).map((e) => e.id));
     for (const listener of listeners) listener(ids);
   };
+  /** 날짜가 지난 일정을 버리고 버린 수를 돌려준다(바뀌었을 때만 구독자에게 알린다). */
+  const prune = () => {
+    if (saved === null) return 0;
+    const kept = alive(saved.events);
+    const removed = saved.events.length - kept.length;
+    if (removed !== 0) {
+      saved = { ...saved, events: kept };
+      size = eventsBytes(kept);
+      notify();
+    }
+    return removed;
+  };
   const store: EventsStore = {
     get: () => {
-      if (saved === null) return null;
-      const kept = alive(saved.events);
-      if (kept.length !== saved.events.length) {
-        saved = { ...saved, events: kept };
-        size = eventsBytes(kept);
-        notify();
-      }
+      prune();
       return saved;
     },
+    purgeExpired: prune,
     replace: (events) => {
       saved = { receivedAt: now().toISOString(), events: alive(events) };
       size = eventsBytes(saved.events);
@@ -265,6 +274,7 @@ export const createEventsRoute = (
       },
     )
     // 개발·데모 전용: 폰이 보낸 일정을 지워 받은 적 없는 상태로 되돌린다(기본 자리는 /schedules/today·places가 픽스처로 복귀, 실제 자리는 0건). 같은 기기 요청만 받는다.
+    // 기본 자리를 비울 때는 그 자리의 도착 횟수(`POST /arrivals`로 쌓인 것)도 함께 비운다(차 쪽 묶음이 데모·E2E 초기화 때 이 호출을 쓴다).
     // 폰 토큰이 있으면 그 자리만, 기기 id만 있으면 그 연결 전 버킷만, 식별이 없으면 기본 자리와 옛 차 앱이 보는 자리를 비운다.
     .delete('/', (c) => {
       if (!isLoopback(c)) return c.json({ error: '같은 기기에서만 초기화할 수 있습니다' }, 403);
@@ -272,6 +282,10 @@ export const createEventsRoute = (
       if (write instanceof Response) return write;
       const read = guard.resolveRead(c);
       if (read instanceof Response) return read;
-      for (const scope of new Map([[write.seatId, write], [read.seatId, read]]).values()) scope.data.events.clear();
+      for (const scope of new Map([[write.seatId, write], [read.seatId, read]]).values()) {
+        scope.data.events.clear();
+        // 기본 자리(데모·E2E)만 도착 횟수도 함께 비운다(반복하는 데모가 횟수를 쌓지 않게). 실제 자리·연결 전 버킷의 도착 횟수는 건드리지 않는다.
+        if (scope.kind === 'default') scope.data.arrivals.clear();
+      }
       return c.json({ receivedAt: null as string | null }, 200);
     });

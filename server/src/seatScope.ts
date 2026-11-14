@@ -26,6 +26,11 @@ export type SeatScope = {
    */
   fixture: boolean;
   /**
+   * **명시 식별**로 정해진 자리인가: 폰 토큰, 또는 차 토큰 + `driver=<seatId>`. 옛 차 앱 호환(식별 없는 읽기·차 토큰만 있고 driver 없음)·기본 자리·기기 id 버킷·빈 범위는 아니다.
+   * 도착 횟수를 반영한 `GET /schedules/today`의 `favorites`처럼 새 기능을 옛 호환 범위에 섞지 않으려는 곳이 본다.
+   */
+  explicit: boolean;
+  /**
    * 쓰기 직전에(본문 검증을 통과한 뒤) 부른다. 연결 전 버킷은 이때 비로소 만들어지고(요청 주소별 속도 제한, 가득 차면 가장 오래 쓰지 않은 버킷을
    * 밀어냄) 마지막으로 쓴 시각이 갱신된다. `reserveEvents(bytes)`는 이 데이터의 일정을 bytes 크기로 바꿔도 되는지 확인한다.
    */
@@ -113,11 +118,12 @@ export function createSeatGuard(
   registry: SeatDataRegistry,
   { legacyDriverFallback, fixtureSeats = false, clientAddress = connectionAddress }: SeatGuardOptions,
 ) {
-  const base = (kind: SeatScope['kind'], seatId: string) => ({ kind, seatId, fixture: fixtureSeats || kind === 'default' });
-  const seatScope = (seatId: string): SeatScope => {
+  const base = (kind: SeatScope['kind'], seatId: string, explicit = false) => ({ kind, seatId, fixture: fixtureSeats || kind === 'default', explicit });
+  /** `explicit`: 폰 토큰이나 차 토큰 + driver로 정해진 자리면 true, 옛 차 앱 호환으로 고른 자리면 false. */
+  const seatScope = (seatId: string, explicit: boolean): SeatScope => {
     const data = registry.get(seatId);
     return {
-      ...base('seat', seatId),
+      ...base('seat', seatId, explicit),
       data,
       open: () => ({ ok: true, data, reserveEvents: (bytes) => registry.reserveEvents(data, bytes) }),
     };
@@ -155,7 +161,7 @@ export function createSeatGuard(
     const cars = seats.seatedCarCount();
     if (cars === 0) return defaultScope();
     const seat = legacy && legacyDriverFallback && cars === 1 ? seats.soleCarSeat() : null;
-    return seat ? seatScope(seat.seatId) : noneScope();
+    return seat ? seatScope(seat.seatId, false) : noneScope();
   };
 
   const resolveWrite = (c: Context): SeatScope | Response => {
@@ -166,7 +172,7 @@ export function createSeatGuard(
     if (auth.kind === 'none') return device.kind === 'none' ? defaultScope() : deviceScope(c, device.id);
     const found = seats.seatByToken(auth.token);
     if (!found) return unauthorized(c, '연결이 끊겼거나 다른 폰으로 바뀐 토큰입니다. 차와 다시 연결해 주세요');
-    return seatScope(found.seat.seatId);
+    return seatScope(found.seat.seatId, true);
   };
 
   const resolveRead = (c: Context, legacy = true): SeatScope | Response => {
@@ -181,17 +187,17 @@ export function createSeatGuard(
       const own = seats.seatByToken(auth.token);
       if (!car && !own) return unauthorized(c, '알 수 없는 토큰입니다');
       const allowed = (car !== null && seats.seatsOf(car.carId).some((s) => s.seatId === driver)) || own?.seat.seatId === driver;
-      return allowed ? seatScope(driver) : forbidden(c, '그 운전자 자리를 볼 수 없습니다');
+      return allowed ? seatScope(driver, true) : forbidden(c, '그 운전자 자리를 볼 수 없습니다');
     }
     if (auth.kind === 'token') {
       const own = seats.seatByToken(auth.token);
-      if (own) return seatScope(own.seat.seatId);
+      if (own) return seatScope(own.seat.seatId, true);
       // 차 토큰으로 driver 없이 읽는 것은 옛 차 앱 호환 읽기다: 그 차 안에서만 지난번 고른 자리(없으면 최근 자리). 자리가 없으면 빈 범위.
       const car = seats.carByToken(auth.token);
       if (car) {
         if (!legacy) return driverRequired(c);
         const seat = legacyDriverFallback ? seats.preferredSeat(car.carId) : null;
-        return seat ? seatScope(seat.seatId) : noneScope();
+        return seat ? seatScope(seat.seatId, false) : noneScope();
       }
       return unauthorized(c, '연결이 끊겼거나 다른 폰으로 바뀐 토큰입니다. 차와 다시 연결해 주세요');
     }
@@ -213,12 +219,12 @@ export function createSeatGuard(
     const driver = driverOf(c);
     if (driver !== undefined) {
       return seats.seatsOf(car.carId).some((s) => s.seatId === driver)
-        ? seatScope(driver)
+        ? seatScope(driver, true)
         : forbidden(c, '그 운전자 자리를 볼 수 없습니다');
     }
     if (!legacy) return driverRequired(c);
     const seat = legacyDriverFallback ? seats.preferredSeat(car.carId) : null;
-    return seat ? seatScope(seat.seatId) : c.json({ error: '쓸 운전자 자리를 정할 수 없습니다. driver를 지정해 주세요', reason: 'no-seat' as const }, 409);
+    return seat ? seatScope(seat.seatId, false) : c.json({ error: '쓸 운전자 자리를 정할 수 없습니다. driver를 지정해 주세요', reason: 'no-seat' as const }, 409);
   };
 
   /**

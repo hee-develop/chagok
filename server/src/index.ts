@@ -1,10 +1,12 @@
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { createEnergySources } from './energy/sources.js';
+import { registerMaintenanceJobs } from './jobs.js';
 import { registerFamilyRequestJobs } from './family/jobs.js';
 import { createFamilyRequests } from './family/service.js';
 import { createNotificationRuntime } from './notify/setup.js';
 import { createFailureLog, createPlaceSearch } from './placeSearch/index.js';
+import { createSeatDataRegistry } from './seatData.js';
 import { createSeatStore } from './seats.js';
 import { loadDayFixture, loadFamilyMembers, loadMockCalendars, loadPlacesCatalog, resolveFixtureLocation } from './fixtures.js';
 
@@ -34,8 +36,12 @@ try {
   const placeSearch = createPlaceSearch(places.places, { KAKAO_REST_KEY: process.env.KAKAO_REST_KEY }, {
     onFailure: createFailureLog((line) => console.warn(line)),
   });
+  const fixture = loadDayFixture(resolveFixtureLocation(process.env.FIXTURE_PATH), calendars);
+  // 정기 정리 작업(지난 일정·무소식 자리)이 같은 자리 데이터 저장소를 비우도록 밖에서 만들어 넘긴다.
+  const seatData = createSeatDataRegistry({ now: () => new Date(), fixtureIds: new Set(fixture.schedules.map((s) => s.id)) });
+  registerMaintenanceJobs({ scheduler: runtime.scheduler, seats, registry: seatData });
   app = createApp({
-    fixture: loadDayFixture(resolveFixtureLocation(process.env.FIXTURE_PATH), calendars),
+    fixture,
     calendars,
     places,
     placeSearch,
@@ -45,6 +51,7 @@ try {
     // 차량 Maestro(e2e-car.sh)·PT 시연(pt-demo.sh) 같은 데모 서버에서만 켠다. 실제 사용자 서버에서는 일정을 받은 적 없는 자리가 0건이다.
     fixtureSeats,
     seats,
+    seatData,
     notifications: runtime.notifications,
     familyRequests,
   });

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import type { DayFixture, FamilyMember, MockCalendar, MockPlace, PlaceFixture, PlacesCatalog } from '../fixture-types.js';
+import { favoritesWithArrivals } from '../arrivals.js';
 import { MAX_BODY_BYTES, MAX_CARE_LENGTH, MAX_ID_LENGTH } from '../limits.js';
 import { MINUTE_MS, parseAt, seoulDay } from '../time.js';
 import { effectiveSelectedIds } from './calendars.js';
@@ -225,7 +226,8 @@ export const createSchedulesRoute = (
             ...place, ...memoryFlag(d, s), ...(memorySuggestion ? { suggestion: memorySuggestion } : {}), title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, care: d.cares.get(s.id) ?? null, attendees: s.attendees,
           };
         }),
-        favorites: favoritePlaces(d),
+        // 도착 횟수는 명시 식별(폰 토큰·차 토큰 + driver)로 정해진 자리에서만 반영한다. 옛 호환 읽기(식별 없음·차 토큰만)와 기본 자리(데모·E2E)는 등록한 곳만 준다.
+        favorites: sc.explicit ? favoritesWithArrivals(favoritePlaces(d), d.arrivals.list()) : favoritePlaces(d),
       }, 200);
     })
     .get('/places', guard.read, anchorValidator, (c) => {

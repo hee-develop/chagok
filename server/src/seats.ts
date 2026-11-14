@@ -149,6 +149,13 @@ export type SeatStore = {
   markEvents(seatId: string): void;
   /** 폰의 연결 끊기: 토큰이 맞으면 그 자리를 지우고 true. */
   disconnect(phoneToken: string): boolean;
+  /**
+   * 자리 id로 자리를 지운다(연결 끊기·차 초기화와 같은 삭제 경로: `removed` 이벤트로 자리 데이터·알림이 함께 지워진다). 정기 작업의 무소식 자리 정리가 쓴다.
+   * 있었으면 true. 마지막 자리가 지워진 차는 그 시점부터 자리 없는 차의 TTL 동안 토큰이 유효하다.
+   */
+  removeSeat(seatId: string): boolean;
+  /** 만료된 항목(코드·코드 시도 기록·차 생성 기록·자리 없이 오래된 차)을 지금 정리한다. 평소에는 요청이 올 때 같이 정리하고, 정기 작업이 한 번 더 비운다. */
+  purgeExpired(): void;
   /** 차곡 초기화: 그 차의 모든 자리·코드를 지운다(차 id·토큰은 남긴다). 지운 자리 수. */
   resetCar(carId: string): number;
   /** 연결 상태가 바뀔 때 알림을 받는다. 구독 해제 함수를 돌려준다. */
@@ -481,6 +488,13 @@ export function createSeatStore(now: () => Date = () => new Date(), random: () =
       removeSeat(seat);
       return true;
     },
+    removeSeat: (seatId) => {
+      const seat = seats.get(seatId);
+      if (!seat) return false;
+      removeSeat(seat);
+      return true;
+    },
+    purgeExpired: () => purge(),
     resetCar: (carId) => {
       const list = seatsOf(carId);
       for (const seat of list) removeSeat(seat);
