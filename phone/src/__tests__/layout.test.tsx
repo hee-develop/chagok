@@ -14,6 +14,7 @@ jest.mock('expo-router', () => {
 });
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaProvider: ({ children }: { children: unknown }) => children }));
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
+jest.mock('../features/notifications/useNotifications', () => ({ useNotifications: jest.fn() }));
 
 beforeEach(() => {
   mockUseFonts.mockReset();

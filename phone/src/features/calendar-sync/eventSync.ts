@@ -55,6 +55,10 @@ export type EventSync = {
   rememberSelection(selectedIds: string[]): void;
   /** 가장 최근 실행의 결과(화면에서 상태를 보여 주거나 디버깅할 때). */
   lastResult(): SyncResult | null;
+  /** 지금 도는 실행(없으면 null). 그 실행이 끝났을 때의 결과로 풀린다(도는 중 다시 불려 한 번 더 도는 것까지 기다린다). */
+  inFlight(): Promise<SyncResult> | null;
+  /** 한 번 읽어 보내는 일이 끝날 때마다(성공·실패·취소 모두) 결과를 알린다. 해제 함수를 돌려준다. 알림·홈 안내가 결과를 따라가는 데 쓴다. */
+  subscribe(listener: (result: SyncResult) => void): () => void;
 };
 
 const devLog = (message: string) => {
@@ -94,6 +98,7 @@ export function createEventSync({
   let lastSent: { key: string; at: number } | null = null;
   let remembered: string[] | null = null;
   let last: SyncResult | null = null;
+  const listeners = new Set<(result: SyncResult) => void>();
   const revisions = createRevisionClock();
 
   const clearFiltered = () => filteredSink.set([]);
@@ -180,6 +185,13 @@ export function createEventSync({
     for (;;) {
       again = false;
       last = await once();
+      for (const listener of [...listeners]) {
+        try {
+          listener(last);
+        } catch {
+          // 구독자가 던져도 동기화는 이어 간다.
+        }
+      }
       if (!again) {
         // 판단과 해제를 같은 동기 구간에서 해야 그 사이에 들어온 호출이 사라지지 않는다.
         running = null;
@@ -206,6 +218,11 @@ export function createEventSync({
       remembered = [...selectedIds];
     },
     lastResult: () => last,
+    inFlight: () => running,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
   };
 }
 

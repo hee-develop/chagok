@@ -1,6 +1,8 @@
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { createEnergySources } from './energy/sources.js';
+import { createNotificationRuntime } from './notify/setup.js';
+import { createSeatStore } from './seats.js';
 import { loadDayFixture, loadFamilyMembers, loadMockCalendars, loadPlacesCatalog, resolveFixtureLocation } from './fixtures.js';
 
 const port = Number(process.env.PORT ?? 8787);
@@ -14,7 +16,11 @@ if (fixtureSeats) {
 }
 
 let app: ReturnType<typeof createApp>;
+let runtime: ReturnType<typeof createNotificationRuntime>;
 try {
+  // 알림 정기 작업이 같은 자리 저장소·알림 묶음을 보도록 밖에서 만들어 넘긴다.
+  const seats = createSeatStore();
+  runtime = createNotificationRuntime({ seats });
   const calendars = loadMockCalendars();
   app = createApp({
     fixture: loadDayFixture(resolveFixtureLocation(process.env.FIXTURE_PATH), calendars),
@@ -25,6 +31,8 @@ try {
     eventsLoopbackOnly: process.env.EVENTS_LOOPBACK_ONLY === '1',
     // 차량 Maestro(e2e-car.sh)·PT 시연(pt-demo.sh) 같은 데모 서버에서만 켠다. 실제 사용자 서버에서는 일정을 받은 적 없는 자리가 0건이다.
     fixtureSeats,
+    seats,
+    notifications: runtime.notifications,
   });
 } catch (e) {
   console.error(`차곡 서버를 시작할 수 없습니다: ${(e as Error).message}`);
@@ -41,3 +49,7 @@ if (energyLive && !['127.0.0.1', 'localhost', '::1'].includes(hostname)) {
 serve({ fetch: app.fetch, port, hostname }, (info) => {
   console.log(`차곡 서버 실행 중: http://${hostname}:${info.port}`);
 });
+
+// 정기 작업(일정을 못 받고 있어요 알림 등). NOTIFY_SCHEDULER=0이면 켜지 않는다.
+if (process.env.NOTIFY_SCHEDULER !== '0') runtime.scheduler.start();
+if (runtime.fcmEnabled) console.log('FCM 푸시가 켜져 있습니다(알림함 폴링과 함께 보냅니다).');

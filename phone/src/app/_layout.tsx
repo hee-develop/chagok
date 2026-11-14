@@ -10,12 +10,14 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useEventSync } from '../features/calendar-sync/useEventSync';
+import { useNotifications } from '../features/notifications/useNotifications';
 import { colors, FontsLoadedContext } from '../ui/theme';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   useEventSync();
+  useNotifications();
   const [loaded, error] = useFonts({
     IBMPlexSansKR_400Regular,
     IBMPlexSansKR_500Medium,
