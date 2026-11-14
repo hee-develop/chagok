@@ -66,6 +66,17 @@ describe('savePlace: 이동 없음 → 같은 이름 기억', () => {
     expect(mockAdd).not.toHaveBeenCalled();
   });
 
+  it('검색 결과 스냅숏({ place })으로 장소를 넣어도 같은 이름의 기억을 지우고 보정으로 기록한다', async () => {
+    mockPut.mockResolvedValue({ ok: true, json: async () => saved({ noTravel: false, corrected: true }) });
+    const place = { name: '카카오 약국', lat: 35.151, lng: 126.851, externalId: 'kakao:12345' };
+    await schedulePlacesApi.savePlace('kia', { place }, new AbortController().signal);
+    await flush();
+    expect(mockRemove).toHaveBeenCalledWith('KIA 직관');
+    expect(mockSync).toHaveBeenCalledTimes(1);
+    expect(mockAdd).not.toHaveBeenCalled();
+    expect(appCorrectedPlaces.has('kia')).toBe(true);
+  });
+
   it('저장 응답의 보정 여부를 일정 동기화가 보는 목록에 남긴다(장소를 넣으면 거르지 않는 일정)', async () => {
     mockPut.mockResolvedValue({ ok: true, json: async () => saved({ noTravel: false, corrected: true }) });
     await schedulePlacesApi.savePlace('kia', { placeId: 'mock-field' }, new AbortController().signal);
@@ -93,6 +104,13 @@ describe('savePlace: 이동 없음 → 같은 이름 기억', () => {
     await schedulePlacesApi.undoNoTravel('kia', 'KIA 직관', true, signal);
     await flush();
     expect(mockRemove).not.toHaveBeenCalled();
+  });
+
+  it("undoNoTravel: 서버가 아직 이름을 기억하는 채로 내린 'skipped' 응답은 이름 기억을 되돌리는 중이면 장소 없음으로 돌려주고, 전부터 기억하던 이름이면 그대로 둔다", async () => {
+    mockPut.mockResolvedValue({ ok: true, json: async () => saved({ noTravel: true, noTravelReason: 'skipped' }) });
+    const { signal } = new AbortController();
+    expect(await schedulePlacesApi.undoNoTravel('kia', 'KIA 직관', false, signal)).toMatchObject({ noTravel: false, noTravelReason: null });
+    expect(await schedulePlacesApi.undoNoTravel('kia', 'KIA 직관', true, signal)).toMatchObject({ noTravel: true, noTravelReason: 'skipped' });
   });
 
   it('undoNoTravel이 서버에서 실패하면 기억을 건드리지 않는다', async () => {

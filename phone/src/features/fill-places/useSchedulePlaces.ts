@@ -4,6 +4,7 @@ import { AccessibilityInfo } from 'react-native';
 
 import { isClientError, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
 import { strings } from '../../i18n/ko';
+import { appEventSync, type EventSync } from '../calendar-sync/eventSync';
 import { UNDO_VISIBLE_MS } from '../calendar-sync/useTravelMark';
 import { appSkipMemory, type SkipMemory } from '../skips/skipMemory';
 import { schedulePlacesApi, type SchedulePlaceChange, type SchedulePlacesApi, type SetupSchedule } from './schedulePlacesApi';
@@ -30,12 +31,15 @@ export function useSchedulePlaces({
   enabled = true,
   skips = appSkipMemory,
   undoVisibleMs = UNDO_VISIBLE_MS,
+  sync = appEventSync,
 }: {
   api?: SchedulePlacesApi;
   timeoutMs?: number;
   enabled?: boolean;
   skips?: Pick<SkipMemory, 'has' | 'full' | 'dismissFull' | 'subscribe'>;
   undoVisibleMs?: number;
+  /** 일정 보내기. 서버로 일정을 보냈다는 결과가 오면 서버가 아는 일정이 달라졌을 수 있어(이름으로 기억한 일정이 빠짐 등) 목록을 다시 읽는다. */
+  sync?: Pick<EventSync, 'subscribe'>;
 } = {}) {
   const [load, setLoad] = useState<ScheduleLoadState>({ status: 'loading' });
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -50,7 +54,9 @@ export function useSchedulePlaces({
   const skipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 마지막으로 읽은 일정(저장하는 일정의 제목을 알아내는 데 쓴다). */
   const schedulesRef = useRef<SetupSchedule[]>([]);
-  schedulesRef.current = load.status === 'ready' ? load.schedules : [];
+  useEffect(() => {
+    schedulesRef.current = load.status === 'ready' ? load.schedules : [];
+  });
   const memoryFull = useSyncExternalStore(skips.subscribe, skips.full, skips.full);
 
   const showSkipNotice = (notice: SkipNotice | null) => {
@@ -82,6 +88,13 @@ export function useSchedulePlaces({
   // attempt는 사용자가 재시도할 때 포커스 조회를 다시 시작하기 위한 값이다.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, timeoutMs, attempt, enabled]));
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    return sync.subscribe((result) => {
+      if (result === 'sent') setAttempt((n) => n + 1);
+    });
+  }, [sync, enabled]);
 
   useEffect(() => () => {
     const pending = saveRequest.current;

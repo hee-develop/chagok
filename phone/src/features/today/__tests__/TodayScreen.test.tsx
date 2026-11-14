@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { colors } from '../../../ui/theme';
 
 import { HttpError } from '../../../api/request';
+import { appEventSync } from '../../calendar-sync/eventSync';
 import type { FilteredEvent } from '../../calendar-sync/filteredEvents';
 import type { SchedulePlacesApi } from '../../fill-places/schedulePlacesApi';
 import { createInbox } from '../../notifications/inbox';
@@ -406,6 +407,93 @@ describe('오늘 탭: 폰이 거른 일정(이동 없음)', () => {
     await setup({ scheduleApi: lunchApi(), filteredEvents: [{ ...ONLINE_EVENT, id: 'lunch', title: '육전집 점심' }] });
     await screen.findByText('육전집 점심');
     expect(screen.getAllByText('육전집 점심')).toHaveLength(1);
+  });
+});
+
+describe('오늘 탭: 이동 없음 기억(정책서 10.3 4번)', () => {
+  const KIA_SKIPPED: FilteredEvent = { id: 'evt-kia', title: 'KIA 직관', start: '2026-11-06T09:00:00Z', end: '2026-11-06T12:00:00Z', reason: 'skipped' };
+  const makeSkips = (remembered: string[] = []) => {
+    const state = { full: false, names: new Set(remembered) };
+    const listeners = new Set<() => void>();
+    return {
+      has: (title: string) => state.names.has(title),
+      full: () => state.full,
+      dismissFull: jest.fn(() => { state.full = false; listeners.forEach((l) => l()); }),
+      subscribe: (l: () => void) => { listeners.add(l); return () => listeners.delete(l); },
+      setFull: () => { state.full = true; listeners.forEach((l) => l()); },
+    };
+  };
+
+  it('[이동 없음]을 누르면 3단계와 같은 안내와 [되돌리기]를 보이고, 되돌리면 이름 기억도 함께 되돌린다(undoNoTravel)', async () => {
+    const api = makeScheduleApi();
+    await setup({ scheduleApi: api, skips: makeSkips() });
+    await fireEvent.press(await findRowButton('육전집 점심'));
+    await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 이동 없음' }));
+    expect(await screen.findByText('‘육전집 점심’ 일정을 이동 없음으로 두었어요. 같은 이름 일정을 앞으로 차에 보내지 않아요.')).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 되돌리기' }));
+    await waitFor(() => expect(api.undoNoTravel).toHaveBeenCalledWith('lunch', '육전집 점심', false, expect.any(AbortSignal)));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '육전집 점심 되돌리기' })).toBeNull());
+  });
+
+  it('누르기 전부터 기억하던 이름이면 되돌려도 기억을 지우지 않는다', async () => {
+    const api = makeScheduleApi();
+    await setup({ scheduleApi: api, skips: makeSkips(['육전집 점심']) });
+    await fireEvent.press(await findRowButton('육전집 점심'));
+    await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 이동 없음' }));
+    await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 되돌리기' }));
+    await waitFor(() => expect(api.undoNoTravel).toHaveBeenCalledWith('lunch', '육전집 점심', true, expect.any(AbortSignal)));
+  });
+
+  it('서버가 기억 상한이라 거절하면 가득 참 안내로 바뀌고 [확인]으로 닫는다', async () => {
+    const skips = makeSkips();
+    await setup({ scheduleApi: makeScheduleApi(), skips });
+    await fireEvent.press(await findRowButton('육전집 점심'));
+    await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 이동 없음' }));
+    await screen.findByRole('button', { name: '육전집 점심 되돌리기' });
+    await act(async () => skips.setFull());
+    expect(screen.getByTestId('skips-full-notice')).toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: '육전집 점심 되돌리기' })).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: '확인' }));
+    expect(skips.dismissFull).toHaveBeenCalled();
+  });
+
+  it("이동 없음으로 기억한 이름이라 폰이 거른 일정은 '이동 없음 · 이동 없음으로 기억' 흐린 줄로 보이고, [이동 일정이에요]는 예외가 아니라 기억 지우기(unskip)다", async () => {
+    const mark = jest.fn().mockResolvedValue('ok');
+    const unskip = jest.fn().mockResolvedValue('ok');
+    const undoUnskip = jest.fn().mockResolvedValue('ok');
+    const api = makeScheduleApi([LUNCH]);
+    await setup({ scheduleApi: api, filteredEvents: [KIA_SKIPPED], travelMark: { mark, unskip, undoUnskip } });
+    const row = within(await screen.findByTestId('today-row-evt-kia'));
+    expect(row.getByText('이동 없음 · 이동 없음으로 기억')).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole('button', { name: /^KIA 직관 / }));
+    await fireEvent.press(screen.getByRole('button', { name: '바꾸기' }));
+    await waitFor(() => expect(unskip).toHaveBeenCalledWith('KIA 직관'));
+    expect(mark).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.fetchSchedules).toHaveBeenCalledTimes(2));
+    await fireEvent.press(await screen.findByRole('button', { name: 'KIA 직관 되돌리기' }));
+    await waitFor(() => expect(undoUnskip).toHaveBeenCalledWith('KIA 직관'));
+  });
+});
+
+describe('오늘 탭: 일정 보내기 결과', () => {
+  it('일정을 서버로 보냈다는 결과(sent)가 오면 서버 일정을 다시 읽는다(이름으로 기억해 빠진 일정이 서버 줄로 남지 않는다). 다른 결과에는 다시 읽지 않는다', async () => {
+    const listeners: ((result: string) => void)[] = [];
+    const spy = jest.spyOn(appEventSync, 'subscribe').mockImplementation((listener) => {
+      listeners.push(listener as (result: string) => void);
+      return () => undefined;
+    });
+    try {
+      const api = makeScheduleApi([LUNCH]);
+      await setup({ scheduleApi: api });
+      await screen.findByText('육전집 점심');
+      expect(api.fetchSchedules).toHaveBeenCalledTimes(1);
+      await act(async () => listeners.forEach((l) => l('unchanged')));
+      expect(api.fetchSchedules).toHaveBeenCalledTimes(1);
+      await act(async () => listeners.forEach((l) => l('sent')));
+      await waitFor(() => expect(api.fetchSchedules).toHaveBeenCalledTimes(2));
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

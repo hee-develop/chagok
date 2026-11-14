@@ -89,6 +89,9 @@ export const createSchedulePlacesApi = ({ client = api, skips = appSkipMemory, c
     const saved = await res.json();
     recordCorrected(saved, corrected);
     if (!keepName) void forgetNoTravelName(title, skips);
+    // 서버는 이 응답을 만들 때 아직 이름을 기억하고 있어(기억 지우기는 뒤에서 올라간다) 보정을 지운 일정을 '이동 없음으로 기억'으로 내린다.
+    // 이름 기억을 되돌리는 중이므로 줄은 다시 '장소 없음'으로 보인다(전부터 기억하던 이름이면 서버 응답 그대로).
+    if (!keepName && saved.noTravelReason === 'skipped') return { ...saved, noTravel: false, noTravelReason: null };
     return saved;
   },
   saveCare: async (id, care, signal) => {
