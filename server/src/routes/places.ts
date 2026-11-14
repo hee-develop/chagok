@@ -3,7 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import type { MockPlace, PlacesCatalog } from '../fixture-types.js';
 import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
-import type { SeatEnv, SeatGuard } from '../seatScope.js';
+import { openDenied, type SeatEnv, type SeatGuard } from '../seatScope.js';
 
 /** 응답에 내보내는 장소. 픽스처 전용 필드(fictional)는 뺀다. */
 export type PublicPlace = Omit<MockPlace, 'fictional'>;
@@ -121,12 +121,20 @@ export const createPlacesRoute = (catalog: PlacesCatalog, guard: SeatGuard) => {
     )
     .get('/suggestions', (c) => c.json({ suggestions }))
     .get('/favorites', guard.read, (c) => c.json(view(c.var.seat.data.favorites.get())))
-    .put('/favorites/home', guard.write, tooLarge, placeIdValidator(true), (c) =>
-      c.json(view(c.var.seat.data.favorites.setHome(c.req.valid('json').placeId)), 200))
-    .put('/favorites/work', guard.write, tooLarge, placeIdValidator(true), (c) =>
-      c.json(view(c.var.seat.data.favorites.setWork(c.req.valid('json').placeId)), 200))
+    .put('/favorites/home', guard.write, tooLarge, placeIdValidator(true), (c) => {
+      const opened = c.var.seat.open();
+      if (!opened.ok) return c.json(openDenied(opened.reason), 429);
+      return c.json(view(opened.data.favorites.setHome(c.req.valid('json').placeId)), 200);
+    })
+    .put('/favorites/work', guard.write, tooLarge, placeIdValidator(true), (c) => {
+      const opened = c.var.seat.open();
+      if (!opened.ok) return c.json(openDenied(opened.reason), 429);
+      return c.json(view(opened.data.favorites.setWork(c.req.valid('json').placeId)), 200);
+    })
     .post('/favorites/others', guard.write, tooLarge, placeIdValidator(false), (c) => {
-      const result = c.var.seat.data.favorites.addOther(c.req.valid('json').placeId as string);
+      const opened = c.var.seat.open();
+      if (!opened.ok) return c.json(openDenied(opened.reason), 429);
+      const result = opened.data.favorites.addOther(c.req.valid('json').placeId as string);
       if (!result.ok) {
         const error = result.reason === 'duplicate' ? '이미 추가한 장소입니다' : `추가한 장소는 ${MAX_OTHER_PLACES}개 이하여야 합니다`;
         return c.json({ error }, 400);

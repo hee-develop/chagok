@@ -23,19 +23,28 @@ export type SeatData = {
   cares: Map<string, string>;
 };
 
+export type BucketDenied = 'rate-limited';
 export type SeatDataRegistry = {
   /** 자리의 데이터. 기본 자리는 늘 있고, 그 밖의 자리는 처음 부를 때 만든다(자리가 있는지는 부르는 쪽이 확인한다). */
   get(seatId: string): SeatData;
   /**
-   * 기기 id 하나의 '연결 전 버킷'. 토큰 없이 기기 id만 가진 폰(첫 설정 중)의 데이터가 쌓인다.
-   * create가 false면 있는 것만 돌려주고(읽기), true면 없을 때 만든다(쓰기). 버킷 수 상한에 막혀 못 만들면 null.
-   * 쓴 지 TTL이 지난 버킷은 이때 정리한다.
+   * 기기 id 하나의 '연결 전 버킷'을 **있을 때만, 쓰지 않고** 돌려준다(읽기용. TTL을 새로 시작하지 않는다). 쓴 지 TTL이 지난 버킷은 이때 정리한다.
    */
-  bucket(deviceId: string, create: boolean): SeatData | null;
-  /** 저장하지 않는 빈 데이터(버킷이 아직 없는 기기의 읽기용). */
+  peekBucket(deviceId: string): SeatData | null;
+  /**
+   * 쓰기용: 버킷을 열어 마지막으로 쓴 시각을 지금으로 한다(TTL은 쓰기만 새로 시작한다). 없으면 만든다. 만들 때는
+   * 요청 주소(source)별 속도 제한을 보고(`rate-limited`), 버킷 수가 가득 차면 가장 오래 쓰지 않은 버킷(빈 버킷 먼저)을 밀어내고 만든다.
+   * 본문 검증을 통과한 쓰기에서만 부른다(잘못된 요청이 버킷을 만들지 않도록).
+   */
+  openBucket(deviceId: string, source: string): { ok: true; data: SeatData } | { ok: false; reason: BucketDenied };
+  /** 저장하지 않는 빈 데이터(버킷이 아직 없는 기기·읽을 자리를 정할 수 없는 읽기용). */
   blank(): SeatData;
-  /** 이 데이터(자리·버킷·기본 자리)의 일정을 bytes 크기로 바꿔도 서버 전체 일정 저장 용량 안인가. */
-  fitsEvents(data: SeatData, bytes: number): boolean;
+  /**
+   * 이 데이터의 일정을 bytes 크기로 바꿔도 되는지 확인하고, 연결 전 버킷이면 필요한 만큼 다른 버킷(가장 오래 쓰지 않은 것부터)을 밀어내
+   * 자리를 낸다. 연결된 자리(기본 자리 포함)와 연결 전 버킷은 용량 예산이 따로라 서로 영향을 주지 않고, 연결된 자리는 밀어내지 않는다.
+   * 버킷 하나의 크기 상한도 여기서 본다.
+   */
+  reserveEvents(data: SeatData, bytes: number): boolean;
   /** 자리를 지운다. */
   remove(seatId: string): void;
   /** 자리 이벤트(생성·교체·삭제)를 데이터에 반영한다. 연결 상태를 가진 SeatStore를 구독시킨다. */
@@ -44,12 +53,19 @@ export type SeatDataRegistry = {
 
 type Preset = Partial<Pick<SeatData, 'events' | 'selection' | 'favorites' | 'family'>>;
 
-/** 연결 전 버킷은 이 개수까지만 둔다. 차면 새 버킷은 만들지 않는다(있는 폰의 데이터를 밀어내지 않는다). */
+/** 연결 전 버킷은 이 개수까지만 둔다. 차면 가장 오래 쓰지 않은 버킷(빈 버킷 먼저)을 밀어내고 새로 만든다. */
 export const MAX_BUCKETS = 500;
-/** 연결 전 버킷은 마지막으로 쓴 지 이 시간이 지나면 버린다(7일). */
+/** 연결 전 버킷은 마지막으로 **쓴** 지 이 시간이 지나면 버린다(7일). 읽기는 TTL을 새로 시작하지 않는다. */
 export const BUCKET_TTL_MS = 7 * 24 * 60 * 60_000;
-/** 서버 전체가 저장하는 일정의 크기 상한(바이트). 넘으면 PUT /events는 429 capacity. */
-export const MAX_TOTAL_EVENT_BYTES = 32 * 1024 * 1024;
+/** 연결된 자리(기본 자리 포함)가 저장하는 일정 크기의 서버 전체 상한(바이트). 넘으면 PUT /events는 429 capacity. */
+export const MAX_SEAT_EVENT_BYTES = 32 * 1024 * 1024;
+/** 연결 전 버킷이 저장하는 일정 크기의 서버 전체 상한(바이트). 연결된 자리 예산과 따로라 버킷이 가득 차도 연결된 자리의 저장은 막히지 않는다. */
+export const MAX_BUCKET_EVENT_BYTES = 32 * 1024 * 1024;
+/** 버킷 하나가 저장할 수 있는 일정 크기 상한(바이트). 하루·내일 일정으로는 충분히 크다. */
+export const MAX_EVENT_BYTES_PER_BUCKET = 512 * 1024;
+/** 한 요청 주소가 BUCKET_CREATE_WINDOW_MS 안에 새로 만들 수 있는 버킷 수(한 집 공유기 뒤의 폰 몇 대는 넉넉히 들어간다). */
+export const BUCKET_CREATE_WINDOW_MS = 10 * 60_000;
+export const MAX_BUCKET_CREATES_PER_SOURCE = 10;
 
 export type SeatDataOptions = {
   now: () => Date;
@@ -59,10 +75,14 @@ export type SeatDataOptions = {
   defaults?: Preset;
   maxBuckets?: number;
   bucketTtlMs?: number;
-  maxTotalEventBytes?: number;
+  maxSeatEventBytes?: number;
+  maxBucketEventBytes?: number;
+  maxEventBytesPerBucket?: number;
+  bucketCreateWindowMs?: number;
+  maxBucketCreatesPerSource?: number;
 };
 
-type Bucket = { data: SeatData; lastUsedAt: number };
+type Bucket = { data: SeatData; lastWrittenAt: number };
 
 export function createSeatDataRegistry({
   now,
@@ -70,7 +90,11 @@ export function createSeatDataRegistry({
   defaults = {},
   maxBuckets = MAX_BUCKETS,
   bucketTtlMs = BUCKET_TTL_MS,
-  maxTotalEventBytes = MAX_TOTAL_EVENT_BYTES,
+  maxSeatEventBytes = MAX_SEAT_EVENT_BYTES,
+  maxBucketEventBytes = MAX_BUCKET_EVENT_BYTES,
+  maxEventBytesPerBucket = MAX_EVENT_BYTES_PER_BUCKET,
+  bucketCreateWindowMs = BUCKET_CREATE_WINDOW_MS,
+  maxBucketCreatesPerSource = MAX_BUCKET_CREATES_PER_SOURCE,
 }: SeatDataOptions): SeatDataRegistry {
   const create = (preset: Preset = {}): SeatData => {
     const data: SeatData = {
@@ -98,9 +122,15 @@ export function createSeatDataRegistry({
     }
     return data;
   };
+  const bucketCreates = new Map<string, number[]>();
   const purgeBuckets = () => {
     const at = now().getTime();
-    for (const [id, b] of buckets) if (b.lastUsedAt + bucketTtlMs <= at) buckets.delete(id);
+    for (const [id, b] of buckets) if (b.lastWrittenAt + bucketTtlMs <= at) buckets.delete(id);
+    for (const [source, list] of bucketCreates) {
+      const recent = list.filter((t) => t > at - bucketCreateWindowMs);
+      if (recent.length === 0) bucketCreates.delete(source);
+      else bucketCreates.set(source, recent);
+    }
   };
   /** 버킷을 꺼내 버킷 표에서 지운다(새 자리가 이어받거나 바꾸기가 반영하면 끝). */
   const takeBucket = (deviceId: string | null) => {
@@ -110,26 +140,88 @@ export function createSeatDataRegistry({
     buckets.delete(deviceId);
     return found?.data ?? null;
   };
+  /** 아무것도 모으지 않은 데이터인가(일정이 없고 선택·보정·채비·자주 가는 곳·가족 요청이 없다). 밀어낼 때 먼저 고른다. */
+  const isEmpty = (d: SeatData) => {
+    const saved = d.favorites.get();
+    return (
+      (d.events.get()?.events.length ?? 0) === 0 &&
+      d.selection.get() === null &&
+      d.overrides.size === 0 &&
+      d.cares.size === 0 &&
+      saved.home === null &&
+      saved.work === null &&
+      saved.others.length === 0 &&
+      d.family.list().length === 0
+    );
+  };
+  /** 밀어낼 버킷: 가장 오래 쓰지 않은 것, 빈 버킷이 있으면 그중 가장 오래된 것. except는 지금 쓰는 버킷. */
+  const evictable = (except: string | null, needBytes: boolean) => {
+    let pick: [string, Bucket, boolean] | null = null;
+    for (const [id, b] of buckets) {
+      if (id === except) continue;
+      if (needBytes && b.data.events.bytes() === 0) continue;
+      const empty = isEmpty(b.data);
+      if (pick === null || (empty && !pick[2]) || (empty === pick[2] && b.lastWrittenAt < pick[1].lastWrittenAt)) pick = [id, b, empty];
+    }
+    return pick?.[0] ?? null;
+  };
+  const bucketBytes = () => {
+    let total = 0;
+    for (const b of buckets.values()) total += b.data.events.bytes();
+    return total;
+  };
+  const bucketIdOf = (data: SeatData) => {
+    for (const [id, b] of buckets) if (b.data === data) return id;
+    return null;
+  };
   return {
     get,
-    blank: () => create(),
-    bucket: (deviceId, createIfMissing) => {
+    peekBucket: (deviceId) => {
       purgeBuckets();
+      return buckets.get(deviceId)?.data ?? null;
+    },
+    openBucket: (deviceId, source) => {
+      purgeBuckets();
+      const at = now().getTime();
       const found = buckets.get(deviceId);
       if (found) {
-        found.lastUsedAt = now().getTime();
-        return found.data;
+        found.lastWrittenAt = at;
+        return { ok: true, data: found.data };
       }
-      if (!createIfMissing || buckets.size >= maxBuckets) return null;
+      const recent = bucketCreates.get(source) ?? [];
+      if (recent.length >= maxBucketCreatesPerSource) return { ok: false, reason: 'rate-limited' };
+      bucketCreates.set(source, [...recent, at]);
+      // 가득 차면 새 기기를 거절하기 전에 가장 오래 쓰지 않은 버킷(빈 버킷 먼저)을 밀어낸다.
+      while (buckets.size >= Math.max(1, maxBuckets)) {
+        const victim = evictable(null, false);
+        if (victim === null) break;
+        buckets.delete(victim);
+      }
       const data = create();
-      buckets.set(deviceId, { data, lastUsedAt: now().getTime() });
-      return data;
+      buckets.set(deviceId, { data, lastWrittenAt: at });
+      return { ok: true, data };
     },
-    fitsEvents: (data, bytes) => {
-      let total = 0;
-      for (const d of bySeat.values()) total += d.events.bytes();
-      for (const b of buckets.values()) total += b.data.events.bytes();
-      return total - data.events.bytes() + bytes <= maxTotalEventBytes;
+    blank: () => create(),
+    reserveEvents: (data, bytes) => {
+      const own = bucketIdOf(data);
+      if (own === null) {
+        // 연결된 자리(기본 자리 포함). 기본 자리가 아닌 버킷 밖의 데이터(저장하지 않는 빈 데이터)는 쓰지 못한다.
+        let total = 0;
+        let known = false;
+        for (const d of bySeat.values()) {
+          if (d === data) known = true;
+          total += d.events.bytes();
+        }
+        return known && total - data.events.bytes() + bytes <= maxSeatEventBytes;
+      }
+      if (bytes > maxEventBytesPerBucket || bytes > maxBucketEventBytes) return false; // 혼자서 상한을 넘으면 다른 버킷을 밀어내지 않는다
+      // 버킷 예산이 모자라면 다른 버킷을 오래 쓰지 않은 순으로 밀어내 자리를 낸다(연결된 자리는 건드리지 않는다).
+      while (bucketBytes() - data.events.bytes() + bytes > maxBucketEventBytes) {
+        const victim = evictable(own, true);
+        if (victim === null) return false;
+        buckets.delete(victim);
+      }
+      return true;
     },
     remove: (seatId) => {
       if (seatId !== DEFAULT_SEAT_ID) bySeat.delete(seatId);

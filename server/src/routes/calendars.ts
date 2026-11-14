@@ -3,7 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import type { MockCalendar } from '../fixture-types.js';
 import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
-import type { SeatEnv, SeatGuard } from '../seatScope.js';
+import { openDenied, type SeatEnv, type SeatGuard } from '../seatScope.js';
 
 export const MAX_SELECTED_IDS = 50;
 
@@ -97,7 +97,9 @@ export const createCalendarsRoute = (calendars: MockCalendar[], guard: SeatGuard
       }),
       (c) => {
         const { selectedIds, revision, source } = c.req.valid('json');
-        const saved = c.var.seat.data.selection.set(selectedIds, revision, source);
+        const opened = c.var.seat.open();
+        if (!opened.ok) return c.json(openDenied(opened.reason), 429);
+        const saved = opened.data.selection.set(selectedIds, revision, source);
         return c.json({ selectedIds: saved.selectedIds, savedAt: saved.savedAt, revision: saved.revision, source: saved.source }, 200);
       },
     );

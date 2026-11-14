@@ -12,7 +12,7 @@ import {
   MAX_NOTES_LENGTH,
   MAX_TITLE_LENGTH,
 } from '../limits.js';
-import type { SeatEnv, SeatGuard } from '../seatScope.js';
+import { openDenied, type SeatEnv, type SeatGuard } from '../seatScope.js';
 import { DAY_MS, formatSeoulDate, parseAt, parseSeoulDate, seoulDay, seoulDayStart } from '../time.js';
 
 /** 폰이 보낸 일정 한 건. 시각은 UTC 밀리초로 들고 있고, 응답에서 ISO8601로 바꾼다. */
@@ -224,10 +224,13 @@ export const createEventsRoute = (
         // 오늘·내일(서울)에 걸치지 않는 일정은 저장하지 않는다.
         const { start, end } = eventWindow(now());
         const inWindow = events.filter((e) => overlaps(e, start, end)).sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
-        const { kind, seatId, data, fitsEvents } = c.var.seat;
-        // 서버 전체가 저장하는 일정 크기에 상한이 있다(자리·버킷을 많이 만들어 메모리를 채우는 것을 막는다).
-        if (!fitsEvents(eventsBytes(inWindow))) return c.json({ error: '서버 저장 공간이 가득 찼어요. 잠시 뒤 다시 해 주세요', reason: 'capacity' as const }, 429);
-        const saved = data.events.replace(inWindow);
+        const { kind, seatId } = c.var.seat;
+        // 연결 전 버킷은 본문 검증을 통과한 여기서 비로소 만들어진다(요청 주소별 속도 제한).
+        const opened = c.var.seat.open();
+        if (!opened.ok) return c.json(openDenied(opened.reason), 429);
+        // 일정 저장 용량에는 예산이 있다(연결된 자리와 연결 전 버킷은 따로, 버킷 하나의 상한도 있다: 자리·버킷을 많이 만들어 메모리를 채우는 것을 막는다).
+        if (!opened.reserveEvents(eventsBytes(inWindow))) return c.json({ error: '서버 저장 공간이 가득 찼어요. 잠시 뒤 다시 해 주세요', reason: 'capacity' as const }, 429);
+        const saved = opened.data.events.replace(inWindow);
         if (kind === 'seat') onReceived?.(seatId);
         return c.json({ receivedAt: saved.receivedAt, stored: inWindow.length, dropped: events.length - inWindow.length }, 200);
       },

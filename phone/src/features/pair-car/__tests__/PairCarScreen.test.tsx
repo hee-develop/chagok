@@ -103,7 +103,7 @@ it('카메라를 거부하면 번호를 넣으라고 안내한다', async () => 
   await waitFor(() => expect(screen.getByRole('button', { name: 'QR 찍기' })).toBeOnTheScreen());
 });
 
-it('차에 폰이 가득이면(409)·번호를 너무 많이 틀리면(429) 번호 오류와 다른 안내를 보이고 다시 시도 버튼은 없다', async () => {
+it('차에 폰이 가득이면(409)·요청이 몰려 잠시 막히면(429) 번호 오류와 다른 안내를 보이고 다시 시도 버튼은 없다', async () => {
   const claim = jest.fn()
     .mockRejectedValueOnce(new HttpError(409, 'POST /pair/claim 409'))
     .mockRejectedValueOnce(new HttpError(429, 'POST /pair/claim 429'));
@@ -116,7 +116,7 @@ it('차에 폰이 가득이면(409)·번호를 너무 많이 틀리면(429) 번�
   expect(screen.queryByRole('button', { name: '다시 시도' })).toBeNull();
 
   await fireEvent.press(screen.getByRole('button', { name: '연결하기' }));
-  expect(await screen.findByText('번호를 여러 번 잘못 넣었어요. 잠시 뒤 다시 해 주세요.')).toBeOnTheScreen();
+  expect(await screen.findByText('지금은 연결할 수 없어요. 잠시 뒤 다시 해 주세요.')).toBeOnTheScreen();
   expect(screen.queryByText('이 차에는 더 연결할 수 없어요. 차에 연결된 폰이 많아요.')).toBeNull();
   expect(screen.queryByRole('button', { name: '다시 시도' })).toBeNull();
 });

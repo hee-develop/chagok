@@ -7,7 +7,7 @@ import { MINUTE_MS, parseAt, seoulDay } from '../time.js';
 import { effectiveSelectedIds } from './calendars.js';
 import { detectNoTravel, type NoTravelReason } from '../noTravel.js';
 import type { SeatData } from '../seatData.js';
-import type { SeatEnv, SeatGuard, SeatScope } from '../seatScope.js';
+import { openDenied, type SeatEnv, type SeatGuard, type SeatScope } from '../seatScope.js';
 
 type PlaceChange = { placeId: string | null } | { noTravel: true };
 
@@ -211,10 +211,12 @@ export const createSchedulesRoute = (
         return c.json({ error: '알려진 placeId 또는 noTravel: true 하나가 필요합니다' }, 400);
       }), (c) => {
         const sc = c.var.seat;
-        const d = sc.data;
         const schedule = selectedSchedules(sc, anchorOf(sc, undefined)).find((s) => s.id === c.req.param('id'));
         if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
         if (schedule.allDay) return c.json({ error: '종일 일정은 이동 대상이 아닙니다' }, 409);
+        const opened = sc.open();
+        if (!opened.ok) return c.json(openDenied(opened.reason), 429);
+        const d = opened.data;
         const change = c.req.valid('json');
         if ('noTravel' in change) d.overrides.set(schedule.id, { placeId: null, noTravel: true });
         else if (change.placeId === null) d.overrides.delete(schedule.id);
@@ -234,9 +236,11 @@ export const createSchedulesRoute = (
         return { care: care === '' ? null : care };
       }), (c) => {
         const sc = c.var.seat;
-        const d = sc.data;
         const schedule = selectedSchedules(sc, anchorOf(sc, undefined)).find((s) => s.id === c.req.param('id'));
         if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
+        const opened = sc.open();
+        if (!opened.ok) return c.json(openDenied(opened.reason), 429);
+        const d = opened.data;
         const { care } = c.req.valid('json');
         if (care === null) d.cares.delete(schedule.id);
         else d.cares.set(schedule.id, care);
@@ -254,10 +258,12 @@ export const createSchedulesRoute = (
         return { memberId: value.memberId };
       }), (c) => {
         const sc = c.var.seat;
-        const d = sc.data;
         const schedule = selectedSchedules(sc, anchorOf(sc, undefined)).find((s) => s.id === c.req.param('id'));
         if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
         if (schedule.allDay) return c.json({ error: '종일 일정은 보낼 수 없습니다' }, 409);
+        const opened = sc.open();
+        if (!opened.ok) return c.json(openDenied(opened.reason), 429);
+        const d = opened.data;
         const member = family.members.find((m) => m.id === c.req.valid('json').memberId)!;
         const { locationText, place } = view(d, schedule);
         const saved = d.family.save({

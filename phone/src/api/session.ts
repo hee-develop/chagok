@@ -41,7 +41,8 @@ export type Session = {
   /**
    * 이 폰의 기기 id. 첫 실행 때 한 번 만들어 secure-store에 저장하고 모든 요청에 헤더로 붙인다. 서버는 토큰이 없을 때 이 id로
    * 이 폰만의 '연결 전 데이터'를 따로 두고, 연결할 때 그것만 새 자리로 옮긴다. 저장소가 막혀도 이번 실행 동안은 같은 id를 쓴다.
-   * 로그에 남기지 않는다. `EXPO_PUBLIC_DEVICE_ID=none`(폰 E2E 전용)이면 보내지 않아 늘 '기본 자리'(null)로 돈다.
+   * 로그에 남기지 않는다. 저장된 id를 읽지 못하면(저장소 오류) 저장된 것을 덮어쓰지 않고 이번 실행 동안만 메모리 id를 쓰며 다음 실행에서 다시 읽는다.
+   * `EXPO_PUBLIC_DEVICE_ID=none`(폰 E2E 전용, 개발 번들 `__DEV__`에서만 적용)이면 보내지 않아 늘 '기본 자리'(null)로 돈다.
    */
   getDeviceId: () => Promise<string | null>;
   getToken: () => Promise<string | null>;
@@ -62,12 +63,20 @@ export function createSession(
 
   const getDeviceId = (): Promise<string | null> => {
     // 폰 E2E(Maestro)는 서버를 기기 id 없이 직접 읽어 확인하므로 기기 id를 끄고 '기본 자리'에서 돈다(번들에 박히는 값).
-    if (process.env.EXPO_PUBLIC_DEVICE_ID === 'none') return Promise.resolve(null);
+    // 개발 번들에서만 듣는다: 이 값이 실수로 릴리스 빌드에 박혀도 기기 id가 꺼지지 않는다.
+    if (__DEV__ && process.env.EXPO_PUBLIC_DEVICE_ID === 'none') return Promise.resolve(null);
     deviceId ??= (async () => {
-      const saved = await deviceStorage.read().catch(() => null);
+      let saved: string | null = null;
+      let readFailed = false;
+      try {
+        saved = await deviceStorage.read();
+      } catch {
+        readFailed = true;
+      }
       if (saved && /^[A-Za-z0-9_-]{22,64}$/.test(saved)) return saved;
       const fresh = makeDeviceId();
-      await deviceStorage.write(fresh).catch(() => undefined);
+      // 읽기가 실패했으면 저장된 id가 있을 수 있어 덮어쓰지 않는다(이번 실행 동안만 이 id를 쓰고 다음 실행에서 다시 읽는다).
+      if (!readFailed) await deviceStorage.write(fresh).catch(() => undefined);
       return fresh;
     })();
     return deviceId;

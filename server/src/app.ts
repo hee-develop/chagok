@@ -40,18 +40,18 @@ export type AppOptions = {
   /** 코드 시도 횟수를 세는 요청 주소. 기본은 연결 주소이고, 프록시 뒤에서는 바꿔야 한다. 테스트에서도 바꾼다. */
   clientAddress?: (c: Context) => string;
   /**
-   * 자리를 모르는 옛 차 앱 호환 읽기: 식별(토큰·기기 id·driver)이 없는 읽기는 **자리가 있는 차가 정확히 하나일 때만** 그 차의
-   * '지난번 고른 자리(없으면 가장 최근에 연결한 자리)'를 보고 그 밖에는 기본 자리다. 차 토큰만 있고 driver가 없는 읽기는 그 차 안에서만 같은 규칙.
-   * 기본값은 켬이고, 차 앱이 driver를 보내게 되면 끈다.
+   * 자리를 모르는 옛 차 앱 호환 읽기: 식별(토큰·기기 id·driver)이 없는 읽기는 서버에 자리 있는 차가 하나도 없으면 기본 자리(픽스처), **자리가 있는 차가
+   * 정확히 하나일 때만** 그 차의 '지난번 고른 자리(없으면 가장 최근에 연결한 자리)', 그 밖에는 저장하지 않는 빈 범위(0건)다.
+   * 차 토큰만 있고 driver가 없는 읽기는 그 차 안에서만 같은 규칙(자리 없는 차는 빈 범위). 기본값은 켬이고, 차 앱이 driver·차 토큰을 보내게 되면 끈다.
    */
   legacyDriverFallback?: boolean;
   /**
-   * 일정을 받은 적 없는 실제 자리(연결된 자리·연결 전 버킷)도 픽스처(목 일정)로 떨어뜨린다. 기본은 꺼짐(실제 자리는 0건).
-   * 목 캘린더로 도는 폰 E2E·PT 시연 서버(`FIXTURE_SEATS=1`)에서만 켠다.
+   * 일정을 받은 적 없는 실제 자리(연결된 자리·연결 전 버킷·빈 범위)도 픽스처(목 일정)로 떨어뜨린다. 기본은 꺼짐(실제 자리는 0건).
+   * **실제 사용자에게 목 일정이 보이는 데모 전용 옵션**이다. 차량 Maestro(`e2e-car.sh`)·PT 시연(`pt-demo.sh`) 서버(`FIXTURE_SEATS=1`)에서만 켠다.
    */
   fixtureSeats?: boolean;
-  /** 연결 전 버킷 수·TTL, 서버 전체 일정 저장 용량 상한(바이트). 기본값은 seatData.ts. 테스트에서 바꾼다. */
-  capacity?: { maxBuckets?: number; bucketTtlMs?: number; maxTotalEventBytes?: number };
+  /** 연결 전 버킷 수·TTL·생성 속도 제한과 일정 저장 용량 예산(연결된 자리/버킷 따로, 버킷 하나의 상한). 기본값은 seatData.ts. 테스트에서 바꾼다. */
+  capacity?: Omit<NonNullable<Parameters<typeof createSeatDataRegistry>[0]>, 'now' | 'fixtureIds' | 'defaults'>;
 };
 
 export const createApp = ({
@@ -81,7 +81,7 @@ export const createApp = ({
     ...capacity,
   });
   seats.subscribe((event) => registry.apply(event));
-  const guard = createSeatGuard(seats, registry, { legacyDriverFallback, fixtureSeats });
+  const guard = createSeatGuard(seats, registry, { legacyDriverFallback, fixtureSeats, clientAddress });
   return new Hono()
     .get('/health', (c) => c.json({ ok: true as const }))
     .route('/calendars', createCalendarsRoute(calendars, guard))

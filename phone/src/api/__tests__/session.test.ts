@@ -110,6 +110,43 @@ describe('기기 id', () => {
     expect(await session.getDeviceId()).toBe('c3'.repeat(16));
   });
 
+  it('저장된 id를 읽지 못하면 덮어쓰지 않고 이번 실행 동안만 메모리 id를 쓰며, 다음 실행에서 다시 읽는다', async () => {
+    let failing = true;
+    let stored: string | null = 'f6'.repeat(16);
+    const flaky: DeviceStorage = {
+      read: jest.fn(async () => {
+        if (failing) throw new Error('keystore locked');
+        return stored;
+      }),
+      write: jest.fn(async (id: string) => {
+        stored = id;
+      }),
+    };
+    const run1 = createSession(memoryStorage(), flaky, () => 'e5'.repeat(16));
+    expect(await run1.getDeviceId()).toBe('e5'.repeat(16));
+    expect(await run1.getDeviceId()).toBe('e5'.repeat(16));
+    expect(flaky.write).not.toHaveBeenCalled();
+    expect(stored).toBe('f6'.repeat(16)); // 저장된 id는 그대로
+    failing = false;
+    expect(await createSession(memoryStorage(), flaky, () => 'e5'.repeat(16)).getDeviceId()).toBe('f6'.repeat(16)); // 다음 실행에서 다시 읽는다
+  });
+
+  it('EXPO_PUBLIC_DEVICE_ID=none은 개발 번들(__DEV__)에서만 기기 id를 끈다', async () => {
+    const original = process.env.EXPO_PUBLIC_DEVICE_ID;
+    const dev = (globalThis as { __DEV__?: boolean }).__DEV__;
+    process.env.EXPO_PUBLIC_DEVICE_ID = 'none';
+    try {
+      (globalThis as { __DEV__?: boolean }).__DEV__ = true;
+      expect(await createSession(memoryStorage(), memoryDevice(), () => 'a1'.repeat(16)).getDeviceId()).toBeNull();
+      (globalThis as { __DEV__?: boolean }).__DEV__ = false; // 릴리스 번들
+      expect(await createSession(memoryStorage(), memoryDevice(), () => 'a1'.repeat(16)).getDeviceId()).toBe('a1'.repeat(16));
+    } finally {
+      (globalThis as { __DEV__?: boolean }).__DEV__ = dev;
+      if (original === undefined) delete process.env.EXPO_PUBLIC_DEVICE_ID;
+      else process.env.EXPO_PUBLIC_DEVICE_ID = original;
+    }
+  });
+
   it('만드는 id는 서버가 받는 모양(영문·숫자 22~64자)의 암호학적 난수이고 매번 다르다', () => {
     const a = newDeviceId();
     expect(a).toMatch(/^[A-Za-z0-9_-]{22,64}$/);

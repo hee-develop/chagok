@@ -130,10 +130,12 @@ export type SeatStore = {
   /** 그 차의 '지난번 고른 자리'(없거나 지워졌으면 가장 최근에 연결한 자리). 자리가 없으면 null. */
   preferredSeat(carId: string): PublicSeat | null;
   /**
-   * 자리를 모르는 옛 차 앱의 읽기를 위한 호환: **자리가 있는 차가 정확히 하나일 때만** 그 차의 preferredSeat, 그 밖에는 null(기본 자리).
+   * 자리를 모르는 옛 차 앱의 읽기를 위한 호환: **자리가 있는 차가 정확히 하나일 때만** 그 차의 preferredSeat, 그 밖에는 null(읽을 자리를 정할 수 없음).
    * 차가 둘 이상이면 어느 차의 읽기인지 알 수 없어 다른 사람의 자리로 보내지 않는다.
    */
   soleCarSeat(): PublicSeat | null;
+  /** 자리가 하나라도 있는 차의 수. 0이면 서버에 실제 사용자가 없어 식별 없는 읽기가 기본 자리(픽스처)를 본다. */
+  seatedCarCount(): number;
   drivers(carId: string): DriversView;
   /** 그 차의 자리인지 확인하고 '지난번 고른 자리'로 기억한다. 아니면 false. */
   select(carId: string, seatId: string): boolean;
@@ -264,7 +266,11 @@ export function createSeatStore(now: () => Date = () => new Date(), random: () =
     // 이 자리를 바꾸려고 낸 코드는 쓸 곳이 없어졌다.
     for (const [code, rec] of liveCodes) if (rec.mode.kind === 'replace' && rec.mode.seatId === seat.seatId) liveCodes.delete(code);
     const car = cars.get(seat.carId);
-    if (car && car.lastSelectedSeatId === seat.seatId) car.lastSelectedSeatId = null;
+    if (car) {
+      // 자리를 지운 것도 차의 활동이다: 마지막 자리가 끊긴 차의 토큰이 곧바로 만료되지 않고 SEATLESS_CAR_TTL_MS 동안 유효하다.
+      car.lastActiveAt = now().toISOString();
+      if (car.lastSelectedSeatId === seat.seatId) car.lastSelectedSeatId = null;
+    }
     emit({ type: 'removed', seatId: seat.seatId });
   };
   /** 지난번 고른 자리(아직 있으면), 아니면 가장 최근에 연결한 자리. */
@@ -428,6 +434,7 @@ export function createSeatStore(now: () => Date = () => new Date(), random: () =
       if (owners.size !== 1) return null;
       return preferredSeatOf([...owners][0] as string);
     },
+    seatedCarCount: () => new Set([...seats.values()].map((seat) => seat.carId)).size,
     drivers: (carId) => {
       const list = seatsOf(carId);
       const car = cars.get(carId);
@@ -474,7 +481,10 @@ export function createSeatStore(now: () => Date = () => new Date(), random: () =
       dropCodesOf(carId);
       lastCodeOfCar.delete(carId);
       const car = cars.get(carId);
-      if (car) car.lastSelectedSeatId = null;
+      if (car) {
+        car.lastSelectedSeatId = null;
+        car.lastActiveAt = now().toISOString();
+      }
       return list.length;
     },
     subscribe: (listener) => {

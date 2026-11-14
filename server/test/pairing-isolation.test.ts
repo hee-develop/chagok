@@ -11,7 +11,8 @@ import {
   SEATLESS_CAR_TTL_MS,
   createSeatStore,
 } from '../src/seats.js';
-import { BUCKET_TTL_MS } from '../src/seatData.js';
+import { MAX_EVENTS_BODY_BYTES } from '../src/limits.js';
+import { BUCKET_CREATE_WINDOW_MS, BUCKET_TTL_MS, MAX_BUCKET_CREATES_PER_SOURCE, MAX_EVENT_BYTES_PER_BUCKET } from '../src/seatData.js';
 import { catalog, newApp } from './helpers.js';
 
 // 리뷰(J1 반려)에서 재현된 시나리오 S1~S7과 설계 결정 A~I를 서버 테스트로 옮긴 것이다.
@@ -121,22 +122,47 @@ describe('A. 연결 전 폰 데이터는 폰마다 나뉜다 (S1)', () => {
     expect((await call(app, 'GET', '/events', { device: DEV_A })).body).toMatchObject({ receivedAt: null, events: [] });
     expect((await call(app, 'GET', '/schedules/today', { device: DEV_B })).body.schedules).toEqual([]);
     expect((await putEvents(app, { device: DEV_A }, [ev()])).status).toBe(200); // 읽기가 자리를 차지하지 않았다
-    // 버킷이 가득 차면 새 기기의 쓰기는 429 capacity이고 있는 버킷은 그대로다.
-    const full = await putEvents(app, { device: DEV_B }, [ev()]);
-    expect(full).toMatchObject({ status: 429, body: { reason: 'capacity' } });
-    expect(ids(await call(app, 'GET', '/events?date=2026-11-11', { device: DEV_A }))).toEqual(['e1']);
-    expect((await call(app, 'GET', '/events', { device: DEV_B })).status).toBe(200);
+    // 버킷이 가득 차도 새 기기를 거절하지 않고 가장 오래 쓰지 않은 버킷을 밀어내고 만든다.
+    clockMs += 1000;
+    expect((await putEvents(app, { device: DEV_B }, [ev({ id: 'b' })])).status).toBe(200);
+    expect(ids(await call(app, 'GET', '/events?date=2026-11-11', { device: DEV_B }))).toEqual(['b']);
+    expect((await call(app, 'GET', '/events', { device: DEV_A })).body.receivedAt).toBeNull(); // 밀려난 쪽은 빈 응답
   });
 
-  it('7일 동안 쓰지도 읽지도 않은 버킷은 버린다(쓰거나 읽으면 TTL이 새로 시작)', async () => {
+  it('버킷이 가득 차면 빈 버킷부터 밀어내고, 없으면 가장 오래 쓰지 않은 버킷을 밀어낸다', async () => {
+    const app = makeApp({ capacity: { maxBuckets: 3 } });
+    await putEvents(app, { device: DEV_A }, [ev({ id: 'a' })]);
+    clockMs += 1000;
+    // 빈 버킷: 일정 0건·선택 없음(받았고 0건)
+    await putEvents(app, { device: DEV_B }, []);
+    clockMs += 1000;
+    await putEvents(app, { device: DEV_C }, [ev({ id: 'c' })]);
+    clockMs += 1000;
+    // 가장 오래된 것은 A지만 빈 버킷 B가 먼저 밀려난다.
+    await putEvents(app, { device: 'd'.repeat(32) }, [ev({ id: 'd' })]);
+    expect(ids(await call(app, 'GET', '/events?date=2026-11-11', { device: DEV_A }))).toEqual(['a']);
+    expect((await call(app, 'GET', '/events', { device: DEV_B })).body.receivedAt).toBeNull();
+    expect(ids(await call(app, 'GET', '/events?date=2026-11-11', { device: DEV_C }))).toEqual(['c']);
+    // 빈 버킷이 없으면 가장 오래 쓰지 않은 A가 밀려난다.
+    clockMs += 1000;
+    await putEvents(app, { device: 'e'.repeat(32) }, [ev({ id: 'e' })]);
+    expect((await call(app, 'GET', '/events', { device: DEV_A })).body.receivedAt).toBeNull();
+    expect(ids(await call(app, 'GET', '/events?date=2026-11-11', { device: DEV_C }))).toEqual(['c']);
+  });
+
+  it('7일 동안 쓰지 않은 버킷은 버린다(쓰면 TTL이 새로 시작하고, 읽기는 새로 시작하지 않는다) (N7)', async () => {
     const app = makeApp();
     await putEvents(app, { device: DEV_A }, [ev({ id: 'old', start: '2026-11-18T14:00:00+09:00', end: '2026-11-18T15:00:00+09:00' })]);
     clockMs += BUCKET_TTL_MS - 1;
-    expect((await call(app, 'GET', '/events', { device: DEV_A })).body.receivedAt).not.toBeNull(); // 7일 직전: 아직 있고, 읽으면 TTL이 새로 시작한다
-    clockMs += BUCKET_TTL_MS - 1;
-    expect((await call(app, 'GET', '/events', { device: DEV_A })).body.receivedAt).not.toBeNull();
-    clockMs += BUCKET_TTL_MS; // 마지막으로 읽은 뒤 7일
+    expect((await call(app, 'GET', '/events', { device: DEV_A })).body.receivedAt).not.toBeNull(); // 7일 직전: 아직 있다
+    clockMs += 1; // 읽어도 TTL은 그대로라 쓴 지 7일이 되는 순간 사라진다
     expect((await call(app, 'GET', '/events', { device: DEV_A })).body.receivedAt).toBeNull();
+    // 쓰면 TTL이 새로 시작한다.
+    await putEvents(app, { device: DEV_B }, [ev({ id: 'old', start: '2026-11-18T14:00:00+09:00', end: '2026-11-18T15:00:00+09:00' })]);
+    clockMs += BUCKET_TTL_MS - 1;
+    await putEvents(app, { device: DEV_B }, [ev({ id: 'old2', start: '2026-11-18T14:00:00+09:00', end: '2026-11-18T15:00:00+09:00' })]);
+    clockMs += BUCKET_TTL_MS - 1;
+    expect((await call(app, 'GET', '/events', { device: DEV_B })).body.receivedAt).not.toBeNull();
   });
 
   it('기기 id는 길이·문자를 검증하고 이상하면 400이다(읽기·쓰기·claim 모두)', async () => {
@@ -231,7 +257,7 @@ describe('A. 연결 전 폰 데이터는 폰마다 나뉜다 (S1)', () => {
 });
 
 describe('B·E. 픽스처는 기본 자리에서만 (S5)', () => {
-  it('식별 없는 요청은 기본 자리(픽스처), 실제 자리·연결 전 버킷은 일정을 받은 적 없어도 0건이다', async () => {
+  it('자리 있는 차가 없는 서버의 식별 없는 요청은 기본 자리(픽스처), 실제 자리·연결 전 버킷은 일정을 받은 적 없어도 0건이다', async () => {
     const app = makeApp();
     expect(ids(await call(app, 'GET', '/schedules/today'))).toContain('gwangju-lunch');
     expect(ids(await call(app, 'GET', '/schedules/today', { device: DEV_A }))).toEqual([]);
@@ -253,7 +279,7 @@ describe('B·E. 픽스처는 기본 자리에서만 (S5)', () => {
     expect((await call(app, 'DELETE', '/events', { device: DEV_A })).status).toBe(403); // 같은 기기만
   });
 
-  it('fixtureSeats(데모·폰 E2E 서버)에서는 받은 적 없는 실제 자리·버킷도 픽스처를 쓴다', async () => {
+  it('fixtureSeats(차량 Maestro·PT 시연 데모 서버)에서는 받은 적 없는 실제 자리·버킷도 픽스처를 쓴다', async () => {
     const app = makeApp({ fixtureSeats: true });
     expect(ids(await call(app, 'GET', '/schedules/places', { device: DEV_A }))).toContain('gwangju-lunch');
     await put(app, '/schedules/gwangju-lunch/place', { device: DEV_A, body: { noTravel: true } });
@@ -289,7 +315,7 @@ describe('C. 옛 차 앱 호환 읽기의 범위 (S2)', () => {
     expect(await legacyToday(app)).toEqual(['a-1']); // 지난번 고른 자리
   });
 
-  it('다른 차에 폰이 연결돼 자리 있는 차가 둘이 되면 차 X의 옛 읽기는 Y 폰 일정이 아니라 기본 자리다', async () => {
+  it('다른 차에 폰이 연결돼 자리 있는 차가 둘이 되면 차 X의 옛 읽기는 Y 폰 일정도 픽스처도 아닌 빈 범위(0건)다 (S2)', async () => {
     const app = makeApp();
     const x = await registerCar(app, 'car-X');
     const ax = await connect(app, x, 'X폰');
@@ -302,7 +328,8 @@ describe('C. 옛 차 앱 호환 읽기의 범위 (S2)', () => {
     const after = await legacyToday(app);
     expect(after).not.toContain('y-secret');
     expect(after).not.toContain('x-1');
-    expect(after).toContain('gwangju-lunch'); // 기본 자리(픽스처)
+    expect(after).toEqual([]); // 읽을 자리를 정할 수 없다: 픽스처(기본 자리)도 남의 일정도 아니다
+    expect(ids(await call(app, 'GET', '/events?date=2026-11-11'))).toEqual([]);
     // 차 토큰이 있으면 그 차 안에서만 본다.
     expect(await legacyToday(app, { token: x.carToken })).toEqual(['x-1']);
     expect(await legacyToday(app, { token: y.carToken })).toEqual(['y-secret']);
@@ -311,16 +338,39 @@ describe('C. 옛 차 앱 호환 읽기의 범위 (S2)', () => {
     expect((await call(app, 'GET', `/schedules/today?driver=${ay.seatId}`, { token: x.carToken })).status).toBe(403);
   });
 
-  it('자리가 없는 차의 토큰은 기본 자리를 보고, 옵션을 끄면 어느 경우도 기본 자리다', async () => {
+  it('자리가 없는 차의 토큰만으로 읽으면 픽스처도 기본 자리의 일정도 아닌 빈 범위이고, 옵션을 끄면 자리 있는 차도 빈 범위다 (N6)', async () => {
     const app = makeApp();
     const lonely = await registerCar(app);
-    expect(await legacyToday(app, { token: lonely.carToken })).toContain('gwangju-lunch');
+    // 식별 없이 PUT한 '주입된 일정'(기본 자리 쓰기)은 자리 없는 차의 토큰 읽기에 보이지 않는다.
+    expect((await putEvents(app, {}, [ev({ id: 'inj-1', title: '주입된 일정' })])).status).toBe(200);
+    expect(await legacyToday(app, { token: lonely.carToken })).toEqual([]);
+    expect(ids(await call(app, 'GET', '/events?date=2026-11-11', { token: lonely.carToken }))).toEqual([]);
+    // 자리가 없는 서버의 식별 없는 읽기는 기본 자리(주입된 일정)다.
+    expect(await legacyToday(app)).toEqual(['inj-1']);
     const off = makeApp({ legacyDriverFallback: false });
     const car = await registerCar(off);
     const a = await connect(off, car, 'A');
     await putEvents(off, { token: a.phoneToken }, [ev({ id: 'a-1' })]);
-    expect(await legacyToday(off)).toContain('gwangju-lunch');
-    expect(await legacyToday(off, { token: car.carToken })).toContain('gwangju-lunch');
+    expect(await legacyToday(off)).toEqual([]);
+    expect(await legacyToday(off, { token: car.carToken })).toEqual([]);
+    expect(ids(await call(off, 'GET', `/schedules/today?driver=${a.seatId}`, { token: car.carToken }))).toEqual(['a-1']); // driver를 보내면 읽는다
+  });
+
+  it('자리 있는 차가 생긴 뒤의 식별 없는 쓰기(기본 자리로 가던 것)는 실제 자리의 읽기에 섞이지 않는다', async () => {
+    const app = makeApp();
+    const car = await registerCar(app);
+    const a = await connect(app, car, 'A');
+    await putEvents(app, { token: a.phoneToken }, [ev({ id: 'real-1' })]);
+    expect((await putEvents(app, {}, [ev({ id: 'inj-1', title: '주입된 일정' })])).status).toBe(200);
+    expect(await legacyToday(app)).toEqual(['real-1']); // 옛 읽기: 그 차의 자리
+    expect(ids(await call(app, 'GET', '/events?date=2026-11-11', { token: a.phoneToken }))).toEqual(['real-1']);
+    expect(await legacyToday(app, { token: car.carToken })).toEqual(['real-1']);
+    // 자리 있는 차가 둘이 돼도 주입된 일정은 어느 읽기에도 보이지 않는다.
+    const car2 = await registerCar(app);
+    await connect(app, car2, 'B');
+    expect(await legacyToday(app)).toEqual([]);
+    expect(await legacyToday(app, { token: car2.carToken })).toEqual([]);
+    expect(await legacyToday(app, { token: car.carToken })).toEqual(['real-1']);
   });
 
   it('폰 바꾸기·두 번째 폰 연결 뒤에도 옛 차 앱 읽기는 픽스처가 아니다(받았고 0건)', async () => {
@@ -459,6 +509,26 @@ describe('F. 남용 방지 (S7)', () => {
     expect(again.body.carToken).not.toBe(idle.carToken);
   });
 
+  it('DELETE /car·마지막 자리 해제 뒤에도 차 토큰은 (그 시점부터) TTL 동안 유효하다 (N3)', async () => {
+    const app = makeApp();
+    // 오래된 차(자리가 있어 지워지지 않았다)가 DELETE /car로 초기화되면 그 시점부터 TTL이 시작한다.
+    const reset = await registerCar(app, 'car-reset');
+    await connect(app, reset, 'A');
+    clockMs += 2 * 60 * 60_000;
+    expect((await call(app, 'DELETE', '/car', { token: reset.carToken })).body).toEqual({ removedSeats: 1 });
+    expect((await call(app, 'POST', '/pair/code', { token: reset.carToken, body: {} })).status).toBe(200); // 같은 토큰으로 다시 코드를 받는다
+    // 마지막 자리가 폰 쪽에서 끊겨도 마찬가지다.
+    const car = await registerCar(app, 'car-last', 'other');
+    const seat = await connect(app, car, 'B');
+    clockMs += 2 * 60 * 60_000;
+    expect((await call(app, 'DELETE', '/pair', { token: seat.phoneToken })).status).toBe(200);
+    expect((await call(app, 'GET', '/drivers', { token: car.carToken })).status).toBe(200);
+    clockMs += CODE_TTL_MS + SEATLESS_CAR_TTL_MS - 1;
+    expect((await call(app, 'GET', '/drivers', { token: car.carToken })).status).toBe(200);
+    clockMs += 1; // 해제한 뒤 TTL이 지나면 자리 없는 오래된 차로 지워진다
+    expect((await call(app, 'GET', '/drivers', { token: car.carToken })).status).toBe(401);
+  });
+
   it('코드를 계속 받는 차는 TTL이 새로 시작해 지워지지 않는다', async () => {
     const app = makeApp();
     const car = await registerCar(app);
@@ -468,16 +538,89 @@ describe('F. 남용 방지 (S7)', () => {
     }
   });
 
-  it('서버 전체 일정 저장 용량 상한을 넘기는 PUT /events는 429 capacity이고, 자기 일정을 바꾸는 것은 자기 크기를 빼고 센다', async () => {
+  it('연결 전 버킷의 일정 예산이 모자라면 오래 쓰지 않은 버킷을 밀어내 자리를 내고, 자기 일정을 바꾸는 것은 자기 크기를 빼고 센다', async () => {
     const big = (n: number) => Array.from({ length: n }, (_, i) => ev({ id: `e${i}`, title: 'x'.repeat(150) }));
-    const app = makeApp({ capacity: { maxTotalEventBytes: 20_000 } });
+    const app = makeApp({ capacity: { maxBucketEventBytes: 20_000 } });
     expect((await putEvents(app, { device: DEV_A }, big(40))).status).toBe(200); // 약 11KB
-    const over = await putEvents(app, { device: DEV_B }, big(40));
-    expect(over).toMatchObject({ status: 429, body: { reason: 'capacity' } });
+    clockMs += 1000;
     expect((await putEvents(app, { device: DEV_A }, big(50))).status).toBe(200); // 같은 기기가 바꾸는 것은 자기 크기를 뺀다
-    expect((await putEvents(app, { device: DEV_B }, big(5))).status).toBe(200); // 작은 것은 들어간다
-    expect((await call(app, 'DELETE', '/events', { device: DEV_A, loopback: true })).status).toBe(200);
-    expect((await putEvents(app, { device: DEV_B }, big(40))).status).toBe(200); // 비우면 자리가 난다
+    clockMs += 1000;
+    // B가 들어가려면 A를 밀어내야 한다: 거절하지 않고 오래 쓰지 않은 A를 밀어낸다.
+    expect((await putEvents(app, { device: DEV_B }, big(40))).status).toBe(200);
+    expect((await call(app, 'GET', '/events', { device: DEV_A })).body.receivedAt).toBeNull();
+    expect((await putEvents(app, { device: DEV_C }, big(5))).status).toBe(200); // 작은 것은 같이 들어간다
+    expect((await call(app, 'GET', '/events', { device: DEV_B })).body.receivedAt).not.toBeNull();
+    // 한 버킷이 혼자 예산을 넘기려 하면 429 capacity(다른 버킷은 밀어내지 않는다).
+    const over = await putEvents(app, { device: DEV_C }, big(200));
+    expect(over).toMatchObject({ status: 429, body: { reason: 'capacity' } });
+    expect((await call(app, 'GET', '/events', { device: DEV_B })).body.receivedAt).not.toBeNull();
+  });
+
+  it('버킷 하나의 일정 크기 상한을 넘기는 PUT /events는 429 capacity이다', async () => {
+    const app = makeApp();
+    const attendees = Array.from({ length: 30 }, (_, i) => `${i}`.padEnd(100, 'a'));
+    const huge = Array.from({ length: 120 }, (_, i) => ev({ id: `h${i}`, title: 'x'.repeat(190), notes: 'n'.repeat(2000), attendees }));
+    expect(JSON.stringify(huge).length).toBeGreaterThan(MAX_EVENT_BYTES_PER_BUCKET);
+    expect(JSON.stringify({ events: huge }).length).toBeLessThan(MAX_EVENTS_BODY_BYTES);
+    expect(await putEvents(app, { device: DEV_A }, huge)).toMatchObject({ status: 429, body: { reason: 'capacity' } });
+    // 연결된 자리는 이 상한이 아니라 자리 예산을 본다.
+    const car = await registerCar(app);
+    const a = await connect(app, car, 'A');
+    expect((await putEvents(app, { token: a.phoneToken }, huge)).status).toBe(200);
+  });
+
+  it('버킷이 가득 차도 연결된 자리의 저장은 영향받지 않는다 (예산 분리)', async () => {
+    const big = (n: number, tag: string) => Array.from({ length: n }, (_, i) => ev({ id: `${tag}${i}`, title: 'x'.repeat(150) }));
+    const app = makeApp({ capacity: { maxBucketEventBytes: 12_000, maxSeatEventBytes: 40_000 } });
+    expect((await putEvents(app, { device: DEV_A }, big(40, 'a'))).status).toBe(200);
+    const car = await registerCar(app);
+    const seat = await connect(app, car, 'A');
+    expect((await putEvents(app, { token: seat.phoneToken }, big(80, 's'))).status).toBe(200); // 버킷 예산(12KB)보다 크다
+    // 자리 예산이 차면 연결된 자리의 PUT은 429이지만 버킷은 그 영향을 받지 않는다(밀어내지도 않는다).
+    expect(await putEvents(app, { token: seat.phoneToken }, big(200, 's'))).toMatchObject({ status: 429, body: { reason: 'capacity' } });
+    expect((await call(app, 'GET', '/events', { device: DEV_A })).body.receivedAt).not.toBeNull();
+  });
+
+  it('잘못된 본문(검증 실패·너무 큼·형식 오류)은 버킷을 만들지 않는다 (N1)', async () => {
+    const app = makeApp({ capacity: { maxBuckets: 3 } });
+    await putEvents(app, { device: DEV_A }, [ev({ id: 'keep' })]);
+    for (let i = 0; i < 500; i++) {
+      const device = `bad${i}`.padEnd(32, 'z');
+      expect((await call(app, 'PUT', '/calendars/selection', { device, body: { bad: 1 }, ip: 'one-ip' })).status).toBe(400);
+      expect((await call(app, 'PUT', '/events', { device, body: { events: 'x' }, ip: 'one-ip' })).status).toBe(400);
+    }
+    expect((await call(app, 'PUT', '/places/favorites/home', { device: DEV_B, body: { placeId: 'nope' } })).status).toBe(400);
+    expect((await call(app, 'PUT', '/schedules/none/place', { device: DEV_B, body: { placeId: 'nope' } })).status).toBe(400);
+    expect((await call(app, 'PUT', '/schedules/none/care', { device: DEV_B, body: { care: 'x' } })).status).toBe(404); // 없는 일정은 버킷을 만들지 않는다
+    // 버킷은 A 하나뿐이라 새 기기 둘이 아직 자리를 밀어내지 않고 들어간다.
+    expect((await putEvents(app, { device: DEV_B }, [ev({ id: 'b' })])).status).toBe(200);
+    expect((await putEvents(app, { device: DEV_C }, [ev({ id: 'c' })])).status).toBe(200);
+    expect(ids(await call(app, 'GET', '/events?date=2026-11-11', { device: DEV_A }))).toEqual(['keep']);
+  });
+
+  it('한 요청 주소가 짧은 시간에 만들 수 있는 버킷 수는 제한되고, 한 주소의 대량 쓰기가 다른 주소 새 폰의 쓰기를 막지 못한다 (N2)', async () => {
+    const app = makeApp({ capacity: { maxBuckets: 5 } });
+    for (let i = 0; i < MAX_BUCKET_CREATES_PER_SOURCE; i++) {
+      expect((await putEvents(app, { device: `many${i}`.padEnd(32, 'z'), ip: '9.9.9.9' }, [ev({ id: `m${i}` })])).status).toBe(200);
+    }
+    const limited = await putEvents(app, { device: 'many-extra'.padEnd(32, 'z'), ip: '9.9.9.9' }, [ev()]);
+    expect(limited).toMatchObject({ status: 429, body: { reason: 'rate-limited' } });
+    // 이미 가진 버킷에 쓰는 것은 속도 제한을 받지 않는다(만드는 것만 센다).
+    expect((await putEvents(app, { device: 'many9'.padEnd(32, 'z'), ip: '9.9.9.9' }, [ev({ id: 'again' })])).status).toBe(200);
+    // 다른 주소의 새 폰은 버킷이 가득 차 있어도(밀어내고) 쓸 수 있다.
+    expect((await putEvents(app, { device: DEV_B, ip: '8.8.8.8' }, [ev({ id: 'real-b' })])).status).toBe(200);
+    expect(ids(await call(app, 'GET', '/events?date=2026-11-11', { device: DEV_B }))).toEqual(['real-b']);
+    // 창이 지나면 그 주소도 다시 만든다.
+    clockMs += BUCKET_CREATE_WINDOW_MS;
+    expect((await putEvents(app, { device: 'many-extra'.padEnd(32, 'z'), ip: '9.9.9.9' }, [ev()])).status).toBe(200);
+  });
+
+  it('DELETE /events(같은 기기)는 버킷을 만들지 않는다', async () => {
+    const app = makeApp({ capacity: { maxBuckets: 1 } });
+    for (let i = 0; i < 20; i++) expect((await call(app, 'DELETE', '/events', { device: `del${i}`.padEnd(32, 'z'), loopback: true })).status).toBe(200);
+    await putEvents(app, { device: DEV_A }, [ev({ id: 'keep' })]);
+    expect((await call(app, 'DELETE', '/events', { device: DEV_B, loopback: true })).status).toBe(200);
+    expect(ids(await call(app, 'GET', '/events?date=2026-11-11', { device: DEV_A }))).toEqual(['keep']);
   });
 });
 
