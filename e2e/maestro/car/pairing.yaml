@@ -1,0 +1,39 @@
+# 휴대폰 연결 E2E(PT 장면: 폰에서 넣고 → 차 화면 QR로 연결 → 바로 탑승 브리핑). 서버가 떠 있고 debug 앱이 설치된 에뮬레이터에서 돈다(scripts/e2e-car.sh).
+# paired=false로 연결을 풀면(서버도) 차가 새 코드를 받아 연결 카드를 띄운다. 폰 대신 화면의 번호를 읽어 서버에 보내면(claim-pairing.js)
+# 차가 2초 안에 연결을 알아채 카드를 접고 일정을 다시 받아 첫 탑승 브리핑을 한다.
+#   SERVER_URL: 호스트에서 본 서버 주소(필수, -e로 넣는다). flow의 env에 기본값을 두면 runScript가 -e 값 대신 그 기본값을 받는다.
+appId: com.chagok.car
+name: 휴대폰 연결
+env:
+  SHOT_DIR: e2e/output/car
+---
+- launchApp
+
+# 1. 연결 전: 탑승해도 브리핑 없이 연결 카드(QR·번호)만
+- openLink: chagok-debug://signal?paired=false&now=2026-11-06T00:20:00Z&trip=none&route=ok&listen=off&gear=P&enter=true
+- extendedWaitUntil:
+    visible: '휴대폰과 연결해 주세요.'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: '.*pairing_code'
+      text: '[0-9]{3} [0-9]{3}'
+    timeout: 15000
+- assertVisible: '연결 번호'
+- assertNotVisible: '.*광주 직관 날이에요!.*'
+- takeScreenshot: ${SHOT_DIR}/pairing-01-qr
+
+# 2. 폰이 번호를 보낸다(여기서는 서버에 직접) → 카드가 접히고 첫 탑승 브리핑
+- copyTextFrom:
+    id: '.*pairing_code'
+- runScript:
+    file: claim-pairing.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      CODE: ${maestro.copiedText}
+- extendedWaitUntil:
+    visible: '.*광주 직관 날이에요!.*'
+    timeout: 15000
+- assertNotVisible: '휴대폰과 연결해 주세요.'
+- assertVisible: '응, 출발'
+- takeScreenshot: ${SHOT_DIR}/pairing-02-briefing

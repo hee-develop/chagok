@@ -11,7 +11,7 @@ env:
 - launchApp
 
 # 1. 09:20 첫 탑승: 육전집 점심(13:00) 출발 제안 → 수락하면 길안내
-- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&enter=true
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
     timeout: 20000

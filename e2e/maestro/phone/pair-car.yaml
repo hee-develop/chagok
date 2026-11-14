@@ -1,0 +1,54 @@
+# 4단계 차 연결. scripts/e2e-phone.sh 가 아래 env를 넣어 실행한다.
+#   APP_ID      Expo Go 번들 ID (Android host.exp.exponent)
+#   EXPO_URL    4단계 화면으로 바로 들어가는 Metro 주소 (exp://.../--/setup/pair-car)
+#   SERVER_URL  호스트에서 본 서버 주소
+# 에뮬레이터 카메라로는 차 화면 QR을 찍을 수 없어, 차 대신 서버에서 코드를 받아(issue-pairing-code.js) 번호로 넣는다.
+appId: ${APP_ID}
+env:
+  CAR_ID: e2e-phone-car
+---
+- launchApp:
+    clearState: true
+- openLink: ${EXPO_URL}
+
+- runFlow:
+    file: expo-dev-menu.yaml
+    env:
+      SCREEN_TITLE: '차와 연결해요'
+- assertVisible: '4 / 4'
+- assertVisible: 'QR 찍기'
+- takeScreenshot: 01-pair-car
+
+# 틀린 번호는 새 번호를 넣으라고 한다(서버 404).
+- tapOn:
+    id: 'pair-code-input'
+- inputText: '000000'
+- hideKeyboard
+- tapOn: '연결하기'
+- extendedWaitUntil:
+    visible: '번호가 맞지 않거나 시간이 지났어요.*'
+    timeout: 15000
+- takeScreenshot: 02-invalid
+
+# 차가 받은 번호를 넣으면 연결된다.
+- runScript:
+    file: issue-pairing-code.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      CAR_ID: ${CAR_ID}
+- tapOn:
+    id: 'pair-code-input'
+- eraseText: 10
+- inputText: ${output.code}
+- hideKeyboard
+- tapOn: '연결하기'
+- extendedWaitUntil:
+    visible: '✓ 차와 연결됐어요'
+    timeout: 15000
+- assertVisible: '완료'
+- takeScreenshot: 03-paired
+- runScript:
+    file: assert-paired.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      CAR_ID: ${CAR_ID}

@@ -3,6 +3,9 @@ package com.chagok.car
 import androidx.test.platform.app.InstrumentationRegistry
 import com.chagok.car.domain.Place
 import com.chagok.car.flow.Event
+import com.chagok.car.flow.PairingClient
+import com.chagok.car.flow.PairingCode
+import com.chagok.car.flow.PairingStatus
 import com.chagok.car.flow.ScheduleFetcher
 import com.chagok.car.runtime.Adapters
 import com.chagok.car.runtime.DemoClock
@@ -82,6 +85,23 @@ class FakeSpeaker(private val onSpeaking: (Boolean) -> Unit, private val onDucki
     }
 }
 
+/** 연결 서버 대신. 코드는 늘 123456이고, 테스트가 [paired]를 true로 바꾸면 다음 확인(2초 간격)에서 연결된다. */
+class FakePairingClient : PairingClient {
+    @Volatile var paired = false
+
+    override fun issue(carId: String) = PairingCode(CODE, "chagok://pair?code=$CODE", Instant.now().plusSeconds(600))
+
+    override fun status(carId: String) = PairingStatus(paired, codeActive = true)
+
+    override fun unpair(carId: String) {
+        paired = false
+    }
+
+    companion object {
+        const val CODE = "123456"
+    }
+}
+
 class E2eApp : ChagokApp() {
     // 모든 권한을 받은 것으로 보고 권한 설명 카드를 건너뛴다
     override val runtimePermissions: List<String> = emptyList()
@@ -96,6 +116,7 @@ class E2eApp : ChagokApp() {
                 if (failFetch) throw java.io.IOException("E2E: 서버에 연결하지 못함")
                 FixtureResponses.response(if (emptyDay) EMPTY_DAY else fixtureJson(), at, calendarsJson(), JSONArray(favoritesJson))
             },
+            pairingClient = fakePairing,
             adapters = { post, onSpeaking, onDucking, onIgnitionSupport ->
                 speaker = FakeSpeaker(onSpeaking, onDucking)
                 navigator = FakeNavigator(post)
@@ -116,6 +137,8 @@ class E2eApp : ChagokApp() {
 
         lateinit var fakeNavigator: FakeNavigator
             private set
+
+        val fakePairing = FakePairingClient()
 
         /** 서버 favorites 자리에 넣을 자주 가는 곳(JSON 배열). 다음 일정 받기([SessionHost.resetDemo])부터 쓴다. 기본은 빈 목록 */
         @Volatile var favoritesJson: String = "[]"

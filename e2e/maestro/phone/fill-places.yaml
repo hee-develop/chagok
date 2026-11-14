@@ -76,7 +76,7 @@ appId: ${APP_ID}
       STAGE: changed
 - tapOn: '다음'
 - extendedWaitUntil:
-    visible: '말 거는 방법'
+    visible: '차와 연결해요'
     timeout: 15000
 - assertVisible: '4 / 4'
 - takeScreenshot: 07-next
@@ -91,5 +91,5 @@ appId: ${APP_ID}
 - takeScreenshot: 08-restored
 - tapOn: '나중에 할게요'
 - extendedWaitUntil:
-    visible: '말 거는 방법'
+    visible: '차와 연결해요'
     timeout: 15000

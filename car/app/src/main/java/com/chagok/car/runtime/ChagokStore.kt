@@ -7,8 +7,9 @@ import com.chagok.car.flow.StoredCopy
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.util.UUID
 
-/** 세션 상태(JSON, [SnapshotCodec]), 데모 기준 시각, 마지막으로 받은 일정 응답을 SharedPreferences에 둔다. */
+/** 세션 상태(JSON, [SnapshotCodec]), 데모 기준 시각, 마지막으로 받은 일정 응답, 익명 차 id·휴대폰 연결 여부를 SharedPreferences에 둔다. */
 class ChagokStore(context: Context) : ScheduleCopyStore {
     private val prefs = context.getSharedPreferences("chagok_state", Context.MODE_PRIVATE)
 
@@ -39,11 +40,26 @@ class ChagokStore(context: Context) : ScheduleCopyStore {
         prefs.edit().putString(KEY_COPY_BODY, copy.body).putString(KEY_COPY_DATE, copy.date.toString()).apply()
     }
 
+    /** 설치 때 한 번 만드는 익명 차 id(UUID). 휴대폰과 연결할 때 서버에 보낸다. 사람·차량 식별 정보는 담지 않는다. */
+    @Synchronized
+    fun carId(): String = prefs.getString(KEY_CAR_ID, null) ?: UUID.randomUUID().toString().also {
+        prefs.edit().putString(KEY_CAR_ID, it).apply()
+    }
+
+    /** 휴대폰과 연결돼 있는가. 한 번 연결되면 데모 초기화(디버그)로 풀 때까지 그대로다. */
+    var paired: Boolean
+        get() = prefs.getBoolean(KEY_PAIRED, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_PAIRED, value).apply()
+        }
+
     private companion object {
         const val NONE = Long.MIN_VALUE
         const val KEY_SNAPSHOT = "snapshot"
         const val KEY_ANCHOR = "demoAnchor"
         const val KEY_COPY_BODY = "scheduleCopyBody"
         const val KEY_COPY_DATE = "scheduleCopyDate"
+        const val KEY_CAR_ID = "carId"
+        const val KEY_PAIRED = "paired"
     }
 }

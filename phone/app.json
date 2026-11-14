@@ -30,6 +30,14 @@
         {
           "calendarPermission": "고른 캘린더의 오늘·내일 일정을 읽어 차에 보내기 위해 캘린더 접근이 필요해요."
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "차 화면의 QR을 찍어 차와 연결하기 위해 카메라가 필요해요.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
       ]
     ],
     "scheme": "chagok"

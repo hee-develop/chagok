@@ -70,6 +70,8 @@ dependencies {
     implementation("ai.pleos.playground:FusedLocation:1.1.3")
     implementation("ai.pleos.playground:TextToSpeech:3.3.1")
     implementation("ai.pleos.playground:SpeechToText:3.3.1")
+    // 차–폰 연결 카드의 QR 그림(인코더만, 카메라·스캔 없음)
+    implementation("com.google.zxing:core:3.5.3")
 
     testImplementation("junit:junit:4.13.2")
     // JVM 단위 테스트(SnapshotCodec)는 android.jar의 org.json 스텁 대신 이 구현을 쓴다

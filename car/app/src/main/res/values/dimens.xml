@@ -68,4 +68,7 @@
     <!-- 기준 창 -->
     <dimen name="ref_window_w">800dp</dimen>
     <dimen name="ref_window_h">640dp</dimen>
+    <!-- 휴대폰 연결 카드의 QR 한 변(흰 바탕 포함). 폰 카메라가 1m 안팎에서 찍을 수 있는 크기 -->
+    <dimen name="pairing_qr">200dp</dimen>
+    <dimen name="pairing_qr_pad">10dp</dimen>
 </resources>
