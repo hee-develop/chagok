@@ -1,0 +1,154 @@
+# 위치 도착(시간 창)과 집 하차 E2E(정책서 3·4·6·9장, docs/home-exit.md). 서버가 떠 있고 debug 앱이 설치된 에뮬레이터에서 돈다
+# (scripts/e2e-car.sh가 서버·설치·위치 권한 허용을 맡는다. 집은 서버 자주 가는 곳 home = mock-home-apt '예시 아파트 101동' 35.1743,126.9121).
+#   집 등록은 flow 안에서 한다: 연결 자리가 있는 서버는 식별 없는 읽기(차 앱)를 그 자리로 보내므로, 식별 없는 PUT(기본 자리)로 등록한 집은 차에 보이지 않는다.
+#   그래서 연결을 풀고 차 화면의 번호를 폰 대신 서버에 보내 새 자리를 만든 뒤(claim-pairing.js, 폰 토큰은 output에 남음) 그 토큰으로 집을 등록하고(set-home.js)
+#   끝나면 같은 토큰으로 지운다(뒤 flow가 집이 등록된 채 돌지 않게). 서버는 FIXTURE_SEATS=1이라 일정은 픽스처다.
+#   SERVER_URL: 호스트에서 본 서버 주소(필수, -e로 넣는다. pairing.yaml과 같다).
+# 위치는 debug 신호 loc=<위도>,<경도>로 결정적으로 넣는다. loc을 넣는 동안은 위치 어댑터가 읽은 실제 위치(에뮬레이터 GPS)를 세션에 넣지 않는다.
+#   위치 도착과 집 하차는 '달린 뒤 P단'에서만 판정하고, 이번 주행(D) 시작 뒤에 측위한 위치(5분 이내)만 쓴다.
+#   그래서 gear=D → loc=<위치> → gear=P를 각각 따로 넣는다(같은 주소에 쓰면 gear가 loc보다 먼저 처리된다).
+#   위치 나이는 데모 시계로 센다. 시계를 앞으로 보내는 advance는 loc보다 앞에 둔다.
+#   일정 장소 도착은 일정 '시작 60분 전 ~ 종료' 창 안에서만 인정한다(육전집 점심 13:00 → 12:00~14:00, 그래서 advance=170으로 12:10에 둔다).
+#   집 하차는 집 반경 밖 위치를 한 번 이상 받은 뒤 돌아왔을 때만 한다(마지막 집 P단·초기화 뒤): 집 앞 loc 전에 집 밖 loc(광주송정역 35.1378,126.7912)을 넣는다.
+#   '말 없음' 확인은 카드가 뜰 시간을 준 뒤(waitForAnimationToEnd) assertNotVisible 한다.
+#   exitcard=12: 하차 카드가 정책상 5초 뒤 닫혀 확인에 빠듯해 이 flow에서만 12초 떠 있게 한다(Rules.EXIT_CARD·release는 그대로, 5초는 단위 테스트가 고정).
+# 장면 시각 09:20 KST(now=2026-11-06T00:20:00Z). 일정은 픽스처(gwangju-day): 육전집 점심 13:00(메모 '유니폼·응원봉·티켓'), 콩물 픽업 21:00(메모 없음).
+# 21:10은 같은 기준 시각에서 advance=710분이다(일정은 기준 시각(09:20) 기준으로 받고 시계만 앞으로 보낸다).
+# 스크린샷은 ${SHOT_DIR} 아래에 남긴다. 기기 시간대는 Asia/Seoul 이어야 한다(스크립트가 맞춘다).
+appId: com.chagok.car
+name: 위치 도착과 집 하차
+env:
+  SHOT_DIR: e2e/output/car
+---
+- launchApp
+
+# 0. 집 등록: 연결을 풀어(서버의 자리도 지움) 연결 카드를 띄우고, 화면의 번호를 서버에 보내 새 자리를 만든 뒤 그 자리에 집을 넣는다.
+- openLink: chagok-debug://signal?paired=false&now=2026-11-06T00:20:00Z&trip=none&route=ok&listen=off&gear=P
+- extendedWaitUntil:
+    visible:
+      id: '.*pairing_code'
+      text: '[0-9]{3} [0-9]{3}'
+    timeout: 15000
+- copyTextFrom:
+    id: '.*pairing_code'
+- runScript:
+    file: claim-pairing.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      CODE: ${maestro.copiedText}
+- runScript:
+    file: set-home.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      PHONE_TOKEN: ${output.phoneToken}
+      PLACE_ID: mock-home-apt
+- extendedWaitUntil:
+    visible: '.*광주 직관 날이에요!.*'
+    timeout: 15000
+
+# 1. 초기화(12:10 = 09:20 + 170분). 신호 화면이 '앱 진입'으로 잡혀 브리핑이 뜰 수 있어도 달리면 접힌다
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&advance=170&navi=real&listen=off&trip=12000&route=ok&exitcard=12&gear=P
+
+# 2. 위치 도착(12:10, 점심 시간 창 12:00~14:00 안): 육전집(35.1595,126.8526) 안에서 달린 뒤 P단 → 내비 도착 없이 도착으로 기록되고 일정 장소 하차 카드(메모 '유니폼·응원봉·티켓')
+- openLink: chagok-debug://signal?gear=D
+- openLink: chagok-debug://signal?loc=35.1595,126.8526
+- openLink: chagok-debug://signal?gear=P
+- extendedWaitUntil:
+    visible: ".*유니폼·응원봉·티켓 챙기세요!.*"
+    timeout: 8000
+- assertVisible: "도착.*내리기 전"
+- assertVisible: "챙겼어요"
+- takeScreenshot: ${SHOT_DIR}/home-01-location-arrival-exit-card
+- tapOn: "챙겼어요"
+- extendedWaitUntil:
+    notVisible: "챙겼어요"
+    timeout: 5000
+
+# 3. 시간 창 밖: KIA 직관(17:00)은 12:10에 시작 60분 전(16:00)이 아니라서 경기장(35.1681,126.8888) 앞 P단도 도착이 아니다(말 없음)
+- openLink: chagok-debug://signal?gear=D
+- openLink: chagok-debug://signal?loc=35.1690,126.8888
+- openLink: chagok-debug://signal?gear=P
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertNotVisible: "도착.*내리기 전"
+- assertNotVisible: ".*챙기세요!.*"
+
+# 4. 일정도 집도 아닌 곳(광주송정역 35.1378,126.7912 근처)의 P단은 말 없음
+- openLink: chagok-debug://signal?gear=D
+- openLink: chagok-debug://signal?loc=35.1378,126.7912
+- openLink: chagok-debug://signal?gear=P
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertNotVisible: "도착.*내리기 전"
+- assertNotVisible: ".*수고했어요.*"
+
+# 5. 집을 떠나지 않고(집 밖 위치 없이) 집 P단은 말 없음: 초기화 직후 바로 집 위치로 P단
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&gear=P
+- openLink: chagok-debug://signal?gear=D
+- openLink: chagok-debug://signal?loc=35.1743,126.9121
+- openLink: chagok-debug://signal?gear=P
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertNotVisible: ".*수고했어요.*"
+- assertNotVisible: ".*챙기세요!.*"
+
+# 6. 집 하차(챙길 물건 없음): 초기화한 09:20에는 콩물 픽업(21:00) 전이라 물건이 없어 '오늘도 수고했어요.'(버튼 없음). 12초 뒤 닫힌다
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&gear=P
+- openLink: chagok-debug://signal?gear=D
+- openLink: chagok-debug://signal?loc=35.1378,126.7912
+- openLink: chagok-debug://signal?loc=35.1743,126.9121
+- openLink: chagok-debug://signal?gear=P
+- extendedWaitUntil:
+    visible: ".*오늘도 수고했어요.*"
+    timeout: 8000
+- assertVisible: "도착.*내리기 전"
+- assertNotVisible: "챙겼어요"
+- takeScreenshot: ${SHOT_DIR}/home-02-home-greeting
+- extendedWaitUntil:
+    notVisible: ".*오늘도 수고했어요.*"
+    timeout: 20000
+
+# 7. 같은 날 집에 다시 들러도(이미 인사함, 새 물건 없음) 말 없음
+- openLink: chagok-debug://signal?gear=D
+- openLink: chagok-debug://signal?loc=35.1378,126.7912
+- openLink: chagok-debug://signal?loc=35.1743,126.9121
+- openLink: chagok-debug://signal?gear=P
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertNotVisible: ".*수고했어요.*"
+- assertNotVisible: ".*챙기세요!.*"
+
+# 8. 집 하차(픽업 물건): 21:10에 '콩물 픽업'(21:00 시작, 메모 없음)이 지났으니 '콩물 챙기세요!' + [챙겼어요]. 초기화로 오늘 기록을 다시 센다
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&advance=710&gear=P
+- openLink: chagok-debug://signal?gear=D
+- openLink: chagok-debug://signal?loc=35.1378,126.7912
+- openLink: chagok-debug://signal?loc=35.1743,126.9121
+- openLink: chagok-debug://signal?gear=P
+- extendedWaitUntil:
+    visible: ".*콩물 챙기세요!.*"
+    timeout: 8000
+- assertVisible: "도착.*내리기 전"
+- assertVisible: "챙겼어요"
+- assertNotVisible: ".*수고했어요.*"
+- takeScreenshot: ${SHOT_DIR}/home-03-home-pickup-exit-card
+- extendedWaitUntil:
+    notVisible: "챙겼어요"
+    timeout: 20000
+
+# 9. 같은 물건은 하루에 한 번: 집에 다시 와도 '콩물 챙기세요!'는 되풀이하지 않는다
+- openLink: chagok-debug://signal?gear=D
+- openLink: chagok-debug://signal?loc=35.1378,126.7912
+- openLink: chagok-debug://signal?loc=35.1743,126.9121
+- openLink: chagok-debug://signal?gear=P
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertNotVisible: ".*콩물 챙기세요!.*"
+
+# 10. 정리: 하차 카드 시간과 위치 주입을 실제 값으로 되돌려 이어지는 flow에 영향이 없게 한다
+- openLink: chagok-debug://signal?exitcard=real&loc=real
+- runScript:
+    file: set-home.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      PHONE_TOKEN: ${output.phoneToken}
+      PLACE_ID: none

@@ -502,6 +502,9 @@ class DriveSessionExitCardTest {
 
     @Test
     fun 먼저_기다리던_대기를_뒤_도착이_덮어쓰지_않는다() {
+        // 점심 약속(b)이 P단 시각의 위치 도착 시간 창(시작 60분 전부터)에 들도록 70분에 시작한다.
+        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, "계약서 2부"), schedule("b", "점심 약속", 70, cityHall))
+        newSession()
         driveAndArrive()
         session.handle(Event.RestrictionChanged(true))
         assertTrue(park().has<Effect.RequestLocation>())

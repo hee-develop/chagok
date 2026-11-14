@@ -484,4 +484,63 @@ class PhrasesTest {
         assertEquals("가나다라마바사아자차$family…", Phrases.shortTitle("가나다라마바사아자차${family}타파하"))
         assertEquals(family.repeat(12), Phrases.shortTitle(family.repeat(12)))
     }
+
+    // ---- 집 하차 카드 ----
+
+    private fun pickup(title: String, memo: String? = null, care: String? = null) =
+        Schedule("p-$title", title, at("21:00"), at("22:00"), place = OFFICE, memo = memo, care = care)
+            .let { PickupItem(HomePickup.itemName(title)!!, it) }
+
+    @Test fun `집 하차 카드 물건이 있으면 챙기세요 문장과 채비 타일과 한 줄 메모를 둔다`() {
+        val card = Phrases.homeExitCard(listOf(pickup("콩물 픽업", memo = "현금")))
+        assertEquals("도착 · 내리기 전", card.status)
+        assertEquals("콩물 챙기세요!", card.voice)
+        assertEquals(listOf<TileView>(TileView.Care(listOf("콩물"))), card.tiles)
+        assertEquals("‘콩물 픽업’ 일정 메모: 현금", card.footnote)
+        assertEquals("챙겼어요", card.primary)
+        assertNull(card.secondary)
+        assertTrue(!card.alert)
+        assertTrue(!card.fixedHeight)
+        assertEquals(Rules.EXIT_CARD, card.autoDismiss)
+        assertEquals(listOf("5초 뒤 자동으로 닫혀요"), card.hints)
+    }
+
+    @Test fun `집 하차 카드 물건이 없으면 인사만 하고 버튼이 없다`() {
+        val card = Phrases.homeExitCard(emptyList())
+        assertEquals("오늘도 수고했어요.", card.voice)
+        assertTrue(card.alert)
+        assertNull(card.primary)
+        assertTrue(card.tiles.isEmpty())
+        assertNull(card.footnote)
+        assertEquals("오늘도 수고했어요.", Phrases.homeExitSpoken(emptyList()))
+    }
+
+    @Test fun `집 하차 카드 물건은 같은 이름을 합치고 세 개까지만 올리며 제목은 12자로 줄인다`() {
+        val items = listOf("콩물 픽업", "콩물 수령", "우유 사기", "빵 찾기", "책 수령").map { pickup(it) }
+        assertEquals("콩물·우유·빵 챙기세요!", Phrases.homeExitCard(items).voice)
+        val long = pickup("아주아주아주아주긴물건이름이에요 픽업")
+        assertEquals("아주아주아주아주긴물건…", Phrases.homeExitCard(listOf(long)).voice.removeSuffix(" 챙기세요!"))
+    }
+
+    @Test fun `집 하차 카드 한 줄은 앱 채비가 있으면 메모보다 채비를 먼저 읽고 문구는 채비라고 한다`() {
+        val card = Phrases.homeExitCard(listOf(pickup("콩물 픽업", memo = "현금", care = "보냉백")))
+        assertEquals("‘콩물 픽업’ 일정 채비: 보냉백", card.footnote)
+    }
+
+    @Test fun `집 하차 카드 한 줄은 물건 순서대로 처음 한 줄이 있는 일정의 것이고 길면 두지 않는다`() {
+        val items = listOf(
+            pickup("우유 사기", memo = "아주 길어서 한 줄로 읽을 수 없는 메모가 서른 글자를 훌쩍 넘어갑니다 정말로"),
+            pickup("콩물 픽업", memo = "현금"),
+        )
+        assertEquals("‘콩물 픽업’ 일정 메모: 현금", Phrases.homeExitCard(items).footnote)
+        assertNull(Phrases.homeExitCard(items.take(1)).footnote)
+    }
+
+    @Test fun `집 하차 카드 말은 큰 문구이고 30자를 넘으면 챙길 물건이 있다고만 한다`() {
+        assertEquals("콩물 챙기세요!", Phrases.homeExitSpoken(listOf(pickup("콩물 픽업"))))
+        val long = listOf("아주아주아주긴물건이름하나 픽업", "아주아주아주긴물건이름둘 수령", "아주아주아주긴물건이름셋 사기").map { pickup(it) }
+        assertEquals("챙길 물건이 있어요.", Phrases.homeExitSpoken(long))
+        // 화면의 큰 문구와 타일은 그대로다.
+        assertEquals(3, (Phrases.homeExitCard(long).tiles.single() as TileView.Care).items.size)
+    }
 }

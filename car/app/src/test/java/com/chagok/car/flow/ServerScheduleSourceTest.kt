@@ -8,6 +8,7 @@ import com.chagok.car.domain.LatLng
 import com.chagok.car.domain.Place
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -37,6 +38,10 @@ class ServerScheduleSourceTest {
         override fun loadCopy() = copy
         override fun saveCopy(copy: StoredCopy) {
             this.copy = copy
+        }
+
+        override fun clearCopy() {
+            copy = null
         }
     }
 
@@ -265,5 +270,105 @@ class ServerScheduleSourceTest {
         val source = source({ error("서버 꺼짐") })
         source.refresh {}
         assertEquals(emptyList<Favorite>(), source.snapshot().favorites)
+    }
+
+    @Test fun `연결이 풀려 지우면 일정과 집 좌표와 저장된 사본이 모두 사라지고 다시 받기 전에는 빈 NONE이다`() {
+        val copies = MemoryCopies()
+        val ok = source({ at -> FixtureResponses.response(fixture, at, favorites = favoritesJson) }, copies)
+        ok.refresh {}
+        assertEquals(listOf(home), ok.snapshot().favorites)
+        assertTrue(ok.snapshot().schedules.isNotEmpty())
+        assertTrue(copies.copy != null)
+
+        ok.clear()
+        val cleared = ok.snapshot()
+        assertEquals(ScheduleOrigin.NONE, cleared.origin)
+        assertEquals(emptyList<Any>(), cleared.schedules)
+        assertEquals(emptyList<Favorite>(), cleared.favorites)
+        assertNull(copies.copy)
+
+        // 서버를 못 받아도 지운 사본·메모리 캐시로 되살아나지 않는다(집이 없다).
+        val failing = source({ error("서버 꺼짐") }, copies)
+        failing.refresh {}
+        assertEquals(ScheduleOrigin.NONE, failing.snapshot().origin)
+        ok.refresh {}
+        assertEquals(listOf(home), ok.snapshot().favorites)
+    }
+
+    @Test fun `받는 중에 지우면(clear) 그 받기의 응답은 캐시도 사본도 되살리지 못하고 받는 중도 아니다`() {
+        // 응답이 오기 전에 연결이 풀렸다: allowed는 아직 true인 순간(해제 직후 요청이 이미 나간 경우)이라 응답이 파싱까지 성공해도 쓰면 안 된다.
+        val copies = MemoryCopies()
+        lateinit var src: ServerScheduleSource
+        var done = false
+        src = source({ at ->
+            val body = FixtureResponses.response(fixture, at, favorites = favoritesJson)
+            src.clear() // 요청이 나간 뒤, 응답이 오기 전에 해제
+            body
+        }, copies)
+        src.refresh { done = true }
+        assertEquals(ScheduleOrigin.NONE, src.snapshot().origin)
+        assertEquals(emptyList<Any>(), src.snapshot().schedules)
+        assertEquals(emptyList<Favorite>(), src.snapshot().favorites)
+        assertNull(copies.copy)
+        // 마지막 세대가 아니라 완료 콜백은 오지 않지만 받는 중 표시는 꺼져 있다(세션은 Unpaired에서 받는 중을 거둔다).
+        assertFalse(done)
+        assertFalse(src.refreshing)
+    }
+
+    // ---- 연결 전에는 받지 않는다 ----
+
+    private fun gated(fetcher: ScheduleFetcher, copies: MemoryCopies, allowed: () -> Boolean) =
+        ServerScheduleSource(fetcher, { anchor }, copies, { seoul }, Logger.None, sameThread, allowed)
+
+    @Test fun `받아도 되지 않으면 서버를 부르지 않고 NONE으로 끝내며 완료는 알린다`() {
+        var asked = 0
+        val copies = MemoryCopies()
+        val source = gated({ asked++; FixtureResponses.response(fixture, anchor) }, copies) { false }
+        var done = false
+        source.refresh { done = true }
+        assertTrue(done)
+        assertEquals(0, asked)
+        assertEquals(ScheduleOrigin.NONE, source.snapshot().origin)
+        assertEquals(emptyList<Any>(), source.snapshot().schedules)
+        assertEquals(emptyList<Favorite>(), source.snapshot().favorites)
+        assertNull(copies.copy)
+    }
+
+    @Test fun `연결이 풀려 받아도 되지 않게 되면 이미 받은 것을 지우고 다시 받아도 집이 되살아나지 않는다`() {
+        var allowed = true
+        val copies = MemoryCopies()
+        val source = gated({ at -> FixtureResponses.response(fixture, at, favorites = favoritesJson) }, copies) { allowed }
+        source.refresh {}
+        assertEquals(listOf(home), source.snapshot().favorites)
+        assertTrue(copies.copy != null)
+
+        allowed = false
+        source.clear()
+        // 풀린 뒤에 앱이 앞으로 와서 다시 받으려 해도(서버는 여전히 집을 가지고 있다) 받지 않는다.
+        source.refresh {}
+        assertEquals(ScheduleOrigin.NONE, source.snapshot().origin)
+        assertEquals(emptyList<Favorite>(), source.snapshot().favorites)
+        assertNull(copies.copy)
+
+        // 다시 연결되면 받는다.
+        allowed = true
+        source.refresh {}
+        assertEquals(listOf(home), source.snapshot().favorites)
+    }
+
+    @Test fun `받는 도중에 연결이 풀리면 그 응답은 쓰지도 저장하지도 않는다`() {
+        var allowed = true
+        val copies = MemoryCopies()
+        val source = gated({ at ->
+            val body = FixtureResponses.response(fixture, at)
+            allowed = false // 응답이 오기 전에 폰에서 연결을 풀었다
+            body
+        }, copies) { allowed }
+        var done = false
+        source.refresh { done = true }
+        assertTrue(done)
+        assertEquals(ScheduleOrigin.NONE, source.snapshot().origin)
+        assertEquals(emptyList<Any>(), source.snapshot().schedules)
+        assertNull(copies.copy)
     }
 }

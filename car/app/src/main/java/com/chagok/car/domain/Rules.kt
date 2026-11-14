@@ -30,6 +30,38 @@ object Rules {
      */
     val EXIT_PENDING_MAX: Duration = Duration.ofMinutes(15)
 
+    /**
+     * 집에 도착했다고 보는 반경(정책서 12장 표의 '집 반경 300m', 가안). 폰 앱에 등록한 집 좌표 기준, 단위 미터.
+     */
+    const val HOME_RADIUS_METERS = 300.0
+
+    /**
+     * 위치를 측위한 뒤 판정에 쓸 수 있는 최대 시간(가안). 측위 시각 기준이고, 이번 주행(D·R) 시작 뒤에 측위한 값만 쓴다. 넘으면 위치 판정(일정 장소 도착·집 하차)을 건너뛴다.
+     * 앱이 보이지 않으면 위치를 받지 못하는 것이 예상 동작이라(포그라운드 위치 권한만 쓴다) 너무 짧게 잡지 않는다. 정책서 12장에 가안으로 추가할 값이다.
+     */
+    val LOCATION_MAX_AGE: Duration = Duration.ofMinutes(5)
+
+    /**
+     * P단에 넣기 직전 이만큼 안에 측위한 어댑터 위치(가안)만 내비에 묻지 않고 바로 판정에 쓴다. 이보다 오래된 위치([LOCATION_MAX_AGE] 이내)는
+     * 결과가 반경 안이어도 내비에 한 번 묻고 그 답을 우선한다(답이 없을 때만 그 오래된 위치로 판정). 정책서 12장에 가안으로 추가할 값이다.
+     */
+    val LOCATION_TRUST_AGE: Duration = Duration.ofSeconds(30)
+
+    /** 내비에 현재 위치를 물은 뒤 답을 기다리는 시간(가안, 소요 시간 조회 제한과 같은 3초). 넘으면 어댑터가 읽어 둔 오래된 위치로 판정한다. */
+    val LOCATION_ANSWER_TIMEOUT: Duration = Duration.ofSeconds(3)
+
+    /** 이보다 오차가 큰(수평 정확도 반경, 미터) 측위는 판정에 쓰지 않고 버린다(가안). 도착·집 반경 300m보다 훨씬 작게 잡는다. */
+    const val LOCATION_MAX_ACCURACY_METERS = 100f
+
+    /**
+     * 위치 도착을 인정하는 시간 창: 일정 '시작 이만큼 전 ~ 종료'(가안). 출발 제안이 목적지를 다시 묻는 여유([ASK_DESTINATION_LEAD], 60분)와 같은 값이라 그대로 쓴다.
+     * 창 밖 일정은 근처 P단이어도 도착으로 기록하지 않는다. 정책서 12장에 가안으로 추가할 값이다.
+     */
+    val ARRIVAL_WINDOW_LEAD: Duration = ASK_DESTINATION_LEAD
+
+    /** 집 하차 카드에 올리는 픽업 물건의 최대 개수. 큰 문구가 두 줄 안에 들게 하려는 표시 한도다. */
+    const val HOME_ITEMS_MAX = 3
+
     val DEPARTURE_BUFFER: Duration = Duration.ofMinutes(10)
     const val CHATTER_OVER_WORDS = 4
 

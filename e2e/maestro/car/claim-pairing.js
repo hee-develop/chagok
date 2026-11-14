@@ -6,3 +6,5 @@ var res = http.post(SERVER_URL + '/pairing/claim', {
   body: JSON.stringify({ code: code }),
 });
 if (res.status !== 200) throw new Error('연결 실패 ' + res.status + ': ' + res.body);
+// 이어지는 단계(set-home.js 등)가 이 자리의 폰 토큰을 쓸 수 있게 flow의 output에 남긴다(로그·스크린샷에는 찍지 않는다).
+output.phoneToken = JSON.parse(res.body).phoneToken;

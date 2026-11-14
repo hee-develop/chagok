@@ -137,11 +137,13 @@ class FakeNaviFlowTest {
         assertEquals(ScheduleStatus.ARRIVED, status("lunch"))
         assertEquals(ScheduleStatus.PLANNED, status("game"))
 
-        // P단: 다음 일정(KIA 직관)을 위치로 판단한다. 가짜 경로 끝(육전집)은 그 장소에서 멀어 도착이 아니다.
+        // P단: 다음 일정(KIA 직관)을 위치로 판단한다(시작 60분 전 창 안인 02:10에 선다). 가짜 경로 끝(육전집)은 그 장소에서 멀어 도착이 아니다.
+        // 주행 중 받은 위치는 2시간 전 것이라 쓰지 않고 내비(가짜 경로)에 현재 위치를 묻는다.
+        clock.now = start + Duration.ofMinutes(130)
         effects.clear()
         send(Event.GearChanged(Gear.PARK))
         assertTrue(effects.contains(Effect.RequestLocation))
-        assertTrue(events.contains(Event.LocationChanged(lunchPlace.position))) // 위치 요청에 가짜 경로 끝으로 답했다
+        assertTrue(events.contains(Event.LocationChanged(lunchPlace.position, naviAnswer = true))) // 위치 요청에 가짜 경로 끝으로 답했다
         assertEquals(ScheduleStatus.ARRIVED, status("lunch"))
         assertEquals(ScheduleStatus.PLANNED, status("game"))
         assertEquals(1, arrivals())

@@ -8,6 +8,7 @@ import com.chagok.car.fakenavi.FakeRoute
 import com.chagok.car.fakenavi.FakeTrip
 import com.chagok.car.flow.Event
 import com.chagok.car.runtime.Adapters
+import com.chagok.car.runtime.Locator
 import com.chagok.car.runtime.Navigator
 import com.chagok.car.runtime.Speaker
 import java.time.Duration
@@ -40,7 +41,8 @@ object DebugInjection {
 
     /**
      * 신호 `loc`으로 주입한 위치. null이면 주입하지 않은 것이다(`loc=real`로 되돌린다).
-     * 값이 있는 동안에는 가짜 내비가 켜져 있어도 가짜 경로 위 위치로 답하거나 위치를 넣지 않고 이 값이 쓰이게 한다.
+     * 값이 있는 동안에는 위치 어댑터의 실제 위치, 가짜 경로 위 위치 이벤트, 실제 내비의 위치 답을 모두 세션에 넣지 않고
+     * 위치를 묻는 [InjectedNavigator.requestLocation]은 이 값으로 답한다.
      */
     @Volatile var injectedLocation: LatLng? = null
 
@@ -57,12 +59,26 @@ object DebugHooks {
     /** 하차 카드를 띄워 두는 시간. [DebugInjection.exitCardSeconds]가 없으면 정책 기준값이다. */
     fun exitCardDuration(): Duration = DebugInjection.exitCardSeconds?.let { Duration.ofSeconds(it) } ?: Rules.EXIT_CARD
 
+    /** 실제 내비의 위치 답이 쓰는 이벤트 출구. 위치를 주입한 동안([DebugInjection.injectedLocation])에는 그 답을 버린다. */
+    fun naviSink(post: (Event) -> Unit): (Event) -> Unit = { event ->
+        if (!(event is Event.LocationChanged && DebugInjection.injectedLocation != null)) post(event)
+    }
+
+    /** 위치 어댑터가 쓰는 이벤트 출구. 실제 위치를 받지 않는 동안([acceptsRealLocation])에는 위치 이벤트를 버린다. */
+    fun locationSink(post: (Event) -> Unit): (Event) -> Unit = { event ->
+        if (!(event is Event.LocationChanged && !acceptsRealLocation())) post(event)
+    }
+
+    /** 실제 위치(어댑터가 읽은 에뮬레이터·차의 위치)를 받는가. `loc`을 주입했거나 가짜 내비가 켜져 있으면 받지 않는다. */
+    fun acceptsRealLocation(): Boolean = DebugInjection.injectedLocation == null && !DebugInjection.fakeNavi
+
     fun wrap(adapters: Adapters, post: (Event) -> Unit): Adapters {
         connect(FakeNaviSession.shared, post)
         return Adapters(
             navi = InjectedNavigator(adapters.navi, post),
             voice = InjectedSpeaker(adapters.voice),
             signals = adapters.signals,
+            location = InjectedLocator(adapters.location),
         )
     }
 
@@ -115,19 +131,15 @@ internal class InjectedNavigator(
         return ok
     }
 
-    // 위치는 실제 내비에 묻는다. 다만 가짜 내비 경로가 있으면 그 경로 위 차 위치로 답한다(에뮬레이터의 실제 위치가 섞이지 않게).
-    // E2E가 chagok-debug://signal?loc=위도,경도로 위치를 주입했고 가짜 내비가 켜져 있으면 가짜 경로가 아니라 그 주입 위치로 답한다.
-    // 가짜 내비가 꺼져 있을 때의 loc은 예전 그대로다(실제 내비에 묻고, 주입한 위치는 신호가 직접 넣는다).
+    // 위치는 실제 내비에 묻는다. 다만 E2E가 chagok-debug://signal?loc=위도,경도로 위치를 주입했으면(가짜 내비 여부와 무관하게)
+    // 실제 내비에 묻지 않고 그 주입 위치로 답한다. 주입이 없고 가짜 내비 경로가 있으면 그 경로 위 차 위치로 답한다(에뮬레이터의 실제 위치가 섞이지 않게).
     override fun requestLocation() {
-        if (!DebugInjection.fakeNavi) {
-            inner.requestLocation()
-            return
-        }
         val injected = DebugInjection.injectedLocation
         val trip = fake.trip
         when {
-            injected != null -> post(Event.LocationChanged(injected))
-            trip != null -> post(Event.LocationChanged(carPosition(trip)))
+            injected != null -> post(Event.LocationChanged(injected, naviAnswer = true))
+            !DebugInjection.fakeNavi -> inner.requestLocation()
+            trip != null -> post(Event.LocationChanged(carPosition(trip), naviAnswer = true))
             else -> inner.requestLocation()
         }
     }
@@ -142,4 +154,15 @@ private class InjectedSpeaker(private val inner: Speaker) : Speaker {
     override fun stopAll() = inner.stopAll()
     override fun speak(text: String, thenListen: Boolean) =
         inner.speak(text, thenListen && DebugInjection.realListening)
+}
+
+/** `loc` 주입 중에는 실제 위치를 읽어 오지 않는다(주기·수동 갱신은 [DebugHooks.locationSink]가 막는다). */
+private class InjectedLocator(private val inner: Locator) : Locator {
+    override fun start() = inner.start()
+    override fun stop() = inner.stop()
+    override fun setForeground(foreground: Boolean) = inner.setForeground(foreground)
+    override fun setNeeded(needed: Boolean) = inner.setNeeded(needed)
+    override fun refreshNow(deliver: (Event) -> Unit) {
+        if (DebugHooks.acceptsRealLocation()) inner.refreshNow(deliver)
+    }
 }

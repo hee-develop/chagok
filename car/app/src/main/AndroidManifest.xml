@@ -14,6 +14,13 @@
     <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
     <uses-permission android:name="pleos.car.permission.STT_SERVICE" />
 
+    <!-- 위치: 달린 뒤 P단의 일정 장소 도착·집 하차 판단(런타임 동의, 설명 카드 뒤 요청). 포그라운드만 쓰고 백그라운드 위치 권한은 두지 않는다. 없어도 나머지 기능은 동작한다 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-feature
+        android:name="android.hardware.location.gps"
+        android:required="false" />
+
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application

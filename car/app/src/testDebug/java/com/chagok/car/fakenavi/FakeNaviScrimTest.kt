@@ -38,4 +38,17 @@ class FakeNaviScrimTest {
         assertFalse(FakeNaviScrim.isExitCard(CardContent(status = "정차 중 · 출발 전", voice = "다음은 5시 KIA 직관이에요.")))
         assertFalse(FakeNaviScrim.isExitCard(null))
     }
+
+    @Test fun `집 하차 카드도 같은 상태 칩이라 덮개가 72퍼센트다`() {
+        // 인사 카드(물건 없음)와 챙길 물건 카드 모두 하차 카드 전체에 같은 덮개를 쓴다(시안 Arrive).
+        val pickup = Schedule(
+            id = "k", title = "콩물 픽업", start = java.time.Instant.parse("2026-12-03T04:00:00Z"), end = java.time.Instant.parse("2026-12-03T05:00:00Z"),
+        )
+        val greeting = Phrases.homeExitCard(emptyList(), Rules.EXIT_CARD)
+        val items = Phrases.homeExitCard(listOf(com.chagok.car.domain.PickupItem("콩물", pickup)), Rules.EXIT_CARD)
+        assertEquals(Phrases.HOME_GREETING, greeting.voice)
+        assertEquals("콩물 챙기세요!", items.voice)
+        assertTrue(FakeNaviScrim.isExitCard(greeting))
+        assertTrue(FakeNaviScrim.isExitCard(items))
+    }
 }

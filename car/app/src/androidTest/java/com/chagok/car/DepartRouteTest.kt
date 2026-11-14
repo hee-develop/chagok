@@ -341,6 +341,8 @@ class DepartRouteTest {
     fun P단에_넣은_곳이_대상_일정_300m_안이면_도착이고_다시_탈_때_다음_일정을_묻는다() {
         departOffer()
         device.findObject(By.text("잠깐만")).click()
+        // 위치 도착은 일정 '시작 60분 전 ~ 종료' 창 안에서만 인정한다. 육전집 점심(13:00)의 창이 열리는 12:00을 넘겨 12:05로 간다.
+        advanceClock(Duration.ofMinutes(165))
         host.post(Event.GearChanged(Gear.DRIVE))
         // 내비가 위치 물음에 육전집(35.1595, 126.8526)에서 약 110m 떨어진 곳이라고 답한다.
         navigator.location = com.chagok.car.domain.LatLng(35.1605, 126.8526)

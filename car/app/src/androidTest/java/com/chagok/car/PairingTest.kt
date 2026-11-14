@@ -70,6 +70,56 @@ class PairingTest {
         assertTrue(speaker.spoken.single().startsWith("광주 직관 날이에요!"))
     }
 
+    @Test
+    fun 서버가_연결을_풀면_앱이_앞으로_올_때_연결_카드로_돌아가고_받아_둔_일정_사본을_지운다() {
+        host.setPaired(false)
+        E2eApp.fakePairing.paired = false
+        launch()
+        assertNotNull("연결 카드", waitFor("휴대폰과 연결해 주세요."))
+        E2eApp.fakePairing.paired = true
+        assertNotNull("연결되면 첫 탑승 브리핑", waitFor("광주 직관 날이에요!", timeoutMs = 10_000))
+        // 연결해 일정을 받았으니 저장된 사본이 있다.
+        val store = com.chagok.car.runtime.ChagokStore(instrumentation.targetContext)
+        assertNotNull("받아 둔 사본", store.loadCopy())
+
+        // 폰(운전자)에서 연결을 풀었다. 차는 앱이 앞으로 올 때 서버에 물어 해제를 안다.
+        E2eApp.fakePairing.paired = false
+        device.pressHome()
+        launch()
+
+        assertNotNull("연결 카드로 돌아감", waitFor("휴대폰과 연결해 주세요."))
+        assertNull("일정 사본이 지워져야 함", store.loadCopy())
+        assertTrue(!store.paired)
+    }
+
+    @Test
+    fun 서버가_이_차를_모르면_해제로_보지_않고_연결과_사본을_그대로_둔다() {
+        host.setPaired(false)
+        E2eApp.fakePairing.paired = false
+        E2eApp.fakePairing.serverKnowsCar = true
+        launch()
+        assertNotNull("연결 카드", waitFor("휴대폰과 연결해 주세요."))
+        E2eApp.fakePairing.paired = true
+        assertNotNull("연결되면 첫 탑승 브리핑", waitFor("광주 직관 날이에요!", timeoutMs = 10_000))
+        val store = com.chagok.car.runtime.ChagokStore(instrumentation.targetContext)
+        assertNotNull("받아 둔 사본", store.loadCopy())
+
+        // 서버를 다시 켜 메모리가 비었다: 이 차를 모른다(404). 해제가 아니다.
+        E2eApp.fakePairing.paired = false
+        E2eApp.fakePairing.serverKnowsCar = false
+        try {
+            device.pressHome()
+            launch()
+            // 재진입 확인이 돌 시간을 준다. 연결 카드로 돌아가지 않고 사본·연결이 남아야 한다.
+            Thread.sleep(3_000)
+            assertNull("연결 카드로 돌아가면 안 됨", device.findObject(By.textContains("휴대폰과 연결해 주세요.")))
+            assertNotNull("사본이 남아야 함", store.loadCopy())
+            assertTrue(store.paired)
+        } finally {
+            E2eApp.fakePairing.serverKnowsCar = true
+        }
+    }
+
     private companion object {
         const val TIMEOUT_MS = 5_000L
     }

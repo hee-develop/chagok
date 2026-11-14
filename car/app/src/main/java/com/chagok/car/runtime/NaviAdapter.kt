@@ -50,7 +50,7 @@ class NaviAdapter(context: Context, private val sink: (Event) -> Unit) : Navigat
         /** [requestLocation]의 답. P단 도착 판단에 쓴다. */
         override fun onCurrentLocationInfo(info: CurrentLocationInfo) {
             if (naviHelper !== helper) return
-            sink(Event.LocationChanged(LatLng(info.latitude, info.longitude)))
+            sink(Event.LocationChanged(LatLng(info.latitude, info.longitude), naviAnswer = true))
         }
 
         /** 내비 목적지 도착. 세션은 차곡이 길안내를 시작한 일정이 있을 때만 도착으로 본다. */

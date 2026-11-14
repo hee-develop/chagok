@@ -76,12 +76,16 @@ data class StoredCopy(val body: String, val date: LocalDate)
 interface ScheduleCopyStore {
     fun loadCopy(): StoredCopy?
     fun saveCopy(copy: StoredCopy)
+
+    /** 저장해 둔 사본을 지운다(연결이 풀렸을 때: 일정·집 좌표를 차에 남기지 않는다). */
+    fun clearCopy()
 }
 
 /**
  * 서버에서 받은 오늘 일정을 메모리에 캐시해 주는 [ScheduleSource]. [schedules]는 캐시만 읽어 바로 돌려주고,
  * 네트워크는 [refresh]가 [worker] 스레드에서 한다.
  *
+ * - [allowed]가 false(휴대폰과 연결 전)면 서버를 부르지 않고 NONE으로 끝낸다. 받는 도중에 연결이 풀려 false가 되면 그 응답도 버린다.
  * - 받기가 성공하면 응답을 [copies]에 저장하고 [origin]은 FRESH.
  * - 실패하면 같은 날짜의 저장된 사본을 쓰고 [origin]은 STORED. 사본이 없으면 빈 목록과 NONE.
  * - 사본의 '오늘'은 기기 날짜가 아니라 [refresh]에 쓴 기준 시각(anchor, 데모 시계)을 [zone]으로 읽은 날짜다.
@@ -94,6 +98,11 @@ class ServerScheduleSource(
     private val zone: () -> ZoneId = { ZoneId.systemDefault() },
     private val logger: Logger = Logger.None,
     private val worker: Executor = Executors.newCachedThreadPool { r -> Thread(r, "schedule-fetch").apply { isDaemon = true } },
+    /**
+     * 서버에서 일정·집을 받아도 되는가. false면 서버를 부르지 않고(이미 나간 요청의 응답도 쓰지 않고) 받은 적 없음([ScheduleOrigin.NONE])으로 끝낸다.
+     * 휴대폰과 연결돼 있지 않은 차가 다른 사람의 일정·집 좌표를 받아 오지 않게 한다. 연결 여부를 따지지 않는 구성(테스트)은 늘 true.
+     */
+    private val allowed: () -> Boolean = { true },
 ) : ScheduleSource {
     private val lock = Any()
     private var generation = 0
@@ -109,6 +118,23 @@ class ServerScheduleSource(
     override fun snapshot(): ScheduleSnapshot = synchronized(lock) { ScheduleSnapshot(cache, current, cachedFavorites) }
 
     /**
+     * 받아 둔 일정·자주 가는 곳(집 좌표 포함)과 저장된 사본을 모두 지우고 "받은 적 없음"([ScheduleOrigin.NONE])으로 돌린다. 휴대폰 연결이 풀렸을 때 쓴다.
+     * **세대를 올려** 진행 중이던 받기의 결과(캐시·사본 저장)를 버린다: 그 받기가 해제 직후 끝나도 집·일정이 되살아나지 않는다.
+     * 그 받기는 마지막 세대가 아니라 완료 콜백도 부르지 않으므로 [refreshing]은 여기서 끈다(세션은 [Event.Unpaired]에서 받는 중 표시를 거둔다).
+     */
+    fun clear() {
+        synchronized(lock) {
+            generation++
+            refreshing = false
+            cache = emptyList()
+            cachedFavorites = emptyList()
+            current = ScheduleOrigin.NONE
+            cacheDate = null
+        }
+        runCatching { copies?.clearCopy() }.onFailure { logger.warn(TAG, "일정 사본 지우기 실패", it) }
+    }
+
+    /**
      * 기준 시각(anchor)으로 다시 받고 이 받기의 세대 번호를 돌려준다. 마지막 세대가 끝나면(성공·실패 모두)
      * 그 세대 번호로 [onDone]을 받은 스레드에서 부른다.
      */
@@ -119,11 +145,17 @@ class ServerScheduleSource(
         refreshing = true
         worker.execute {
             try {
-                val body = runCatching { fetcher.fetch(at) }
+                val body = if (allowed()) runCatching { fetcher.fetch(at) } else kotlin.Result.failure<String>(NotAllowed())
                 val parsed = body.mapCatching { ScheduleParser.parseDay(it) }
-                val error = parsed.exceptionOrNull()
-                if (error != null) logger.warn(TAG, "일정 받기 실패: ${describe(error)}", null)
-                val result = if (error == null) Result(parsed.getOrThrow(), ScheduleOrigin.FRESH) else fallback(date)
+                var error = parsed.exceptionOrNull()
+                // 받는 동안 연결이 풀렸으면 응답을 쓰지 않는다(풀린 뒤에 집·일정이 되살아나지 않게).
+                if (error == null && !allowed()) error = NotAllowed()
+                if (error != null && error !is NotAllowed) logger.warn(TAG, "일정 받기 실패: ${describe(error)}", null)
+                val result = when {
+                    error == null -> Result(parsed.getOrThrow(), ScheduleOrigin.FRESH)
+                    error is NotAllowed -> Result(DayResponse(emptyList()), ScheduleOrigin.NONE)
+                    else -> fallback(date)
+                }
                 val applied = synchronized(lock) {
                     (mine == generation).also {
                         if (it) {
@@ -134,7 +166,8 @@ class ServerScheduleSource(
                         }
                     }
                 }
-                if (applied && error == null) body.getOrNull()?.let { saveCopy(StoredCopy(it, date)) }
+                // 저장 직전에 한 번 더 확인한다(그 사이 [clear]가 불렸으면 사본을 되살리지 않는다).
+                if (applied && error == null && synchronized(lock) { mine == generation }) body.getOrNull()?.let { saveCopy(StoredCopy(it, date)) }
             } finally {
                 val last = synchronized(lock) { (mine == generation).also { if (it) refreshing = false } }
                 if (last) onDone(mine)
@@ -148,6 +181,9 @@ class ServerScheduleSource(
         (error as? ScheduleHttpException)?.let { "${it::class.simpleName} ${it.status}" } ?: (error::class.simpleName ?: "알 수 없는 예외")
 
     private class Result(val day: DayResponse, val origin: ScheduleOrigin)
+
+    /** [allowed]가 false라 받지 않았다(실패가 아니다: 로그도 사본 대체도 없다). */
+    private class NotAllowed : IOException("연결 전이라 일정을 받지 않음")
 
     /** 받기 실패 때 쓸 일정과 자주 가는 곳. 같은 날짜의 사본(메모리 캐시, 없으면 저장된 것)이 있으면 STORED. */
     private fun fallback(date: LocalDate): Result {

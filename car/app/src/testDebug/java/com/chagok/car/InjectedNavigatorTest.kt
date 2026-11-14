@@ -102,7 +102,7 @@ class InjectedNavigatorTest {
         posted.clear()
         navigator.requestLocation()
         assertEquals(1, inner.calls.size)
-        assertEquals(listOf<Event>(Event.LocationChanged(place.position)), posted) // 도착했으면 목적지 좌표
+        assertEquals(listOf<Event>(Event.LocationChanged(place.position, naviAnswer = true)), posted) // 도착했으면 목적지 좌표
     }
 
     @Test fun `route=fail은 남아 있던 이전 가짜 경로를 지운다`() {
@@ -122,15 +122,38 @@ class InjectedNavigatorTest {
         DebugInjection.injectedLocation = injected
         posted.clear()
         navigator.requestLocation()
-        assertEquals(listOf<Event>(Event.LocationChanged(injected)), posted)
+        assertEquals(listOf<Event>(Event.LocationChanged(injected, naviAnswer = true)), posted)
         assertTrue(inner.calls.isEmpty())
     }
 
-    @Test fun `가짜 내비가 꺼져 있을 때의 loc은 예전 그대로 실제 내비에 묻는다`() {
-        DebugInjection.injectedLocation = LatLng(35.1690, 126.8888)
+    @Test fun `가짜 내비가 꺼져 있어도 loc을 주입했으면 실제 내비에 묻지 않고 주입 위치로 답한다`() {
+        val injected = LatLng(35.1690, 126.8888)
+        DebugInjection.injectedLocation = injected
         navigator.requestLocation()
-        assertEquals(listOf("location"), inner.calls)
-        assertTrue(posted.isEmpty())
+        assertTrue(inner.calls.isEmpty())
+        assertEquals(listOf<Event>(Event.LocationChanged(injected, naviAnswer = true)), posted)
+    }
+
+    @Test fun `loc을 주입한 동안에는 실제 내비의 위치 답도 어댑터의 실제 위치도 버리고 가짜 내비가 켜져 있으면 실제 위치를 받지 않는다`() {
+        val out = mutableListOf<Event>()
+        val naviSink = DebugHooks.naviSink { out += it }
+        val locationSink = DebugHooks.locationSink { out += it }
+        val real = Event.LocationChanged(LatLng(35.1, 126.8))
+        naviSink(real); locationSink(real)
+        assertEquals(listOf(real, real), out) // 주입도 가짜 내비도 없으면 그대로 통과
+        out.clear()
+
+        DebugInjection.injectedLocation = LatLng(35.2, 126.9)
+        naviSink(real); locationSink(real)
+        naviSink(Event.DestinationArrived)
+        assertEquals(listOf<Event>(Event.DestinationArrived), out) // 위치만 막고 다른 이벤트는 통과
+        out.clear()
+
+        DebugInjection.injectedLocation = null
+        DebugInjection.fakeNavi = true
+        assertFalse(DebugHooks.acceptsRealLocation())
+        locationSink(real)
+        assertTrue(out.isEmpty())
     }
 
     @Test fun `loc을 주입한 동안에는 가짜 경로 위치 이벤트도 넣지 않는다`() {

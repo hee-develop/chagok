@@ -84,4 +84,55 @@ class SnapshotCodecTest {
         assertNull(SnapshotCodec.decode("{}"))
         assertNull(SnapshotCodec.decode("""{"date":"2026-12-03"}"""))
     }
+
+    @Test fun `집 하차 알림 기록도 저장하고 복원한다`() {
+        val snapshot = Snapshot(
+            BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3),
+            homeItemsAnnounced = setOf("k", "a,b:c"), homeCardShown = true,
+        )
+        assertEquals(snapshot, SnapshotCodec.decode(SnapshotCodec.encode(snapshot)))
+    }
+
+    @Test fun `집 하차 알림 기록이 없는 이전 저장분은 빈 기록으로 복원한다`() {
+        val old = """{"date":"2026-12-03","statuses":{},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false},"exitTargetId":"a","exitArrivedAt":5}"""
+        val decoded = SnapshotCodec.decode(old)!!
+        assertEquals(emptySet<String>(), decoded.homeItemsAnnounced)
+        assertEquals(false, decoded.homeCardShown)
+        assertEquals("a", decoded.exitTargetId)
+    }
+
+    @Test fun `집 하차 알림 칸만 손상돼도 나머지 상태는 살린다`() {
+        val base = """"date":"2026-12-03","statuses":{"a":"ARRIVED"},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false}"""
+        for (broken in listOf(
+            """"homeItemsAnnounced":{"k":1},"homeCardShown":"yes"""",
+            """"homeItemsAnnounced":[{"k":1}],"homeCardShown":1""",
+            """"homeItemsAnnounced":"k","homeCardShown":null""",
+        )) {
+            val decoded = SnapshotCodec.decode("{$base,$broken}")!!
+            assertEquals(mapOf("a" to ScheduleStatus.ARRIVED), decoded.statuses)
+            assertEquals(emptySet<String>(), decoded.homeItemsAnnounced)
+            assertEquals(false, decoded.homeCardShown)
+        }
+    }
+
+    @Test fun `위치로 정한 하차 대기인지도 저장하고 복원하며 이전 저장분은 false다`() {
+        val snapshot = Snapshot(
+            BoardingLog(), mapOf("a" to ScheduleStatus.ARRIVED), LocalDate.of(2026, 12, 3),
+            exitTargetId = "a", exitArrivedAt = Instant.parse("2026-12-03T01:00:00Z"), exitByLocation = true,
+        )
+        val decoded = SnapshotCodec.decode(SnapshotCodec.encode(snapshot))
+        assertEquals(snapshot, decoded)
+        assertEquals(true, decoded?.exitByLocation)
+
+        val old = """{"date":"2026-12-03","statuses":{"a":"ARRIVED"},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false},"noticeDate":null,"exitTargetId":"a","exitArrivedAt":5}"""
+        val oldDecoded = SnapshotCodec.decode(old)!!
+        assertEquals("a", oldDecoded.exitTargetId)
+        assertEquals(false, oldDecoded.exitByLocation)
+
+        // 칸이 손상돼도 나머지는 살린다.
+        val broken = old.dropLast(1) + ""","exitByLocation":"yes"}"""
+        val brokenDecoded = SnapshotCodec.decode(broken)!!
+        assertEquals("a", brokenDecoded.exitTargetId)
+        assertEquals(false, brokenDecoded.exitByLocation)
+    }
 }
