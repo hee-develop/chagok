@@ -127,6 +127,8 @@ export type SeatStore = {
   /** 폰 토큰이 가리키는 자리(없거나 이미 바뀐·끊긴 토큰이면 null). */
   seatByToken(phoneToken: string): { seat: PublicSeat; carId: string } | null;
   seatsOf(carId: string): PublicSeat[];
+  /** 그 자리가 연결된 차의 id(없으면 null). 가족 요청의 '우리 차' 전달이 쓴다. 차 id는 서버 안에서만 쓰고 폰에는 주지 않는다. */
+  carIdOfSeat(seatId: string): string | null;
   /** 서버가 아는 모든 자리(차 구분 없이, 정기 작업이 훑는다). */
   allSeats(): PublicSeat[];
   /** 그 차의 '지난번 고른 자리'(없거나 지워졌으면 가장 최근에 연결한 자리). 자리가 없으면 null. */
@@ -437,6 +439,7 @@ export function createSeatStore(now: () => Date = () => new Date(), random: () =
       return seat ? { seat: toPublic(seat), carId: seat.carId } : null;
     },
     seatsOf: (carId) => seatsOf(carId).map(toPublic),
+    carIdOfSeat: (seatId) => seats.get(seatId)?.carId ?? null,
     allSeats: () => [...seats.values()].map(toPublic),
     preferredSeat: (carId) => preferredSeatOf(carId),
     soleCarSeat: () => {

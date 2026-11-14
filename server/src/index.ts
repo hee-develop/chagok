@@ -2,6 +2,8 @@ import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { createEnergySources } from './energy/sources.js';
 import { registerMaintenanceJobs } from './jobs.js';
+import { registerFamilyRequestJobs } from './family/jobs.js';
+import { createFamilyRequests } from './family/service.js';
 import { createNotificationRuntime } from './notify/setup.js';
 import { createFailureLog, createPlaceSearch } from './placeSearch/index.js';
 import { createSeatDataRegistry } from './seatData.js';
@@ -24,6 +26,9 @@ try {
   // 알림 정기 작업이 같은 자리 저장소·알림 묶음을 보도록 밖에서 만들어 넘긴다.
   const seats = createSeatStore();
   runtime = createNotificationRuntime({ seats });
+  // 가족 요청 저장소: 날짜가 지난 요청을 지우는 정기 작업이 앱과 같은 저장소를 본다.
+  const familyRequests = createFamilyRequests({ now: () => new Date(), seats, notifier: runtime.notifications.notifier });
+  registerFamilyRequestJobs(runtime.scheduler, familyRequests);
   const calendars = loadMockCalendars();
   const places = loadPlacesCatalog();
   // KAKAO_REST_KEY가 있으면 카카오 로컬 API, 없으면 픽스처 목. 키는 로그에 남기지 않고 실패 이유(종류·상태 코드)만 남긴다.
@@ -48,6 +53,7 @@ try {
     seats,
     seatData,
     notifications: runtime.notifications,
+    familyRequests,
   });
 } catch (e) {
   console.error(`차곡 서버를 시작할 수 없습니다: ${(e as Error).message}`);

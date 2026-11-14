@@ -46,24 +46,35 @@ export type OutboxOptions = {
 };
 
 export function createOutbox({ now = () => new Date(), maxPerSeat = MAX_QUEUE_PER_SEAT, ttlMs = NOTIFICATION_TTL_MS }: OutboxOptions = {}): Outbox {
-  const queues = new Map<string, AppNotification[]>();
+  /** 알림과 그 알림이 사라지는 시각(알림마다 보관 시간을 따로 줄 수 있다). */
+  type Entry = { notification: AppNotification; expiresAt: number };
+  const queues = new Map<string, Entry[]>();
 
-  const alive = (seatId: string) => {
+  const entries = (seatId: string): Entry[] => {
     const queue = queues.get(seatId);
     if (!queue) return [];
     const at = now().getTime();
-    const kept = queue.filter((n) => Date.parse(n.createdAt) + ttlMs > at);
+    const kept = queue.filter((e) => e.expiresAt > at);
     if (kept.length === 0) queues.delete(seatId);
     else if (kept.length !== queue.length) queues.set(seatId, kept);
     return kept;
   };
+  const alive = (seatId: string) => entries(seatId).map((e) => e.notification);
 
   return {
-    send: (seatId, notification) => {
-      const queue = alive(seatId);
-      queue.push(notification);
+    send: (seatId, notification, options) => {
+      const queue = entries(seatId);
+      queue.push({ notification, expiresAt: Date.parse(notification.createdAt) + (options?.ttlMs ?? ttlMs) });
       while (queue.length > Math.max(1, maxPerSeat)) queue.shift();
       queues.set(seatId, queue);
+    },
+    drop: (kind, predicate) => {
+      for (const seatId of [...queues.keys()]) {
+        const queue = entries(seatId);
+        const kept = queue.filter((e) => !(e.notification.kind === kind && predicate(e.notification)));
+        if (kept.length === 0) queues.delete(seatId);
+        else if (kept.length !== queue.length) queues.set(seatId, kept);
+      }
     },
     forget: (seatId) => {
       queues.delete(seatId);
@@ -76,16 +87,16 @@ export function createOutbox({ now = () => new Date(), maxPerSeat = MAX_QUEUE_PE
       return after.slice(0, MAX_LIST_SIZE);
     },
     ack: (seatId, ids) => {
-      const list = alive(seatId);
+      const list = entries(seatId);
       const wanted = new Set(ids);
-      const kept = list.filter((n) => !wanted.has(n.id));
+      const kept = list.filter((e) => !wanted.has(e.notification.id));
       if (kept.length === 0) queues.delete(seatId);
       else queues.set(seatId, kept);
       return list.length - kept.length;
     },
     dropKind: (seatId, kind) => {
-      const list = alive(seatId);
-      const kept = list.filter((n) => n.kind !== kind);
+      const list = entries(seatId);
+      const kept = list.filter((e) => e.notification.kind !== kind);
       if (kept.length === 0) queues.delete(seatId);
       else if (kept.length !== list.length) queues.set(seatId, kept);
       return list.length - kept.length;

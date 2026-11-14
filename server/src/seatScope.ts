@@ -62,6 +62,12 @@ export const DEVICE_ID_PATTERN = /^[A-Za-z0-9_-]{22,64}$/;
 
 type Device = { kind: 'none' } | { kind: 'bad' } | { kind: 'id'; id: string };
 
+/**
+ * 차가 어느 자리를 대신해 부르는지(`?driver=<자리 id>`). 같은 이름의 값이 여럿이면 첫 값이다. 자리 정하기 가드와 가족 요청 가드가 이 한 함수로 읽어
+ * 판정이 서로 어긋나지 않는다.
+ */
+export const driverOf = (c: Context): string | undefined => c.req.query('driver');
+
 export const deviceOf = (c: Context): Device => {
   const header = c.req.header(DEVICE_HEADER);
   if (header === undefined) return { kind: 'none' };
@@ -174,7 +180,7 @@ export function createSeatGuard(
     const device = deviceOf(c);
     if (device.kind === 'bad') return badDevice(c);
     if (auth.kind === 'bad') return unauthorized(c, 'Authorization 형식이 올바르지 않습니다');
-    const driver = c.req.query('driver');
+    const driver = driverOf(c);
     if (driver !== undefined) {
       if (auth.kind === 'none') return unauthorized(c, 'driver를 지정하려면 차 토큰이 필요합니다');
       const car = seats.carByToken(auth.token);
@@ -210,7 +216,7 @@ export function createSeatGuard(
     const car = seats.carByToken(auth.token);
     if (!car || seats.seatByToken(auth.token)) return resolveWrite(c);
     if (deviceOf(c).kind === 'bad') return badDevice(c);
-    const driver = c.req.query('driver');
+    const driver = driverOf(c);
     if (driver !== undefined) {
       return seats.seatsOf(car.carId).some((s) => s.seatId === driver)
         ? seatScope(driver, true)
