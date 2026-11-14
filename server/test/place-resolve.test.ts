@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MockPlace } from '../src/fixture-types.js';
 import { parsePlacesCatalog } from '../src/fixtures.js';
 import { createKakaoPlaceSearch, type PlaceSearch } from '../src/placeSearch/index.js';
+import { createSeatStore } from '../src/seats.js';
 import { catalog, newApp } from './helpers.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -99,7 +100,7 @@ describe('POST /places/resolve: 좌표·주소는 검색 없이', () => {
         },
       },
     });
-    const { body } = await resolve(app, { name: '광주 서구 상무중앙로 1', ...HERE });
+    const { body } = await resolve(app, { query: '광주 서구 상무중앙로 1', ...HERE });
     expect(calls).toEqual(['광주 서구 상무중앙로 1']);
     expect(body).toMatchObject({ via: 'address', total: 1, source: 'kakao', memory: null });
     expect(body.candidates[0]).toMatchObject({ name: '샘플 아파트', lat: 35.1595, lng: 126.8526, distanceMeters: null });
@@ -192,8 +193,8 @@ describe('POST /places/resolve: 검색을 못 했을 때·카카오·키', () =>
     expect(body).toMatchObject({ source: 'kakao', total: 3, via: 'search' });
     expect(body.candidates.map((c) => [c.id, c.distanceMeters])).toEqual([['kakao:1', 120], ['kakao:2', 3000]]);
     const url = new URL(seen[0] as string);
-    expect(url.searchParams.get('x')).toBe('126.8505'); // x = 경도
-    expect(url.searchParams.get('y')).toBe('35.1505'); // y = 위도
+    expect(url.searchParams.get('x')).toBe(String(Number(HERE.lng.toFixed(3)))); // x = 경도(소수 3자리로 줄여 보낸다)
+    expect(url.searchParams.get('y')).toBe(String(Number(HERE.lat.toFixed(3)))); // y = 위도
     expect(url.searchParams.get('sort')).toBe('distance');
   });
 
@@ -266,7 +267,7 @@ describe('POST /places/resolve: 입력 검증·속도 제한', () => {
     const app = custom({ clientAddress: () => 'a', placeSearchRateLimit: { max: 1, windowMs: 60_000 } });
     await remember(app, '약국', { name: '내 약국', lat: 35, lng: 126 }, false);
     for (let i = 0; i < 5; i++) expect((await resolve(app, { name: '약국' })).body.via).toBe('memory');
-    for (let i = 0; i < 5; i++) expect((await resolve(app, { name: '35.1, 126.8' })).body.via).toBe('coordinates');
+    for (let i = 0; i < 5; i++) expect((await resolve(app, { name: '35.101, 126.801' })).body.via).toBe('coordinates');
   });
 });
 
@@ -298,5 +299,164 @@ describe('GET /places/search: 기존 계약 호환', () => {
     const { places } = (await (await newApp().request('/places/search?q=%EA%B4%91%EC%A3%BC')).json()) as { places: unknown[] };
     expect(places).toHaveLength(10);
     expect(catalog.places.length).toBeGreaterThan(10);
+  });
+});
+
+const coordinates = (text: string) => import('../src/placeSearch/address.js').then((m) => m.parseCoordinateText(text));
+
+describe('좌표 글자 판정(M6): 소수점 3자리 이상 두 수 + 한국 범위만', () => {
+  it.each(['35.1595, 126.8526', '35.1595 126.8526', ' 37.566,126.978 ', '33.000 124.000', '38.999, 131.999'])('좌표다: %s', async (text) => {
+    expect(await coordinates(text)).not.toBeNull();
+  });
+  it.each(['10 30', '3, 15', '12 34', '1 2', '35 126', '37, 127', '35.1 126.8', '35.15, 126.85', '40.123, 127.123', '35.123, 123.999', '32.999, 127.000', '0.000, 0.000', '-35.159, 126.852', '35.1595,126.8526,3'])('좌표가 아니다: %s', async (text) => {
+    expect(await coordinates(text)).toBeNull();
+  });
+
+  it('좌표가 아닌 글자는 resolve에서 검색으로 간다("10 30"이 좌표가 되지 않는다)', async () => {
+    const { body } = await resolve(custom(), { query: '10 30' });
+    expect(body.via).toBe('search');
+    expect(body.total).toBe(0);
+  });
+});
+
+describe('resolve 요청: query(검색할 글자)와 key(기억 키) 분리(E)', () => {
+  const spy = () => {
+    const searched: { query: string; near?: { lat: number; lng: number } }[] = [];
+    const geocoded: string[] = [];
+    const placeSearch: PlaceSearch = {
+      searchKeyword: async (q) => {
+        searched.push({ query: q.query, near: q.near });
+        return { places: [], total: 0, source: 'mock' };
+      },
+      geocodeAddress: async (a) => {
+        geocoded.push(a);
+        return { place: null, source: 'mock' };
+      },
+    };
+    return { searched, geocoded, placeSearch };
+  };
+
+  it('기억은 key로 찾고, 외부 검색은 query로만 한다(일정 제목은 key로만 쓰이고 밖으로 나가지 않는다)', async () => {
+    const { searched, placeSearch } = spy();
+    const app = custom({ placeSearch });
+    // 제목 "친구 약속"은 key, 차가 물어 들은 이름 "스타벅스 상무점"은 query
+    await remember(app, '친구 약속', { name: '단골 카페', lat: 35.15, lng: 126.85 }, false);
+    const hit = await resolve(app, { query: '스타벅스 상무점', key: '친구 약속' });
+    expect(hit.body.via).toBe('memory');
+    expect(searched).toEqual([]);
+    const miss = await resolve(app, { query: '스타벅스 상무점', key: '다른 약속' });
+    expect(miss.body.via).toBe('search');
+    expect(searched.map((s) => s.query)).toEqual(['스타벅스 상무점']); // '다른 약속'은 외부로 안 나갔다
+  });
+
+  it('key가 없으면 query가 기억 키다. name은 query의 옛 이름으로 받는다(둘을 같이 보내면 400)', async () => {
+    const app = custom();
+    await remember(app, '약국', { name: '내 약국', lat: 35, lng: 126 }, false);
+    expect((await resolve(app, { query: '약국' })).body.via).toBe('memory');
+    expect((await resolve(app, { name: '약국' })).body.via).toBe('memory');
+    const both = await post(app, '/places/resolve', { query: '약국', name: '약국' });
+    expect(both.status).toBe(400);
+  });
+
+  it.each([
+    ['key가 공백뿐', { query: 'x', key: '  ' }],
+    ['key가 숫자', { query: 'x', key: 3 }],
+    ['key가 너무 길다', { query: 'x', key: '가'.repeat(301) }],
+    ['query가 너무 길다', { query: '가'.repeat(301) }],
+    ['query 없이 key만', { key: 'x' }],
+  ])('400: %s', async (_n, body) => {
+    expect((await post(custom(), '/places/resolve', body)).status).toBe(400);
+  });
+
+  it('외부로 나가는 검색어는 50글자로 자르고 현재 위치는 소수 3자리로 줄인다(주소 검색어도 50글자)', async () => {
+    const { searched, geocoded, placeSearch } = spy();
+    const app = custom({ placeSearch });
+    const long = `${'가'.repeat(60)}`;
+    await resolve(app, { query: long, lat: 35.150549, lng: 126.850451 });
+    expect(searched[0]?.query).toBe('가'.repeat(50));
+    expect(searched[0]?.near).toEqual({ lat: 35.151, lng: 126.85 });
+    await resolve(app, { query: `광주 서구 ${'가'.repeat(60)}로 12` });
+    expect(geocoded[0]).toHaveLength(50);
+    // 기억 키는 자르지 않는다(300자까지 그대로 비교).
+    await remember(app, long, { name: '긴 이름', lat: 35, lng: 126 }, false);
+    expect((await resolve(app, { query: 'x', key: long })).body.via).toBe('memory');
+  });
+
+  it('GET /places/search도 검색어 50글자·위치 소수 3자리로 보낸다', async () => {
+    const { searched, placeSearch } = spy();
+    const app = custom({ placeSearch });
+    await app.request(`/places/search?q=${encodeURIComponent('나'.repeat(50))}&lat=35.150549&lng=126.850451`);
+    expect(searched[0]).toEqual({ query: '나'.repeat(50), near: { lat: 35.151, lng: 126.85 } });
+  });
+});
+
+describe('실제 자리에서는 목 검색 결과를 쓰지 않는다(B)', () => {
+  const NOW = new Date('2026-11-15T09:00:00+09:00');
+  const makeReal = (over: Parameters<typeof newApp>[0] = {}) =>
+    custom({ now: () => NOW, seats: createSeatStore(() => NOW), clientAddress: (c) => c.req.header('x-test-ip') ?? 'a', ...over });
+  const j = async (app: ReturnType<typeof makeReal>, method: string, path: string, o: { token?: string; device?: string; body?: unknown } = {}) => {
+    const headers: Record<string, string> = {};
+    if (o.token) headers.authorization = `Bearer ${o.token}`;
+    if (o.device) headers['x-chagok-device'] = o.device;
+    if (o.body !== undefined) headers['content-type'] = 'application/json';
+    const res = await app.request(path, { method, headers, body: o.body === undefined ? undefined : JSON.stringify(o.body) });
+    return { status: res.status, body: (await res.json()) as any };
+  };
+  const connectSeat = async (app: ReturnType<typeof makeReal>) => {
+    const car = (await j(app, 'POST', '/pair/code', { body: {} })).body;
+    const code = (await j(app, 'POST', '/pair/code', { token: car.carToken, body: {} })).body.code;
+    const seat = (await j(app, 'POST', '/pair/claim', { body: { code, name: 'A' } })).body;
+    return { car, seat };
+  };
+
+  it('연결된 자리: 카카오 키가 없으면(목 어댑터) resolve·search 모두 후보 없음 + unavailable', async () => {
+    const app = makeReal();
+    const { seat } = await connectSeat(app);
+    const r = await j(app, 'POST', '/places/resolve', { token: seat.phoneToken, body: { query: '스타벅스', ...HERE } });
+    expect(r.body).toEqual({ memory: null, candidates: [], total: 0, source: 'unavailable', via: 'search' });
+    const g = await j(app, 'POST', '/places/resolve', { token: seat.phoneToken, body: { query: '광주 서구 상무중앙로 1' } });
+    expect(g.body).toMatchObject({ via: 'search', source: 'unavailable', candidates: [] });
+    const s = await j(app, 'GET', '/places/search?q=%EC%8A%A4%ED%83%80%EB%B2%85%EC%8A%A4', { token: seat.phoneToken });
+    expect(s.body).toEqual({ places: [], source: 'unavailable' });
+  });
+
+  it('연결 전 버킷(기기 id)도 같다', async () => {
+    const app = makeReal();
+    const dev = 'd'.repeat(32);
+    expect((await j(app, 'POST', '/places/resolve', { device: dev, body: { query: '스타벅스' } })).body.source).toBe('unavailable');
+    expect((await j(app, 'GET', '/places/search?q=a', { device: dev })).body).toEqual({ places: [], source: 'unavailable' });
+  });
+
+  it('자리 있는 차가 생긴 뒤 식별 없는 요청도 실제 범위라서 목을 쓰지 않는다. 기억은 여전히 동작한다', async () => {
+    const app = makeReal();
+    const { car, seat } = await connectSeat(app);
+    expect((await j(app, 'POST', '/places/resolve', { body: { query: '스타벅스' } })).body.source).toBe('unavailable');
+    await j(app, 'PUT', `/places/memory?driver=${seat.seatId}`, { token: car.carToken, body: { name: '스타벅스', place: { name: '단골', lat: 35, lng: 126 }, ambiguous: false } });
+    expect((await j(app, 'POST', '/places/resolve', { token: seat.phoneToken, body: { query: '스타벅스' } })).body.via).toBe('memory');
+  });
+
+  it('실제 출처(카카오 주입)는 실제 자리에서도 그대로 통과한다', async () => {
+    const real: PlaceSearch = {
+      searchKeyword: async () => ({ places: [{ id: 'kakao:1', name: '진짜', address: 'a', lat: 35.1, lng: 126.8, distanceMeters: 10 }], total: 1, source: 'kakao' }),
+      geocodeAddress: async () => ({ place: null, source: 'kakao' }),
+    };
+    const app = makeReal({ placeSearch: real });
+    const { seat } = await connectSeat(app);
+    const r = await j(app, 'POST', '/places/resolve', { token: seat.phoneToken, body: { query: '진짜' } });
+    expect(r.body).toMatchObject({ source: 'kakao', total: 1 });
+  });
+
+  it('기본 자리(식별 없음, 자리 있는 차 없음)와 FIXTURE_SEATS=1은 목을 쓴다(연결 뒤에도 같은 결과)', async () => {
+    const plain = makeReal();
+    expect((await j(plain, 'POST', '/places/resolve', { body: { query: '스타벅스', ...HERE } })).body.source).toBe('mock');
+    expect((await j(plain, 'GET', '/places/search?q=%EC%8A%A4%ED%83%80%EB%B2%85%EC%8A%A4')).body.places).toHaveLength(3);
+    const demo = makeReal({ fixtureSeats: true });
+    const before = (await j(demo, 'POST', '/places/resolve', { body: { query: '스타벅스', ...HERE } })).body;
+    const { seat } = await connectSeat(demo);
+    const after = (await j(demo, 'POST', '/places/resolve', { token: seat.phoneToken, body: { query: '스타벅스', ...HERE } })).body;
+    expect(after).toEqual(before);
+    expect(after.source).toBe('mock');
+    const dev = await j(demo, 'GET', '/places/search?q=%EC%8A%A4%ED%83%80%EB%B2%85%EC%8A%A4', { device: 'e'.repeat(32) });
+    expect(dev.body.places).toHaveLength(3);
   });
 });

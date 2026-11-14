@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
 import { createEnergySources } from './energy/sources.js';
 import { createNotificationRuntime } from './notify/setup.js';
-import { createPlaceSearch } from './placeSearch/index.js';
+import { createFailureLog, createPlaceSearch } from './placeSearch/index.js';
 import { createSeatStore } from './seats.js';
 import { loadDayFixture, loadFamilyMembers, loadMockCalendars, loadPlacesCatalog, resolveFixtureLocation } from './fixtures.js';
 
@@ -25,8 +25,9 @@ try {
   const calendars = loadMockCalendars();
   const places = loadPlacesCatalog();
   // KAKAO_REST_KEY가 있으면 카카오 로컬 API, 없으면 픽스처 목. 키는 로그에 남기지 않고 실패 이유(종류·상태 코드)만 남긴다.
+  // 같은 이유의 실패는 10분에 한 줄만 남긴다(키 거절·쿼터 초과가 요청마다 로그를 쌓지 않게).
   const placeSearch = createPlaceSearch(places.places, { KAKAO_REST_KEY: process.env.KAKAO_REST_KEY }, {
-    onFailure: (reason, status) => console.warn(`장소 검색 실패(카카오): ${reason}${status === undefined ? '' : ` ${status}`}`),
+    onFailure: createFailureLog((line) => console.warn(line)),
   });
   app = createApp({
     fixture: loadDayFixture(resolveFixtureLocation(process.env.FIXTURE_PATH), calendars),

@@ -130,6 +130,19 @@ describe('지난번 장소 기억', () => {
     expect(screen.queryByText("지난번 '치과' 일정")).toBeNull();
   });
 
+  it('지난번 기억이 애매해서 확인이 필요한 장소는 서버가 준 장소 스냅숏으로 저장한다(placeId가 null)', async () => {
+    const remembered: SetupSchedule = {
+      ...empty, id: 'cafe', title: '카페 약속',
+      suggestion: { placeId: null, name: '스타벅스 상무점', source: 'memory', ambiguous: true, place: { name: '스타벅스 상무점', address: '광주 서구 상무로 1', lat: 35.15, lng: 126.85 } },
+    };
+    const savePlace = jest.fn().mockResolvedValue({ id: 'cafe', place: { name: '스타벅스 상무점', lat: 35.15, lng: 126.85 }, locationText: '스타벅스 상무점', noTravel: false });
+    await renderScreen(makeApi({ fetchSchedules: jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [remembered] }), savePlace }));
+    expect(await screen.findByText('스타벅스 상무점')).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole('button', { name: '카페 약속 여기 맞아요' }));
+    expect(await screen.findByText('✓ 스타벅스 상무점')).toBeOnTheScreen();
+    expect(savePlace).toHaveBeenCalledWith('cafe', { place: { name: '스타벅스 상무점', address: '광주 서구 상무로 1', lat: 35.15, lng: 126.85 } }, expect.any(AbortSignal));
+  });
+
   it('저장 실패는 후보를 유지하고 같은 후보로 재시도하며 저장 중에는 비활성이다', async () => {
     const savePlace = jest.fn().mockRejectedValueOnce(new Error('offline')).mockReturnValueOnce(new Promise(() => {}));
     await renderScreen(withDentist({ savePlace }));

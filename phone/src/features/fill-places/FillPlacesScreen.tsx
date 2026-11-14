@@ -29,6 +29,20 @@ type Props = {
 
 type Item = { kind: 'server'; start: number; schedule: SetupSchedule } | { kind: 'filtered'; start: number; event: FilteredEvent };
 
+type Suggestion = NonNullable<SetupSchedule['suggestion']>;
+
+/**
+ * '여기 맞아요'로 저장할 내용. 목 장소 후보는 id로, 지난번 기억(애매해서 확인이 필요한 장소)은 서버가 내려준 장소 스냅숏으로 저장한다.
+ */
+function confirmChange(suggestion: Suggestion): SchedulePlaceChange {
+  if (suggestion.placeId !== null) return { placeId: suggestion.placeId };
+  if ('place' in suggestion) {
+    const { name, address, lat, lng } = suggestion.place;
+    return { place: { name, address: address ?? undefined, lat, lng } };
+  }
+  return { placeId: null };
+}
+
 export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_TIMEOUT_MS, filteredEvents, travelMark }: Props) {
   const sharedFiltered = useFilteredEvents();
   const filtered = filteredEvents ?? sharedFiltered;
@@ -127,7 +141,7 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel={`${schedule.title} ${t.rememberedConfirm}`}
             accessibilityState={{ disabled: saving }} disabled={saving} style={styles.confirm}
-            onPress={() => void save(schedule.id, { placeId: schedule.suggestion!.placeId })}>
+            onPress={() => void save(schedule.id, confirmChange(schedule.suggestion!))}>
             <Text style={[styles.confirmText, font(600)]}>{t.rememberedConfirm}</Text>
           </Pressable>
         </View>

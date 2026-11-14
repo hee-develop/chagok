@@ -101,25 +101,52 @@ export function parseAddressResponse(body: unknown): { place: GeocodedPlace | nu
 
 export function createKakaoPlaceSearch({ apiKey, fetch: doFetch = fetch, timeoutMs = SEARCH_TIMEOUT_MS, radiusMeters, onFailure }: KakaoOptions): PlaceSearch {
   const unavailable = { places: [], total: 0, source: 'unavailable' as const };
-  /** 요청 하나. 어떤 실패든 던지지 않고 null(이유는 onFailure로만 알림). */
+  /**
+   * 요청 하나. 어떤 실패든 던지지 않고 null(이유는 onFailure로만 알림). 제한 시간(timeoutMs)은 **헤더를 받는 데서 본문을 다 읽을 때까지** 전체에 걸린다:
+   * 본문을 받다가 멈춰도 `timeout`이고, signal을 무시하는 fetch여도 시간이 지나면 끊는다.
+   */
   const call = async (req: { url: string; headers: Record<string, string> }): Promise<unknown | null> => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await doFetch(req.url, { method: 'GET', headers: req.headers, signal: controller.signal });
-      if (!res.ok) {
-        onFailure?.('http', res.status);
-        return null;
-      }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // 실패는 한 번만 알린다(시간이 지나 끊은 뒤 늦게 도착하는 fetch의 실패는 알리지 않는다).
+    let reported = false;
+    const fail = (reason: KakaoFailure, status?: number) => {
+      if (reported) return;
+      reported = true;
+      if (status === undefined) onFailure?.(reason);
+      else onFailure?.(reason, status);
+    };
+    const deadline = new Promise<'deadline'>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve('deadline');
+      }, timeoutMs);
+    });
+    const work = (async (): Promise<{ body: unknown } | null> => {
       try {
-        return await res.json();
-      } catch {
-        onFailure?.('format');
+        const res = await doFetch(req.url, { method: 'GET', headers: req.headers, signal: controller.signal });
+        if (!res.ok) {
+          fail('http', res.status);
+          return null;
+        }
+        try {
+          return { body: await res.json() };
+        } catch {
+          fail(controller.signal.aborted ? 'timeout' : 'format');
+          return null;
+        }
+      } catch (e) {
+        fail(controller.signal.aborted || (e as { name?: string })?.name === 'AbortError' ? 'timeout' : 'network');
         return null;
       }
-    } catch (e) {
-      onFailure?.(controller.signal.aborted || (e as { name?: string })?.name === 'AbortError' ? 'timeout' : 'network');
-      return null;
+    })();
+    try {
+      const winner = await Promise.race([work, deadline]);
+      if (winner === 'deadline') {
+        fail('timeout');
+        return null;
+      }
+      return winner === null ? null : winner.body;
     } finally {
       clearTimeout(timer);
     }

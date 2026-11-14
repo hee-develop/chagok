@@ -10,7 +10,7 @@ import { colors, useFont } from '../../ui/theme';
 import { schedulePlacesApi, type SchedulePlacesApi } from '../fill-places/schedulePlacesApi';
 import type { PlaceTarget } from './favorites';
 import { PlaceRow } from './PlaceRow';
-import { placesApi, type Place, type PlacesApi } from './placesApi';
+import { placesApi, snapshotOf, type Place, type PlaceSearchSource, type PlacesApi } from './placesApi';
 
 /** 서버 검색어 상한과 같다. */
 const MAX_QUERY_LENGTH = 50;
@@ -22,7 +22,7 @@ type Props = ({ target: PlaceTarget; scheduleId?: never } | { scheduleId: string
   debounceMs?: number;
 };
 
-type SearchState = { status: 'idle' } | { status: 'loading' } | { status: 'error' } | { status: 'ready'; places: Place[] };
+type SearchState = { status: 'idle' } | { status: 'loading' } | { status: 'error' } | { status: 'ready'; places: Place[]; source: PlaceSearchSource };
 
 export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePlacesApi, api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS, debounceMs = 300 }: Props) {
   const router = useRouter();
@@ -51,8 +51,8 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
       searchRequest.current = controller;
       setSearch({ status: 'loading' });
       try {
-        const places = await requestWithTimeout((signal) => api.searchPlaces(trimmed, signal), timeoutMs, controller);
-        if (searchRequest.current === controller) setSearch({ status: 'ready', places });
+        const found = await requestWithTimeout((signal) => api.searchPlaces(trimmed, signal), timeoutMs, controller);
+        if (searchRequest.current === controller) setSearch({ status: 'ready', places: found.places, source: found.source });
       } catch {
         if (searchRequest.current === controller) setSearch({ status: 'error' });
       }
@@ -87,9 +87,9 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
   }, [router, scheduleId]);
 
   /** 해당 자리 또는 일정 하나만 저장한다. 일정이 거절되면 목록 확인을 안내한다. */
-  const pick = async (place: Place) => {
+  const pick = async (place: Place, source: PlaceSearchSource) => {
     if (pickRequest.current) return;
-    retryPick.current = () => void pick(place);
+    retryPick.current = () => void pick(place, source);
     const controller = new AbortController();
     pickRequest.current = controller;
     setPickingId(place.id);
@@ -98,7 +98,13 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
     let leave = false;
     try {
       await requestWithTimeout<unknown>(
-        (signal) => scheduleId === undefined ? api.assignPlace(target!, place.id, signal) : scheduleApi.savePlace(scheduleId, { placeId: place.id }, signal),
+        // 목 장소는 id로, 외부 검색 결과(카카오)는 장소 스냅숏으로 저장한다.
+        (signal) => {
+          const external = source !== 'mock';
+          return scheduleId === undefined
+            ? api.assignPlace(target!, external ? snapshotOf(place) : place.id, signal)
+            : scheduleApi.savePlace(scheduleId, external ? { place: snapshotOf(place) } : { placeId: place.id }, signal);
+        },
         timeoutMs, controller,
       );
       leave = pickRequest.current === controller;
@@ -163,7 +169,14 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
             </Pressable>
           </View>
         ) : search.status === 'ready' ? (
-          search.places.length === 0 ? (
+          search.source === 'unavailable' ? (
+            <View key="unavailable" style={styles.statusBox} accessibilityLiveRegion="polite">
+              <Text style={[styles.errorText, font(500)]}>{t.searchUnavailable}</Text>
+              <Pressable accessibilityRole="button" onPress={() => setAttempt((n) => n + 1)} style={styles.retry}>
+                <Text style={[styles.retryText, font(600)]}>{t.retry}</Text>
+              </Pressable>
+            </View>
+          ) : search.places.length === 0 ? (
             <View key="empty" style={styles.statusBox}>
               <Text style={[styles.emptyText, font(400)]}>{t.noResults}</Text>
             </View>
@@ -177,7 +190,7 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
                   subtitle={place.address}
                   isLast={index === search.places.length - 1}
                   disabled={picking}
-                  onPress={() => void pick(place)}
+                  onPress={() => void pick(place, search.source)}
                 />
               ))}
             </View>

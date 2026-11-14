@@ -7,8 +7,10 @@ import type { PlaceSearch } from './types.js';
 export * from './types.js';
 export { createMockPlaceSearch } from './mock.js';
 export { createKakaoPlaceSearch } from './kakao.js';
+export { createFailureLog } from './failureLog.js';
 export { withCache } from './cache.js';
 export { createRateLimiter, type RateLimiter, type RateLimiterOptions } from './rateLimit.js';
+export { scopedSearch, externalQuery, coarseLocation } from './scoped.js';
 export { matchPlaces, normalizeQuery, searchPlaces } from './match.js';
 
 export type PlaceSearchEnv = { KAKAO_REST_KEY?: string };

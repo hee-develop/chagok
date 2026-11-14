@@ -13,6 +13,7 @@ import { createSchedulesRoute } from './routes/schedules.js';
 import { createPlaceResolveRoute } from './routes/placeResolve.js';
 import { createPlacesRoute, type FavoritesStore } from './routes/places.js';
 import { createNotifications, type Notifications } from './notify/notifier.js';
+import { MEMORY_WRITE_MAX, MEMORY_WRITE_WINDOW_MS } from './placeSearch/limits.js';
 import { createMockPlaceSearch, createRateLimiter, type PlaceSearch, type RateLimiterOptions } from './placeSearch/index.js';
 import { createSeatDataRegistry } from './seatData.js';
 import { connectionAddress, createSeatGuard } from './seatScope.js';
@@ -66,6 +67,8 @@ export type AppOptions = {
   placeSearch?: PlaceSearch;
   /** 장소 검색(`GET /places/search`·`POST /places/resolve`)의 요청 주소별 속도 제한. 기본값은 placeSearch/limits.ts. 테스트에서 바꾼다. */
   placeSearchRateLimit?: Omit<RateLimiterOptions, 'now'>;
+  /** `PUT /places/memory`의 요청 주소별 속도 제한. 기본값은 placeSearch/limits.ts(분당 30회). 테스트에서 바꾼다. */
+  placeMemoryRateLimit?: Omit<RateLimiterOptions, 'now'>;
   /** 연결 전 버킷 수·TTL·생성 속도 제한과 일정 저장 용량 예산(연결된 자리/버킷 따로, 버킷 하나의 상한). 기본값은 seatData.ts. 테스트에서 바꾼다. */
   capacity?: Omit<NonNullable<Parameters<typeof createSeatDataRegistry>[0]>, 'now' | 'fixtureIds' | 'defaults'>;
   /**
@@ -105,6 +108,7 @@ export const createApp = ({
   energyRateLimit,
   placeSearch = createMockPlaceSearch(places.places),
   placeSearchRateLimit,
+  placeMemoryRateLimit,
 }: AppOptions) => {
   // 일정·선택·자주 가는 곳·가족 요청·보정·채비는 운전자 자리마다 따로 쌓인다. 토큰 없이 기기 id만 있는 폰은 그 기기의 연결 전 버킷을,
   // 식별이 전혀 없는 요청은 기본 자리를 쓴다(픽스처·데모·차량 E2E 경로).
@@ -127,7 +131,12 @@ export const createApp = ({
   };
   const guard = createSeatGuard(seats, registry, { legacyDriverFallback, fixtureSeats, clientAddress });
   const searchLimiter = createRateLimiter({ ...placeSearchRateLimit, now: () => now().getTime() });
-  const searchDeps = { search: placeSearch, allow: (c: Context) => searchLimiter.take(clientAddress(c)) };
+  const memoryLimiter = createRateLimiter({ max: MEMORY_WRITE_MAX, windowMs: MEMORY_WRITE_WINDOW_MS, ...placeMemoryRateLimit, now: () => now().getTime() });
+  const searchDeps = {
+    search: placeSearch,
+    allow: (c: Context) => searchLimiter.take(clientAddress(c)),
+    allowMemoryWrite: (c: Context) => memoryLimiter.take(clientAddress(c)),
+  };
   return new Hono()
     .get('/health', (c) => c.json({ ok: true as const }))
     .route('/calendars', createCalendarsRoute(calendars, guard))

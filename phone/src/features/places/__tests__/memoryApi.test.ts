@@ -7,7 +7,7 @@ jest.mock('../../../api/client', () => ({
     places: {
       memory: {
         $get: (...a: unknown[]) => mock.get(...a),
-        ':name': { $delete: (...a: unknown[]) => mock.del(...a) },
+        $delete: (...a: unknown[]) => mock.del(...a),
       },
     },
   },
@@ -32,10 +32,10 @@ describe('placeMemoryApi', () => {
     await expect(placeMemoryApi.fetchMemories(signal)).rejects.toMatchObject({ name: 'HttpError', status: 401 });
   });
 
-  it('deleteMemory는 이름을 param으로 보내고 지웠으면 true, 이미 없으면(404) false다', async () => {
+  it('deleteMemory는 이름을 쿼리 name으로 보내고 지웠으면 true, 이미 없으면(404) false다', async () => {
     mock.del.mockResolvedValueOnce(ok({ name: '스타벅스' }));
     await expect(placeMemoryApi.deleteMemory('스타벅스', signal)).resolves.toBe(true);
-    expect(mock.del).toHaveBeenCalledWith({ param: { name: '스타벅스' } }, { init: { signal } });
+    expect(mock.del).toHaveBeenCalledWith({ query: { name: '스타벅스' } }, { init: { signal } });
     mock.del.mockResolvedValueOnce(bad(404));
     await expect(placeMemoryApi.deleteMemory('스타벅스', signal)).resolves.toBe(false);
   });

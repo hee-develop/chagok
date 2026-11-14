@@ -7,11 +7,19 @@ import { isLat, isLng } from './types.js';
  */
 export const looksLikeAddress = (text: string): boolean => /(?:로|길|동|읍|면|리)\s*(?:산\s*)?\d+(?:-\d+)?(?:\s*번지)?(?:\s|$)/.test(text.trim());
 
-/** `35.1595, 126.8526`(위도, 경도) 꼴 글자를 좌표로 읽는다. 범위를 벗어나면 null. */
+/** 한국의 위도·경도 범위(도). 좌표 글자는 이 안일 때만 좌표로 본다. */
+export const KOREA_LAT_RANGE = [33, 39] as const;
+export const KOREA_LNG_RANGE = [124, 132] as const;
+
+/**
+ * `35.1595, 126.8526`(위도, 경도) 꼴 글자를 좌표로 읽는다. **소수점 아래 3자리 이상인 두 수**이고 한국 범위(위도 33~39, 경도 124~132)일 때만
+ * 좌표다. 장소 이름·층수·호수 같은 `10 30`·`3, 15`·`35 126`을 좌표로 오판하지 않기 위해서다. 아니면 null.
+ */
 export function parseCoordinateText(text: string): { lat: number; lng: number } | null {
-  const m = /^\s*(-?\d{1,3}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(text);
+  const m = /^\s*(-?\d{1,3}\.\d{3,})\s*[, ]\s*(-?\d{1,3}\.\d{3,})\s*$/.exec(text);
   if (!m) return null;
   const lat = Number(m[1]);
   const lng = Number(m[2]);
-  return isLat(lat) && isLng(lng) ? { lat, lng } : null;
+  const inKorea = lat >= KOREA_LAT_RANGE[0] && lat <= KOREA_LAT_RANGE[1] && lng >= KOREA_LNG_RANGE[0] && lng <= KOREA_LNG_RANGE[1];
+  return inKorea && isLat(lat) && isLng(lng) ? { lat, lng } : null;
 }

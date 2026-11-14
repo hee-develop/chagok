@@ -10,7 +10,7 @@ import {
   parseAddressResponse,
   parseKeywordResponse,
 } from '../src/placeSearch/kakao.js';
-import { createPlaceSearch, createMockPlaceSearch, createRateLimiter, distanceMeters, withCache, type PlaceSearch } from '../src/placeSearch/index.js';
+import { createFailureLog, createPlaceSearch, createMockPlaceSearch, createRateLimiter, distanceMeters, withCache, type PlaceSearch } from '../src/placeSearch/index.js';
 import { SEARCH_CACHE_TTL_MS } from '../src/placeSearch/limits.js';
 import { catalog } from './helpers.js';
 
@@ -235,6 +235,33 @@ describe('카카오 어댑터: 호출·실패 처리', () => {
     expect(await search.searchKeyword({ query: '치과', limit: 2 })).toEqual({ places: [], total: 0, source: 'unavailable' });
     expect(seen).toEqual([['timeout']]);
   });
+  it('헤더는 왔는데 본문을 받다가 멈추면 timeout이다(format이 아니다). 제한 시간은 본문까지 걸린다', async () => {
+    const seen: unknown[][] = [];
+    // 본문 스트림이 abort에 반응해 실패하는 실제 fetch처럼 흉내 낸다.
+    const stall = ((_url: string, init: RequestInit) => {
+      const body = new ReadableStream({
+        start(controller) {
+          init.signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')));
+        },
+      });
+      return Promise.resolve(new Response(body, { status: 200 }));
+    }) as unknown as typeof fetch;
+    const search = createKakaoPlaceSearch({ apiKey: KEY, fetch: stall, timeoutMs: 30, onFailure: (...a) => seen.push(a) });
+    expect(await search.searchKeyword({ query: '치과', limit: 2 })).toEqual({ places: [], total: 0, source: 'unavailable' });
+    expect(seen).toEqual([['timeout']]);
+  });
+  it('signal을 무시하는 fetch(응답이 영영 안 옴·본문이 안 닫힘)여도 제한 시간에 끊고 timeout을 한 번만 알린다', async () => {
+    const seen: unknown[][] = [];
+    const never = (() => new Promise<Response>(() => undefined)) as unknown as typeof fetch;
+    const endless = (async () => new Response(new ReadableStream({ start() {} }), { status: 200 })) as unknown as typeof fetch;
+    for (const f of [never, endless]) {
+      const search = createKakaoPlaceSearch({ apiKey: KEY, fetch: f, timeoutMs: 30, onFailure: (...a) => seen.push(a) });
+      const started = Date.now();
+      expect(await search.searchKeyword({ query: '치과', limit: 2 })).toEqual({ places: [], total: 0, source: 'unavailable' });
+      expect(Date.now() - started).toBeLessThan(1000);
+    }
+    expect(seen).toEqual([['timeout'], ['timeout']]);
+  });
   it('네트워크 오류·JSON이 아닌 본문·모양이 어긋난 본문도 던지지 않고 unavailable이다', async () => {
     const seen: unknown[][] = [];
     const make = (f: () => Promise<Response>) => createKakaoPlaceSearch({ apiKey: KEY, fetch: f as typeof fetch, onFailure: (...a) => seen.push(a) });
@@ -244,6 +271,26 @@ describe('카카오 어댑터: 호출·실패 처리', () => {
     expect((await make(async () => jsonResponse('{"documents":1}')).searchKeyword(q)).source).toBe('unavailable');
     expect((await make(async () => jsonResponse('{"documents":1}')).geocodeAddress('x')).source).toBe('unavailable');
     expect(seen).toEqual([['network'], ['format'], ['format'], ['format']]);
+  });
+});
+
+describe('실패 로그: 같은 이유는 일정 시간에 한 번(키 거절·쿼터 초과가 요청마다 쌓이지 않는다)', () => {
+  it('같은 이유(종류·상태 코드)는 간격 안에 한 줄만 남기고 건너뛴 횟수를 다음 줄에 붙인다. 이유가 다르면 따로 남긴다', () => {
+    let clock = 0;
+    const lines: string[] = [];
+    const log = createFailureLog((l) => lines.push(l), { intervalMs: 1000, now: () => clock });
+    for (let i = 0; i < 50; i++) log('http', 401);
+    log('http', 429);
+    log('timeout');
+    expect(lines).toEqual(['장소 검색 실패(카카오): http 401', '장소 검색 실패(카카오): http 429', '장소 검색 실패(카카오): timeout']);
+    clock = 1000;
+    log('http', 401);
+    expect(lines[3]).toBe('장소 검색 실패(카카오): http 401 (그 사이 49번 더)');
+    expect(lines).toHaveLength(4);
+    clock = 2000;
+    log('http', 401);
+    expect(lines[4]).toBe('장소 검색 실패(카카오): http 401');
+    expect(JSON.stringify(lines)).not.toContain(KEY);
   });
 });
 

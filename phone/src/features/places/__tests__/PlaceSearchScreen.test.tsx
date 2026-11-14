@@ -5,7 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { HttpError } from '../../../api/request';
 import { PlaceSearchScreen } from '../PlaceSearchScreen';
-import { APT, EMPTY, GYM, makeApi, TOWER } from '../testSupport';
+import { APT, EMPTY, found, GYM, makeApi, TOWER } from '../testSupport';
 
 const mockBack = jest.fn();
 const mockReplace = jest.fn();
@@ -55,7 +55,7 @@ describe('PlaceSearchScreen 렌더', () => {
 
 describe('검색', () => {
   it('공백을 뺀 검색어와 signal로 서버에 묻고 결과를 줄로 보여 준다', async () => {
-    const searchPlaces = jest.fn().mockResolvedValue([APT, TOWER]);
+    const searchPlaces = jest.fn().mockResolvedValue(found([APT, TOWER]));
     await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={0} />);
 
     await fireEvent.changeText(input(), '  광주 ');
@@ -80,7 +80,7 @@ describe('검색', () => {
   });
 
   it('입력을 멈추기 전까지는 묻지 않고(디바운스), 마지막 입력으로만 묻는다', async () => {
-    const searchPlaces = jest.fn().mockResolvedValue([]);
+    const searchPlaces = jest.fn().mockResolvedValue(found([]));
     await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={60} />);
 
     await fireEvent.changeText(input(), '광');
@@ -92,7 +92,7 @@ describe('검색', () => {
   });
 
   it('앞뒤 공백만 달라진 입력은 다시 검색하지 않는다', async () => {
-    const searchPlaces = jest.fn().mockResolvedValue([APT]);
+    const searchPlaces = jest.fn().mockResolvedValue(found([APT]));
     await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={0} />);
 
     await fireEvent.changeText(input(), '광주');
@@ -105,7 +105,7 @@ describe('검색', () => {
   });
 
   it('입력을 멈추기 전에는 이전 결과를 지우지 않고, 검색을 시작할 때 로딩으로 바뀐다', async () => {
-    const searchPlaces = jest.fn().mockResolvedValueOnce([APT]).mockReturnValue(new Promise(() => {}));
+    const searchPlaces = jest.fn().mockResolvedValueOnce(found([APT])).mockReturnValue(new Promise(() => {}));
     await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={80} />);
 
     await fireEvent.changeText(input(), '아파트');
@@ -119,7 +119,7 @@ describe('검색', () => {
   });
 
   it('검색어를 모두 지웠다가 다시 입력하면 이전 결과를 다시 보이지 않는다', async () => {
-    const searchPlaces = jest.fn().mockResolvedValueOnce([APT]).mockReturnValue(new Promise(() => {}));
+    const searchPlaces = jest.fn().mockResolvedValueOnce(found([APT])).mockReturnValue(new Promise(() => {}));
     await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={80} />);
 
     await fireEvent.changeText(input(), '아파트');
@@ -139,7 +139,7 @@ describe('검색', () => {
         signals.push(s);
         return new Promise((r) => (resolveFirst = r));
       })
-      .mockResolvedValue([TOWER]);
+      .mockResolvedValue(found([TOWER]));
     await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={0} />);
 
     await fireEvent.changeText(input(), '아파트');
@@ -148,7 +148,7 @@ describe('검색', () => {
 
     expect(await screen.findByText(TOWER.name)).toBeOnTheScreen();
     expect(signals[0].aborted).toBe(true);
-    await act(async () => resolveFirst([APT]));
+    await act(async () => resolveFirst(found([APT])));
     expect(screen.queryByText(APT.name)).toBeNull();
   });
 
@@ -158,7 +158,7 @@ describe('검색', () => {
   });
 
   it('입력값이 바뀔 때마다 마지막 값으로 검색한다(글자를 하나씩 바꾸는 입력을 흉내 낸 것으로, 실제 IME 조합은 포함하지 않는다)', async () => {
-    const searchPlaces = jest.fn().mockResolvedValue([]);
+    const searchPlaces = jest.fn().mockResolvedValue(found([]));
     await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={0} />);
     await fireEvent.changeText(input(), '육');
     await fireEvent.changeText(input(), '육저');
@@ -168,7 +168,7 @@ describe('검색', () => {
 
   it('검색이 실패하면 오류 안내를 알리고 다시 시도로 복구한다', async () => {
     const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
-    const searchPlaces = jest.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue([APT]);
+    const searchPlaces = jest.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue(found([APT]));
     await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={0} />);
 
     await fireEvent.changeText(input(), '광주');
@@ -207,7 +207,7 @@ describe('장소 고르기', () => {
     ['work', TOWER],
     ['other', GYM],
   ] as const)('%s 대상이면 그 자리 하나만 서버에 보내고(저장값을 먼저 읽지 않는다) 돌아간다', async (target, place) => {
-    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([place]) });
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([place])) });
     await pickApt(target, api, place);
 
     await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
@@ -217,7 +217,7 @@ describe('장소 고르기', () => {
   });
 
   it('서버가 돌려준 결과로 다른 자리는 그대로이고, 다른 자리의 같은 장소는 옮겨진다', async () => {
-    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([GYM]) }, { home: APT, work: TOWER, others: [GYM], revision: 4 });
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([GYM])) }, { home: APT, work: TOWER, others: [GYM], revision: 4 });
     await pickApt('work', api, GYM);
 
     await waitFor(() => expect(mockBack).toHaveBeenCalled());
@@ -228,7 +228,7 @@ describe('장소 고르기', () => {
   it('저장 중에는 로딩을 보이고 결과를 다시 눌러도 한 번만 저장하며, 끝나기 전에는 돌아가지 않는다', async () => {
     let resolve: (v: unknown) => void = () => {};
     const api = makeApi({
-      searchPlaces: jest.fn().mockResolvedValue([APT]),
+      searchPlaces: jest.fn().mockResolvedValue(found([APT])),
       assignPlace: jest.fn().mockReturnValue(new Promise((r) => (resolve = r))),
     });
     await renderScreen(<PlaceSearchScreen target="home" api={api} debounceMs={0} />);
@@ -249,7 +249,7 @@ describe('장소 고르기', () => {
 
   it('네트워크·5xx 실패는 오류 안내를 알리고 결과를 유지하며, 다시 시도가 같은 요청을 다시 보낸다', async () => {
     const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
-    const base = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]) });
+    const base = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([APT])) });
     const assignPlace = jest.fn().mockRejectedValueOnce(new HttpError(500, 'PUT 500')).mockImplementation(base.assignPlace);
     await renderScreen(<PlaceSearchScreen target="home" api={{ ...base, assignPlace }} debounceMs={0} />);
     await fireEvent.changeText(input(), '아파트');
@@ -269,7 +269,7 @@ describe('장소 고르기', () => {
   });
 
   it('서버가 거절(4xx)하면 같은 요청을 다시 보내지 않고 돌아가 2단계 화면이 최신 상태를 불러오게 한다', async () => {
-    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([GYM]) }, { ...EMPTY, others: [GYM], revision: 3 });
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([GYM])) }, { ...EMPTY, others: [GYM], revision: 3 });
     await pickApt('other', api, GYM);
 
     await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
@@ -283,7 +283,7 @@ describe('장소 고르기', () => {
       signal = s;
       return new Promise(() => {});
     });
-    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]), assignPlace });
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([APT])), assignPlace });
     await renderScreen(<PlaceSearchScreen target="home" api={api} timeoutMs={150} debounceMs={0} />);
     await fireEvent.changeText(input(), '아파트');
 
@@ -298,7 +298,7 @@ describe('장소 고르기', () => {
     const assignPlace = jest.fn().mockImplementation((_t: string, _id: string, _s: AbortSignal) => {
       return new Promise(() => {});
     });
-    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]), assignPlace }, { ...EMPTY, work: TOWER, revision: 2 });
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([APT])), assignPlace }, { ...EMPTY, work: TOWER, revision: 2 });
     await renderScreen(<PlaceSearchScreen target="home" api={api} debounceMs={0} />);
     await fireEvent.changeText(input(), '아파트');
     void fireEvent.press(await screen.findByRole('button', { name: `${APT.name}, ${APT.address}` }));
@@ -319,7 +319,7 @@ describe('장소 고르기', () => {
       signal = s;
       return new Promise(() => {});
     });
-    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]), assignPlace });
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([APT])), assignPlace });
     const view = await renderScreen(<PlaceSearchScreen target="home" api={api} debounceMs={0} />);
     await fireEvent.changeText(input(), '아파트');
     void fireEvent.press(await screen.findByRole('button', { name: `${APT.name}, ${APT.address}` }));
@@ -350,9 +350,45 @@ describe('취소와 돌아가기', () => {
 });
 
 
+describe('외부 검색 결과(카카오) 저장과 검색 불가 안내', () => {
+  const KAKAO: typeof APT = { id: 'kakao:777', name: '카카오 약국', address: '광주 서구 약국로 9', lat: 35.151, lng: 126.851 };
+  const SNAPSHOT = { name: '카카오 약국', address: '광주 서구 약국로 9', lat: 35.151, lng: 126.851, externalId: 'kakao:777' };
+
+  it('외부 결과를 고르면 목 id가 아니라 장소 스냅숏으로 자주 가는 곳에 저장한다', async () => {
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([KAKAO], 'kakao')) });
+    await renderScreen(<PlaceSearchScreen target="home" api={api} debounceMs={0} />);
+    await fireEvent.changeText(input(), '약국');
+    await fireEvent.press(await screen.findByRole('button', { name: `${KAKAO.name}, ${KAKAO.address}` }));
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+    expect(api.assignPlace).toHaveBeenCalledWith('home', SNAPSHOT, expect.any(AbortSignal));
+  });
+
+  it('일정 장소 검색에서도 외부 결과는 place 스냅숏으로 보정하고, 목 결과는 기존대로 placeId다', async () => {
+    const savePlace = jest.fn().mockResolvedValue({ id: 'lunch', place: KAKAO, locationText: KAKAO.name, noTravel: false });
+    const scheduleApi = { fetchSchedules: jest.fn(), saveCare: jest.fn(), savePlace };
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([KAKAO], 'kakao')) });
+    await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={scheduleApi} debounceMs={0} />);
+    await fireEvent.changeText(input(), '약국');
+    await fireEvent.press(await screen.findByRole('button', { name: `${KAKAO.name}, ${KAKAO.address}` }));
+    await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
+    expect(savePlace).toHaveBeenCalledWith('lunch', { place: SNAPSHOT }, expect.any(AbortSignal));
+  });
+
+  it('검색을 못 하는 상태(unavailable)는 "결과 없음"이 아니라 검색 불가 안내와 다시 시도를 보인다', async () => {
+    const searchPlaces = jest.fn().mockResolvedValueOnce(found([], 'unavailable')).mockResolvedValue(found([KAKAO], 'kakao'));
+    await renderScreen(<PlaceSearchScreen target="home" api={makeApi({ searchPlaces })} debounceMs={0} />);
+    await fireEvent.changeText(input(), '약국');
+    expect(await screen.findByText('지금은 장소를 검색할 수 없어요. 잠시 뒤 다시 시도해 주세요.')).toBeOnTheScreen();
+    expect(screen.queryByText('검색 결과가 없어요')).toBeNull();
+    await fireEvent.press(screen.getByText('다시 시도'));
+    expect(await screen.findByRole('button', { name: `${KAKAO.name}, ${KAKAO.address}` })).toBeOnTheScreen();
+    expect(searchPlaces).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('3단계 일정 장소 검색', () => {
   it('선택한 일정에만 장소를 저장하고 3단계로 돌아간다', async () => {
-    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]) });
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([APT])) });
     const scheduleApi = { fetchSchedules: jest.fn(), saveCare: jest.fn(), savePlace: jest.fn().mockResolvedValue({ id: 'lunch', place: APT, locationText: APT.name, noTravel: false }) };
     await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={scheduleApi} debounceMs={0} />);
     expect(screen.getByText('3 / 4')).toBeOnTheScreen();
@@ -364,7 +400,7 @@ describe('3단계 일정 장소 검색', () => {
   });
 
   it('저장 실패는 성공으로 이동하지 않고, 재시도가 같은 일정에만 적용된다', async () => {
-    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]) });
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([APT])) });
     const savePlace = jest.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({});
     await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={{ fetchSchedules: jest.fn(), saveCare: jest.fn(), savePlace }} debounceMs={0} />);
     await fireEvent.changeText(input(), '아파트');
@@ -378,7 +414,7 @@ describe('3단계 일정 장소 검색', () => {
 
   it('선택 해제된 일정은 실패를 안내하고 목록으로 돌아가게 한다', async () => {
     mockCanGoBack.mockReturnValue(false);
-    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue([APT]) });
+    const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([APT])) });
     const savePlace = jest.fn().mockRejectedValue(new HttpError(404, 'removed'));
     await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={{ fetchSchedules: jest.fn(), saveCare: jest.fn(), savePlace }} debounceMs={0} />);
     await fireEvent.changeText(input(), '아파트');

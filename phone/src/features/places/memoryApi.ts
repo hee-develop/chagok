@@ -24,10 +24,11 @@ export const placeMemoryApi: PlaceMemoryApi = {
     return (await res.json()).memories;
   },
   deleteMemory: async (name, signal) => {
-    const res = await api.places.memory[':name'].$delete({ param: { name } }, { init: { signal } });
+    // 이름은 쿼리 name으로 보낸다: 경로 변수였을 때 `/`·`#`·`?`가 든 이름(헬스장/수영장)은 지워지지 않았다.
+    const res = await api.places.memory.$delete({ query: { name } }, { init: { signal } });
     const status: number = res.status;
     if (status === 404) return false;
-    if (status !== 200) throw new HttpError(status, `DELETE /places/memory/:name ${status}`);
+    if (status !== 200) throw new HttpError(status, `DELETE /places/memory ${status}`);
     return true;
   },
 };

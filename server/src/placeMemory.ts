@@ -18,12 +18,18 @@ export type PlaceMemoryStore = {
   /** 최근에 쓴 것부터. */
   list(): PlaceMemoryEntry[];
   size(): number;
+  /** 상한을 바꾼다(연결 전 버킷이 자리가 될 때 늘린다). 줄이면 오래된 것부터 버린다. */
+  setMax(max: number): void;
 };
 
 /** 운전자 자리 하나의 장소 기억(메모리). SeatData에 붙어 자리를 지우면 함께 지워지고, 폰을 바꿔도 같은 자리에 남는다. */
 export function createPlaceMemoryStore(now: () => Date, max: number = MAX_MEMORIES): PlaceMemoryStore {
   // Map의 삽입 순서 = 쓴 순서(다시 쓰면 맨 뒤로).
   const entries = new Map<string, PlaceMemoryEntry>();
+  let limit = Math.max(1, max);
+  const trim = () => {
+    while (entries.size > limit) entries.delete(entries.keys().next().value as string);
+  };
   return {
     get: (name) => entries.get(normalizePlaceName(name)) ?? null,
     put: ({ name, place, ambiguous }) => {
@@ -36,11 +42,15 @@ export function createPlaceMemoryStore(now: () => Date, max: number = MAX_MEMORI
       };
       entries.delete(key);
       entries.set(key, entry);
-      while (entries.size > Math.max(1, max)) entries.delete(entries.keys().next().value as string);
+      trim();
       return entry;
     },
     delete: (name) => entries.delete(normalizePlaceName(name)),
     list: () => [...entries.values()].reverse(),
     size: () => entries.size,
+    setMax: (next) => {
+      limit = Math.max(1, next);
+      trim();
+    },
   };
 }
