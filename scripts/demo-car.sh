@@ -13,7 +13,7 @@
 # 끝날 때(Ctrl-C 포함) 주입값(trip·route·listen·navi·drive·loc·exitcard)을 실제 값으로 되돌린다. 휴대폰 연결 상태는 되돌리지 않는다:
 # 시작할 때 paired=true로 '연결됨'으로 두므로(연결 카드가 단계 판정을 가리지 않게), PT 시연 전에는 `pnpm demo:pt reset`으로 다시 연결 전으로 돌린다.
 # 시계는 09:20(기준 시각)에서 시작해 재탑승 단계에서 13:30으로 보낸다. 서버·앱 데이터는 바꾸지 않는다.
-# 같은 에뮬레이터를 다른 세션이 쓰는 중일 수 있어 Maestro가 돌고 있으면 멈춘다. 이 스크립트는 e2e-car.sh와 달리 flow를 돌리지 않는다.
+# 같은 에뮬레이터를 다른 세션이 쓰는 중일 수 있어 그 에뮬레이터를 대상으로 한 Maestro가 돌고 있으면 멈춘다. 이 스크립트는 e2e-car.sh와 달리 flow를 돌리지 않는다.
 # 로그 문구는 car/app/src/debug/.../FlowLog.kt가 정한다. 바꾸면 아래 기대 패턴도 함께 고친다.
 set -uo pipefail
 # 백그라운드로 띄운 서버가 자기 프로세스 그룹을 갖도록 job control을 켠다(그룹 전체를 한 번에 종료하려고 쓴다)
@@ -27,8 +27,9 @@ RUN_DIR="${DEMO_OUT:-$ROOT/e2e/output/car-demo}/$(date +%Y%m%d-%H%M%S)"
 FLOW_LOG="$RUN_DIR/flow.log"
 SETTLE="${DEMO_SETTLE:-4}"   # 신호를 넣은 뒤 로그를 모으는 기본 시간(초)
 
-if pgrep -f maestro.cli.AppKt >/dev/null 2>&1; then
-  echo "다른 Maestro 실행 중입니다. 같은 에뮬레이터를 쓰므로 끝난 뒤 다시 실행하세요." >&2
+# 같은 에뮬레이터를 쓰는 Maestro만 막는다(다른 에뮬레이터를 대상으로 --device를 준 실행은 상관없다).
+if pgrep -fl maestro.cli.AppKt 2>/dev/null | grep -v -- '--device' >/dev/null || pgrep -fl maestro.cli.AppKt 2>/dev/null | grep -- "--device $SERIAL " >/dev/null; then
+  echo "같은 에뮬레이터($SERIAL)를 쓰는 Maestro가 실행 중입니다. 끝난 뒤 다시 실행하세요." >&2
   exit 1
 fi
 if ! "${ADB[@]}" get-state >/dev/null 2>&1; then
@@ -79,6 +80,13 @@ set_home() {
   curl -fs -X PUT "http://127.0.0.1:$PORT/places/favorites/home" -H 'content-type: application/json' -d "{\"placeId\":$1}" >/dev/null 2>&1
 }
 
+# 차 앱이 읽는 것과 같은 식별 없는 읽기(/schedules/today)에 집이 보이는가. 폰이 연결된(자리 있는 차가 있는) 서버는 식별 없는 읽기를
+# 그 자리로 보내므로 식별 없는 PUT(기본 자리)로 등록한 집은 차에 보이지 않는다(docs/pairing.md).
+home_visible() {
+  curl -fs "http://127.0.0.1:$PORT/schedules/today" 2>/dev/null |
+    python3 -c 'import sys,json; sys.exit(0 if any(f.get("kind")=="home" for f in json.load(sys.stdin).get("favorites",[])) else 1)' 2>/dev/null
+}
+
 cleanup() {
   [ "$HOME_SET" = "1" ] && set_home null
   reset_injection
@@ -119,7 +127,15 @@ fi
 
 # 집 하차 단계는 서버에 집을 등록해야 한다. 서버를 직접 띄웠거나 DEMO_HOME=1일 때만 한다.
 if [ -n "$SERVER_PGID" ] || [ "${DEMO_HOME:-}" = "1" ]; then
-  if set_home '"mock-home-apt"'; then HOME_SET=1; else echo "경고: 서버에 집을 등록하지 못해 집 하차 단계를 건너뜁니다." >&2; fi
+  if set_home '"mock-home-apt"'; then
+    HOME_SET=1
+    if ! home_visible; then
+      echo "경고: 집을 등록했지만 차가 읽는 자리에 보이지 않아(폰이 연결된 서버) 집 하차 단계를 건너뜁니다. 등록한 집은 되돌립니다." >&2
+      set_home null; HOME_SET=0
+    fi
+  else
+    echo "경고: 서버에 집을 등록하지 못해 집 하차 단계를 건너뜁니다." >&2
+  fi
 else
   echo "== 이미 떠 있는 서버라 집 하차 단계는 건너뜁니다(DEMO_HOME=1이면 집을 등록했다가 해제합니다)"
 fi
@@ -303,11 +319,13 @@ step "재탑승: 다음 일정 한 줄" \
 # ---- 위치 기반 도착 판단. 신호 loc으로 위치를 넣고, 달린 뒤(gear=D) P단에 넣는 순간 판정한다. 가짜 내비는 끄고 실제 내비 모드다. ----
 # 장소는 픽스처의 육전집(35.1595,126.8526, 13:00 점심).
 LUNCH_LOC='35.1595,126.8526'
+# 첫 위치 주입을 달리기 전(D 앞)에 한다: 주입이 켜지면 어댑터의 실제 위치(에뮬레이터 GPS)는 세션에 들어가지 않는다. 주입 전에는 에뮬레이터 GPS가 집 근처 등에
+# 있으면 그 위치가 이번 주행의 믿을 만한 위치로 먼저 쓰여 P단 판정이 달라질 수 있다(에뮬레이터 GPS 상태와 무관하게 돌게 한다).
 
 step "위치로 도착: 내비 도착 알림 없이 육전집 300m 안에서 P단" \
   "정책서 3·4장: 달린 뒤 P단에 넣은 곳이 대상 일정 장소 300m 안이면 도착으로 기록하고 그 시점에 바로 하차 카드를 띄운다(docs/exit-card.md). 내비 도착 알림은 없다(길안내를 하지 않았다)" \
   "가짜 지도가 사라지고 '도착 · 내리기 전' 칩, '유니폼·응원봉·티켓 챙기세요!', 채비 타일, [챙겼어요]. 5초 뒤 접힘(초기화 직후라 첫 탑승 브리핑 카드가 먼저 떠 있을 수 있음)" \
-  "now=$FIRST_AT&advance=170&navi=real&listen=off&trip=none&exitcard=real&gear=P gear=D loc=$LUNCH_LOC&gear=P" \
+  "now=$FIRST_AT&advance=170&navi=real&listen=off&trip=none&exitcard=real&gear=P loc=$LUNCH_LOC gear=D loc=$LUNCH_LOC&gear=P" \
   "카드 칩=도착 · 내리기 전.*카드 접음" 15 \
   "저장: [^ ,]+ 예정→도착;;카드 칩=도착 · 내리기 전 \\| voice=유니폼·응원봉·티켓 챙기세요!;;버튼=챙겼어요;;말함: 유니폼·응원봉·티켓 챙기세요!.*카드 접음" \
   "DestinationArrived"

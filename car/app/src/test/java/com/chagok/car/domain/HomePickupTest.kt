@@ -44,6 +44,29 @@ class HomePickupTest {
         assertNull(HomePickup.itemName("치사기 모임"))
         assertNull(HomePickup.itemName("픽업하기 연습"))
         assertNull(HomePickup.itemName("고객 미팅"))
+        assertNull(HomePickup.itemName("pickup"))
+        assertNull(HomePickup.itemName("Pickup"))
+    }
+
+    @Test fun `끝의 하기와 이모지와 닫히지 않은 괄호는 정리하고 센다`() {
+        assertEquals("콩물", HomePickup.itemName("콩물 픽업하기"))
+        assertEquals("택배", HomePickup.itemName("택배 수령하기"))
+        assertEquals("콩물", HomePickup.itemName("콩물 픽업 🥛"))
+        assertEquals("콩물", HomePickup.itemName("콩물 픽업 🥛✨"))
+        assertEquals("콩물", HomePickup.itemName("🥛 콩물 픽업"))
+        assertEquals("콩물", HomePickup.itemName("콩물 픽업 (2개"))
+        assertEquals("콩물", HomePickup.itemName("콩물 픽업 [오후"))
+        assertEquals("콩물", HomePickup.itemName("콩물 픽업 (2개 🥛"))
+    }
+
+    @Test fun `사람을 가리키는 말은 물건으로 뽑지 않는다`() {
+        for (title in listOf("아이 픽업", "애 픽업", "딸 픽업", "아들 픽업", "엄마 픽업", "아빠 픽업", "남편 픽업", "아내 픽업", "친구 픽업", "부모님 픽업", "큰애 픽업", "우리 아이 픽업", "막내딸 픽업하기", "아이 픽업 (학원 앞)")) {
+            assertNull(title, HomePickup.itemName(title))
+        }
+        // 사람 말이 마지막 낱말이 아니거나 다른 낱말의 끝이면 물건이다.
+        assertEquals("아이스크림", HomePickup.itemName("아이스크림 픽업"))
+        assertEquals("아이 선물", HomePickup.itemName("아이 선물 픽업"))
+        assertEquals("자동차 모형", HomePickup.itemName("자동차 모형 픽업"))
     }
 
     @Test fun `단어를 빼고 남는 말이 없으면 물건이 없다`() {

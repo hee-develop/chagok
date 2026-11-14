@@ -2,7 +2,8 @@
 # 차량 앱 E2E(Maestro): debug 앱을 설치하고 서버를 띄운 뒤 flow를 돌리고 서버를 내린다.
 # flow는 e2e/maestro/car/ 아래 pairing.yaml, boarding-briefing.yaml, depart-route.yaml, arrival-next.yaml, home-exit.yaml, fake-navi.yaml(가짜 길안내, debug 전용) 순서로 돈다.
 # 위치 권한(ACCESS_FINE_LOCATION·COARSE)은 설치 직후 adb로 미리 허용해 권한 설명 카드가 flow를 가리지 않게 한다(앱이 도는 사용자 기준).
-# home-exit는 앞뒤로 서버 자주 가는 곳의 집(mock-home-apt)을 등록·해제한다(끝나는 즉시 해제해 뒤 flow가 집이 등록된 채 돌지 않게 한다).
+# home-exit flow는 안에서 연결을 새로 만들고(차 화면 번호를 폰 대신 서버에 보냄) 그 폰 토큰으로 서버 자주 가는 곳의 집(mock-home-apt)을 등록·해제한다.
+# 연결된 자리가 있는 서버는 식별 없는 읽기(차 앱)를 그 자리로 보내므로, 이 스크립트가 식별 없이 PUT하면 기본 자리에 들어가 차가 못 본다(docs/pairing.md).
 # 사용: pnpm e2e:car   (에뮬레이터 하나가 떠 있어야 한다. 여러 기기가 붙어 있으면 ANDROID_SERIAL=emulator-5554)
 # 환경 변수: E2E_FRESH_INSTALL=1 이면 앱을 지우고 설치한다(처음 설치 상태). E2E_OUT은 산출물 루트(기본 e2e/output/car).
 # 실행마다 $E2E_OUT/<시각>/ 폴더를 새로 만들고 스크린샷(shots/)과 로그는 그 안에만 둔다.
@@ -78,8 +79,6 @@ cleanup() {
   # Maestro가 테스트 출력 폴더 깊은 곳에 두는 이번 실행의 스크린샷을 $SHOTS 로 모은다
   mkdir -p "$SHOTS"
   find "$RUN_DIR/maestro" -path '*takeScreenshot*' -name '*.png' -exec cp {} "$SHOTS/" \; 2>/dev/null || true
-  # flow가 home-exit 중간에 실패해도 서버에 집이 남지 않게 한다(서버는 곧 내려가지만 실행 중인 동안의 정리).
-  curl -fs -X PUT "http://127.0.0.1:$PORT/places/favorites/home" -H 'content-type: application/json' -d '{"placeId":null}' >/dev/null 2>&1
   reset_injection
   restore_timezone
   stop_server
@@ -117,20 +116,11 @@ curl -fs "http://127.0.0.1:$PORT/health" >/dev/null || { echo "서버가 뜨지 
 
 echo "== Maestro 실행 (스크린샷: $SHOTS)"
 cd "$ROOT"
-# 서버 자주 가는 곳의 집을 정한다(placeId가 null이면 지운다). 차는 일정 응답(favorites)으로 받아 간다.
-set_home() {
-  curl -fs -X PUT "http://127.0.0.1:$PORT/places/favorites/home" -H 'content-type: application/json' -d "{\"placeId\":$1}" >/dev/null ||
-    { echo "서버에 집을 등록하지 못했습니다($1)." >&2; exit 1; }
-}
-
 for flow in pairing boarding-briefing depart-route arrival-next home-exit fake-navi; do
   echo "-- $flow"
-  if [ "$flow" = "home-exit" ]; then set_home '"mock-home-apt"'; fi
   "$MAESTRO" test "e2e/maestro/car/$flow.yaml" \
     --device "$ANDROID_SERIAL" \
     -e SHOT_DIR="$SHOTS" \
     -e SERVER_URL="http://127.0.0.1:$PORT" \
     --test-output-dir "$RUN_DIR/maestro/$flow"
-  # home-exit가 끝나면 바로 집 등록을 풀어 뒤 flow(fake-navi)가 집이 등록된 채 돌지 않게 한다.
-  if [ "$flow" = "home-exit" ]; then set_home null; fi
 done

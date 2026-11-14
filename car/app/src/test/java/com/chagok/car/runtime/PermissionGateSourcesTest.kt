@@ -31,17 +31,10 @@ class PermissionGateSourcesTest {
     private val locator = FakeLocator()
     private val starter = SourceStarter(signals, locator)
 
-    @Test fun `앱 시작에는 위치 권한 결정과 무관하게 기어와 시동 신호를 켜고 위치는 켜지 않는다`() {
+    @Test fun `앱 시작에는 위치 권한 결정과 무관하게(거부해도) 기어와 시동 신호를 켜고 위치는 권한 결정 전에는 켜지 않는다`() {
         starter.startAtLaunch()
         assertEquals(listOf("start", "startPermissionGated"), signals.calls)
         assertTrue(locator.calls.isEmpty())
-    }
-
-    @Test fun `위치 권한을 거부해 위치를 켜지 못해도 기어와 시동은 이미 켜져 있다`() {
-        // 권한 설명 카드를 거부하면 startAfterPermission은 어댑터가 권한을 다시 확인해 아무것도 하지 않는다(여기서는 호출 자체가 없는 경우를 포함).
-        starter.startAtLaunch()
-        assertTrue("startPermissionGated" in signals.calls)
-        assertFalse("start" in locator.calls)
     }
 
     @Test fun `위치는 권한 결정 뒤에만 켜고 기어와 시동은 다시 켜지 않는다`() {

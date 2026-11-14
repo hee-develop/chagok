@@ -319,6 +319,12 @@ class DriveSession(
     private var homeItemsAnnounced: Set<String> = restored?.homeItemsAnnounced.orEmpty()
     private var homeCardShown: Boolean = restored?.homeCardShown ?: false
 
+    /**
+     * 지금 P단에서 하차 카드를 이미 보였는가(닫힌 뒤라도). 한 P단에 하차 카드는 하나라서, 그 뒤에 온 위치 답·타임아웃·내비의 도착은 기록만 한다.
+     * 다시 달리기 시작하거나(D·R) 해제·초기화 때 false로 돌아간다.
+     */
+    private var exitCardShownThisPark = false
+
     /** 마지막으로 P단이 된 것이 달린 뒤였는가. 이미 P단일 때 도착이 기록되면 이것이 true일 때만 바로 하차 카드를 띄운다. */
     private var lastParkWasRun = false
 
@@ -619,6 +625,19 @@ class DriveSession(
         clearExit()
         // 연결이 풀리면 집 좌표(일정 응답의 자주 가는 곳)는 [SessionHost]가 지운다. 세션은 위치와 집 판정 기록을 버린다.
         forgetLocation()
+        // 다른 운전자가 이어 연결할 수 있어 이 운전자의 탑승 기록과 당일 알림 기록도 비운다(정책서 10.9: 해제하면 탑승 기록도 함께 지운다).
+        // 그래야 해제 뒤 10분 안에 다른 운전자가 연결해도 '잠깐 정차'로 침묵하지 않고 첫 브리핑이 나온다.
+        log = BoardingLog()
+        statuses = emptyMap()
+        statusDate = today()
+        noticeSpokenOn = null
+        homeItemsAnnounced = emptySet()
+        homeCardShown = false
+        lastParkWasRun = false
+        drivenSincePark = false
+        exitCardShownThisPark = false
+        // 받던 일정은 [ServerScheduleSource.clear]가 버렸고 그 받기의 완료는 오지 않는다(마지막 세대가 아니라서). 받는 중으로 남지 않게 한다.
+        loadingSchedules = false
         clearResult(out)
         if (card != null) closeCard(out, instant = true)
     }
@@ -686,6 +705,7 @@ class DriveSession(
             // 이번 주행의 시작(마지막 P단 뒤 처음 D·R). 그 전에 측위한 위치는 판정에 쓰지 않는다.
             if (!drivenSincePark) driveStartedAt = now()
             drivenSincePark = true
+            exitCardShownThisPark = false
             // 위치로 정한 하차 대기(집 하차 포함)는 다시 달리면 지운다. 내비 도착 대기는 그대로 다음 P단을 기다린다.
             if (exitByLocation) clearExit()
         }
@@ -851,7 +871,8 @@ class DriveSession(
      * 달린 뒤 P단에 넣은 순간의 위치 판정(3·4장). 내비 도착 대기가 있어도 한다(도착은 내비 도착 또는 300m 안 P단 중 하나면 된다).
      * - 어댑터가 P단 직전 [Rules.LOCATION_TRUST_AGE](30초) 안에 측위한 위치가 있으면 그것으로 바로 판정한다.
      * - 없거나(오래됐거나 없음) 판정한 결과 일정 장소·집 어디와도 멀면 내비에 현재 위치를 한 번 물어 답([onLocation])으로 판정한다. 오래된 위치는 반경 안이어도 내비 답이 우선이다.
-     *   답이 [Rules.LOCATION_ANSWER_TIMEOUT] 안에 없을 때만([onLocationTimeout]) 어댑터의 오래된([Rules.LOCATION_MAX_AGE] 이내) 위치로 같은 규칙(일정 장소·집 모두)으로 판정한다.
+     *   답이 [Rules.LOCATION_ANSWER_TIMEOUT] 안에 없을 때만([onLocationTimeout]) 어댑터의 오래된([Rules.LOCATION_MAX_AGE] 이내) 위치로 같은 규칙(일정 장소·집 모두)으로 판정하고,
+     *   그런 위치도 없으면 기다림만 끝낸다(타임아웃은 늘 건다). 기다림이 끝난 뒤 오는 주기 갱신으로는 다시 판정하지 않는다.
      * - 물을 후보(시간 창 안의 일정 장소나, [allowHome]일 때 등록한 집)가 없으면 묻지 않는다.
      * [allowHome]이 false면(이 P단에서 내비 도착 카드를 먼저 기다렸음) 집 하차 카드는 띄우지 않는다.
      */
@@ -863,12 +884,11 @@ class DriveSession(
         awaitingParkLocation = true
         awaitingHome = allowHome
         out += Effect.RequestLocation
-        // 어댑터에 오래된 위치만 있으면 내비가 답하지 않을 때를 위해 기다리는 시간을 둔다(믿을 만한 위치가 없으니 내비 답이 우선이다).
-        if (trusted == null && usableLocation(Rules.LOCATION_MAX_AGE) != null) {
-            val id = ++seq
-            locationTimerId = id
-            out += Effect.ScheduleLocationTimeout(id, Rules.LOCATION_ANSWER_TIMEOUT)
-        }
+        // 기다림에는 늘 타임아웃을 건다(믿을 위치도 오래된 위치도 없을 때 포함). 만료되면 오래된 위치가 있을 때만 그것으로 판정하고 기다림을 끝낸다.
+        // P단에 선 뒤 오는 주기 갱신으로는 기다림이 끝난 다음 다시 판정하지 않는다.
+        val id = ++seq
+        locationTimerId = id
+        out += Effect.ScheduleLocationTimeout(id, Rules.LOCATION_ANSWER_TIMEOUT)
     }
 
     /** 위치 답 기다림을 그만둔다(판정이 끝났거나 주행·Suspend·초기화로 의미가 없어짐). */
@@ -890,6 +910,8 @@ class DriveSession(
         }
         val position = event.position
         val measuredAt = now().minusMillis(event.ageMillis.coerceAtLeast(0))
+        // 이미 아는 위치보다 먼저 측위한 값이 늦게 오면 버린다(옛 위치가 최신 위치를 덮어쓰지 않게).
+        lastPositionAt?.let { if (measuredAt.isBefore(it)) return }
         lastPosition = position
         lastPositionAt = measuredAt
         // 집 반경 밖 위치를 한 번이라도 받아야 돌아왔을 때 집 하차가 된다(아침에 2분 만에 되돌아오거나 주차장에서 옮기는 경우는 해당 없음).
@@ -971,7 +993,7 @@ class DriveSession(
         if (homeAt == null || here.distanceTo(homeAt) > Rules.HOME_RADIUS_METERS) return false
         val returned = leftHome
         leftHome = false
-        if (allowHome && returned && lastParkWasRun && exitTargetId == null && !exitHome) {
+        if (allowHome && returned && lastParkWasRun && exitTargetId == null && !exitHome && !exitCardShownThisPark) {
             exitHome = true
             exitArrivedAt = now()
             exitByLocation = true
@@ -1018,6 +1040,8 @@ class DriveSession(
         if (routeScheduleId == id) routeScheduleId = null
         stopAwaitingLocation()
         if (!fresh) return
+        // 이 P단에서 하차 카드를 이미 보였으면(닫힌 뒤라도) 뒤에 온 도착은 기록만 한다(한 P단에 하차 카드는 하나).
+        if (exitCardShownThisPark && gear == Gear.PARK) return
         // 먼저 기다리던 하차 카드가 있으면 그것을 우선하고 덮어쓰지 않는다(뒤 도착은 기록만 한다).
         if (exitTargetId == null && !exitHome) {
             exitTargetId = id
@@ -1078,6 +1102,7 @@ class DriveSession(
             view = Phrases.exitCard(schedule, timeout)
             spoken = Phrases.exitSpoken(schedule)
         }
+        exitCardShownThisPark = true
         val timerId = ++seq
         card = CardState(view, null, timerId, isExit = true)
         resultTimerId = null
@@ -1121,6 +1146,7 @@ class DriveSession(
         homeItemsAnnounced = emptySet()
         homeCardShown = false
         lastParkWasRun = false
+        exitCardShownThisPark = false
         // 데모 시계가 바뀌었을 수 있어 칩 재판단 시각을 다시 맞춘다.
         chipDeadline = null
         if (card != null) closeCard(out, instant = true) else out += Effect.StopVoice

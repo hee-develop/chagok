@@ -152,6 +152,24 @@ class DriveSessionPairingTest {
     }
 
     @Test
+    fun 해제하면_탑승_기록도_비워_해제_뒤_10분_안에_다른_운전자가_연결해도_첫_브리핑이_나온다() {
+        pairAndBrief()
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        session.handle(Event.GearChanged(Gear.PARK))
+        // 해제하기 전이라면: 달렸다 서서 10분 안에 다시 타는 것은 '잠깐 정차'라 말하지 않는다(탑승 기록이 남아 있다).
+        val silent = session.handle(Event.Boarded)
+        assertFalse(silent.has<Effect.RequestTravelTime>())
+        assertFalse(silent.has<Effect.Speak>())
+
+        // 서버가 해제를 확인했고(Unpaired) 같은 시각(10분 안)에 다른 운전자가 이어 연결한다: 기록이 비어 있어 첫 탑승 브리핑이 나온다.
+        session.handle(Event.Unpaired)
+        session.handle(code)
+        val brief = pairAndBrief()
+        assertTrue("다른 운전자의 첫 브리핑", brief.has<Effect.Speak>())
+        assertTrue(brief.one<Effect.ShowCard>().card.voice.isNotEmpty())
+    }
+
+    @Test
     fun 데모_초기화_뒤에도_연결_전이면_연결_카드를_다시_보인다() {
         session.handle(code)
         val reset = session.handle(Event.Reset)

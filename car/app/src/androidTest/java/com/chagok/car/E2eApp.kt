@@ -85,13 +85,17 @@ class FakeSpeaker(private val onSpeaking: (Boolean) -> Unit, private val onDucki
     }
 }
 
-/** 연결 서버 대신. 코드는 늘 123456이고, 테스트가 [paired]를 true로 바꾸면 다음 확인(2초 간격)에서 연결된다. */
+/**
+ * 연결 서버 대신. 코드는 늘 123456이고, 테스트가 [paired]를 true로 바꾸면 다음 확인(2초 간격)에서 연결된다.
+ * [serverKnowsCar]가 false면 서버를 다시 켠 것처럼 이 차를 모른다고(404, known=false) 답한다.
+ */
 class FakePairingClient : PairingClient {
     @Volatile var paired = false
+    @Volatile var serverKnowsCar = true
 
     override fun issue(carId: String) = PairingCode(CODE, "chagok://pair?code=$CODE", Instant.now().plusSeconds(600))
 
-    override fun status(carId: String) = PairingStatus(paired, codeActive = true)
+    override fun status(carId: String) = PairingStatus(paired, codeActive = true, known = serverKnowsCar)
 
     override fun unpair(carId: String) {
         paired = false

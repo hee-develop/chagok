@@ -194,8 +194,10 @@ class DriveSessionLocationTest {
         assertTrue(stale.noExitCard())
         assertNull(statusOf(stale, "a"))
         assertTrue(stale.has<Effect.RequestLocation>())
-        // 5분을 넘긴 위치는 폴백으로도 쓸 수 없어 타이머도 없다.
-        assertNull(stale.locationTimer())
+        // 5분을 넘긴 위치는 폴백으로도 쓸 수 없지만 기다림에는 늘 타임아웃을 건다. 만료되면 카드 없이 기다림만 끝난다.
+        val staleTimer = stale.locationTimer()!!
+        assertEquals(Rules.LOCATION_ANSWER_TIMEOUT, staleTimer.delay)
+        assertTrue(session.handle(Event.LocationTimedOut(staleTimer.timerId)).noExitCard())
     }
 
     @Test
@@ -927,7 +929,7 @@ class DriveSessionLocationTest {
     }
 
     @Test
-    fun P단_직전에_들어온_시스템의_마지막_위치로_바로_판정하고_P단_뒤에_들어온_위치는_묻지_않았으면_쓰지_않는다() {
+    fun P단_직전에_들어온_시스템의_마지막_위치로_바로_판정하고_위치를_기다리는_동안_들어온_믿을_위치로도_판정한다() {
         // SessionHost는 P단 이벤트 직전에 refreshNow의 위치를 먼저 넣는다.
         begin(schedule("a", "고객 미팅", 30))
         drive()
@@ -935,7 +937,7 @@ class DriveSessionLocationTest {
         loc(NEAR_GANGNAM, ageMillis = 3_000)
         assertNotNull(park().exitCard())
 
-        // 반대로 P단 뒤에 도착한 어댑터 위치는 이미 판정이 끝났거나 묻지 않은 P단이면 판정에 쓰지 않는다.
+        // 어댑터 위치가 없는 P단: 내비에 묻고 기다리는 동안 들어온 믿을 만한 위치로 판정한다.
         begin(schedule("a", "고객 미팅", 30))
         drive()
         clock.now += Duration.ofMinutes(2)
@@ -943,6 +945,66 @@ class DriveSessionLocationTest {
         // 어댑터 위치가 없으니 내비에 묻는다. 기다리는 동안 들어온 믿을 만한 위치(방금 측위)는 같은 규칙으로 판정한다.
         assertTrue(parked.has<Effect.RequestLocation>())
         assertNotNull(loc(NEAR_GANGNAM, ageMillis = 3_000).exitCard())
+    }
+
+    @Test
+    fun 이미_아는_위치보다_먼저_측위한_값이_늦게_오면_버린다() {
+        begin(schedule("a", "고객 미팅", 30, memo = "계약서 2부"))
+        drive()
+        clock.now += Duration.ofMinutes(10)
+        loc(NEAR_GANGNAM, ageMillis = 1_000)
+        // 3분 전에 측위한 옛 위치(집 쪽)가 늦게 도착했다: 최신 위치(강남)를 덮어쓰면 안 된다.
+        loc(AWAY, ageMillis = Duration.ofMinutes(3).toMillis())
+        assertNotNull(park().exitCard())
+    }
+
+    @Test
+    fun 위치도_답도_없이_기다려도_타임아웃을_걸고_만료되면_끝나며_그_뒤_주기_갱신으로는_다시_판정하지_않는다() {
+        begin(schedule("a", "고객 미팅", 30, memo = "계약서 2부"))
+        val parked = driveAndPark(null)
+        assertTrue(parked.has<Effect.RequestLocation>())
+        // 믿을 위치도 오래된 위치도 없어도 기다림에는 타임아웃이 걸린다(내비가 영영 답하지 않아도 기다림이 남지 않는다).
+        val timer = parked.locationTimer()!!
+        assertEquals(Rules.LOCATION_ANSWER_TIMEOUT, timer.delay)
+        assertTrue(session.handle(Event.LocationTimedOut(timer.timerId)).noExitCard())
+        // 기다림이 끝난 뒤 P단에 선 채로 오는 주기 갱신(어댑터 위치)으로는 판정하지 않는다.
+        val later = loc(NEAR_GANGNAM)
+        assertFalse(later.has<Effect.ShowCard>())
+        assertTrue(park().none { it is Effect.ShowCard })
+    }
+
+    @Test
+    fun 위치를_기다리는_동안의_주기_갱신은_믿을_위치면_판정하고_타임아웃_뒤에는_하지_않는다() {
+        begin(schedule("a", "고객 미팅", 30, memo = "계약서 2부"))
+        val parked = driveAndPark(null)
+        assertTrue(parked.has<Effect.RequestLocation>())
+        // 기다리는 동안 어댑터가 방금 측위한 위치를 보내면 같은 규칙으로 판정한다.
+        assertNotNull(loc(NEAR_GANGNAM).exitCard())
+    }
+
+    @Test
+    fun 한_P단에_하차_카드는_하나라서_카드를_보인_뒤_닫힌_다음에_온_내비_도착은_기록만_한다() {
+        // 길안내 대상은 고객 미팅(a, 강남). 이 P단의 위치는 집 앞 약속(c)이라 위치로 c의 하차 카드가 먼저 뜬다.
+        begin(
+            schedule("a", "고객 미팅", -45, 45, memo = "계약서 2부"),
+            schedule("c", "집 앞 약속", -20, 40, place = Place("집 앞", NEAR_HOME), memo = "열쇠"),
+        )
+        boardAndAccept()
+        drive()
+        loc(NEAR_HOME)
+        val parked = park()
+        val card = parked.filterIsInstance<Effect.ShowCard>().single { it.card.status == Phrases.STATUS_BEFORE_EXIT }
+        assertEquals("열쇠 챙기세요!", card.card.voice)
+        assertEquals(ScheduleStatus.ARRIVED, statusOf(parked, "c"))
+        // 카드가 닫힌 뒤(같은 P단) 늦게 온 내비 도착은 일정 상태만 기록하고 카드를 다시 띄우지 않는다.
+        val timer = parked.filterIsInstance<Effect.ScheduleCardTimeout>().single()
+        session.handle(Event.CardTimedOut(timer.timerId))
+        val late = session.handle(Event.DestinationArrived)
+        assertTrue(late.none { it is Effect.ShowCard })
+        assertEquals(ScheduleStatus.ARRIVED, statusOf(late, "a"))
+        // 다시 달렸다 서면 새 P단이라 하차 카드가 다시 가능하다(여기서는 새로 도착할 일정이 없어 카드는 없다).
+        drive()
+        assertTrue(park().noExitCard())
     }
 
     @Test

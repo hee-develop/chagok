@@ -295,6 +295,26 @@ class ServerScheduleSourceTest {
         assertEquals(listOf(home), ok.snapshot().favorites)
     }
 
+    @Test fun `받는 중에 지우면(clear) 그 받기의 응답은 캐시도 사본도 되살리지 못하고 받는 중도 아니다`() {
+        // 응답이 오기 전에 연결이 풀렸다: allowed는 아직 true인 순간(해제 직후 요청이 이미 나간 경우)이라 응답이 파싱까지 성공해도 쓰면 안 된다.
+        val copies = MemoryCopies()
+        lateinit var src: ServerScheduleSource
+        var done = false
+        src = source({ at ->
+            val body = FixtureResponses.response(fixture, at, favorites = favoritesJson)
+            src.clear() // 요청이 나간 뒤, 응답이 오기 전에 해제
+            body
+        }, copies)
+        src.refresh { done = true }
+        assertEquals(ScheduleOrigin.NONE, src.snapshot().origin)
+        assertEquals(emptyList<Any>(), src.snapshot().schedules)
+        assertEquals(emptyList<Favorite>(), src.snapshot().favorites)
+        assertNull(copies.copy)
+        // 마지막 세대가 아니라 완료 콜백은 오지 않지만 받는 중 표시는 꺼져 있다(세션은 Unpaired에서 받는 중을 거둔다).
+        assertFalse(done)
+        assertFalse(src.refreshing)
+    }
+
     // ---- 연결 전에는 받지 않는다 ----
 
     private fun gated(fetcher: ScheduleFetcher, copies: MemoryCopies, allowed: () -> Boolean) =

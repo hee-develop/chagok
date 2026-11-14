@@ -119,10 +119,13 @@ class ServerScheduleSource(
 
     /**
      * 받아 둔 일정·자주 가는 곳(집 좌표 포함)과 저장된 사본을 모두 지우고 "받은 적 없음"([ScheduleOrigin.NONE])으로 돌린다. 휴대폰 연결이 풀렸을 때 쓴다.
-     * 진행 중인 받기는 건드리지 않는다(세대·완료 알림이 어긋나지 않게). 그 받기가 끝나면 서버가 준 대로 다시 채워진다.
+     * **세대를 올려** 진행 중이던 받기의 결과(캐시·사본 저장)를 버린다: 그 받기가 해제 직후 끝나도 집·일정이 되살아나지 않는다.
+     * 그 받기는 마지막 세대가 아니라 완료 콜백도 부르지 않으므로 [refreshing]은 여기서 끈다(세션은 [Event.Unpaired]에서 받는 중 표시를 거둔다).
      */
     fun clear() {
         synchronized(lock) {
+            generation++
+            refreshing = false
             cache = emptyList()
             cachedFavorites = emptyList()
             current = ScheduleOrigin.NONE
@@ -163,7 +166,8 @@ class ServerScheduleSource(
                         }
                     }
                 }
-                if (applied && error == null) body.getOrNull()?.let { saveCopy(StoredCopy(it, date)) }
+                // 저장 직전에 한 번 더 확인한다(그 사이 [clear]가 불렸으면 사본을 되살리지 않는다).
+                if (applied && error == null && synchronized(lock) { mine == generation }) body.getOrNull()?.let { saveCopy(StoredCopy(it, date)) }
             } finally {
                 val last = synchronized(lock) { (mine == generation).also { if (it) refreshing = false } }
                 if (last) onDone(mine)

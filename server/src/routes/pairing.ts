@@ -17,7 +17,7 @@ const validCarId = (v: unknown): v is string => typeof v === 'string' && v.trim(
  * 차–폰 연결의 옛 경로(차 id만으로 부르는 호환 경로). 현재 차 앱이 쓴다. 운전자 자리 모델은 같은 저장소(SeatStore)를 쓰고,
  * 정책서 이름의 새 API(`/pair/*`, `/drivers`, `/presence`, `/car`)가 차 토큰·폰 토큰을 쓰는 본 경로다(계약: docs/pairing.md).
  *
- * - `paired`는 '이 차에 연결된 자리가 하나라도 있는가'이고 `pairedAt`은 가장 최근 연결 시각이다.
+ * - `GET /cars/:carId`는 서버가 모르는 차면 404 `unknown-car`, 아는 차면 200이다. `paired`는 '이 차에 연결된 자리가 하나라도 있는가'이고 `pairedAt`은 가장 최근 연결 시각이다.
  * - 코드는 언제나 새 자리용이다(폰 바꾸기는 새 API).
  * - 응답에는 새 필드(carToken·seatId·name·phoneToken)가 더해졌다. 옛 필드는 그대로다.
  */
@@ -46,10 +46,13 @@ export const createPairingRoute = (seats: SeatStore, { clientAddress = connectio
         const { code, expiresAt } = result.issued;
         return c.json({ code, expiresAt, qr: qrContent(code), carToken: access.carToken }, 200);
       })
-    // 차가 연결됐는지 본다(연결 카드를 띄운 동안 몇 초마다).
+    // 차가 연결됐는지 본다(연결 카드를 띄운 동안 몇 초마다, 앱이 앞으로 올 때 한 번).
+    // 서버가 모르는 차(서버를 다시 켜 메모리가 비었거나 자리 없는 차가 TTL로 지워짐)는 404 `unknown-car`다. 아는 차의 `paired:false`(자리 0개)는 200이다.
+    // 그래서 차는 200 `paired:false`만 해제로 보고, 404는 서버 재시작일 수 있어 해제로 단정하지 않는다(차는 새 코드를 받으면 서버가 차를 다시 만든다).
     .get('/cars/:carId', (c) => {
       const carId = c.req.param('carId');
       if (!validCarId(carId)) return c.json({ error: 'carId가 올바르지 않습니다' }, 400);
+      if (!seats.car(carId)) return c.json({ error: '서버가 모르는 차입니다', reason: 'unknown-car' as const }, 404);
       return c.json(status(carId), 200);
     })
     // 폰이 QR이나 숫자로 받은 코드를 보낸다. 새 API(/pair/claim)와 같지만 응답 앞부분이 옛 모양({ carId, pairedAt })이다.

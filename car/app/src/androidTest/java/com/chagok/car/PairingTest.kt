@@ -92,6 +92,34 @@ class PairingTest {
         assertTrue(!store.paired)
     }
 
+    @Test
+    fun 서버가_이_차를_모르면_해제로_보지_않고_연결과_사본을_그대로_둔다() {
+        host.setPaired(false)
+        E2eApp.fakePairing.paired = false
+        E2eApp.fakePairing.serverKnowsCar = true
+        launch()
+        assertNotNull("연결 카드", waitFor("휴대폰과 연결해 주세요."))
+        E2eApp.fakePairing.paired = true
+        assertNotNull("연결되면 첫 탑승 브리핑", waitFor("광주 직관 날이에요!", timeoutMs = 10_000))
+        val store = com.chagok.car.runtime.ChagokStore(instrumentation.targetContext)
+        assertNotNull("받아 둔 사본", store.loadCopy())
+
+        // 서버를 다시 켜 메모리가 비었다: 이 차를 모른다(404). 해제가 아니다.
+        E2eApp.fakePairing.paired = false
+        E2eApp.fakePairing.serverKnowsCar = false
+        try {
+            device.pressHome()
+            launch()
+            // 재진입 확인이 돌 시간을 준다. 연결 카드로 돌아가지 않고 사본·연결이 남아야 한다.
+            Thread.sleep(3_000)
+            assertNull("연결 카드로 돌아가면 안 됨", device.findObject(By.textContains("휴대폰과 연결해 주세요.")))
+            assertNotNull("사본이 남아야 함", store.loadCopy())
+            assertTrue(store.paired)
+        } finally {
+            E2eApp.fakePairing.serverKnowsCar = true
+        }
+    }
+
     private companion object {
         const val TIMEOUT_MS = 5_000L
     }

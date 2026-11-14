@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CODE_TTL_MS, createSeatStore } from '../src/seats.js';
+import { CODE_TTL_MS, SEATLESS_CAR_TTL_MS, createSeatStore } from '../src/seats.js';
 import { newApp } from './helpers.js';
 
 let clockMs = Date.parse('2026-11-14T09:00:00+09:00');
@@ -17,9 +17,7 @@ const status = async (app: App, carId = 'car-1') => (await (await app.request(`/
 describe('차–폰 연결(옛 /pairing 경로, 차 id만으로)', () => {
   it('차가 6자리 코드와 QR 글을 받고, 폰이 그 코드를 보내면 연결된다', async () => {
     const app = makeApp();
-    expect(await status(app)).toEqual({ paired: false, pairedAt: null, codeActive: false });
     const issued = await issue(app);
-    expect(await status(app)).toEqual({ paired: false, pairedAt: null, codeActive: true });
     expect(issued.code).toMatch(/^\d{6}$/);
     expect(issued.qr).toBe(`chagok://pair?code=${issued.code}`);
     expect(issued.expiresAt).toBe(new Date(clockMs + CODE_TTL_MS).toISOString());
@@ -93,6 +91,54 @@ describe('차–폰 연결(옛 /pairing 경로, 차 id만으로)', () => {
     const app = makeApp();
     const { code } = await issue(app);
     await post(app, '/pairing/claim', { code });
-    expect(await status(makeApp())).toEqual({ paired: false, pairedAt: null, codeActive: false });
+    expect((await app.request('/pairing/cars/car-1')).status).toBe(200);
+    expect((await makeApp().request('/pairing/cars/car-1')).status).toBe(404);
+  });
+
+  // 차 앱은 앱이 앞으로 올 때 이 경로로 '해제'를 판단한다: 200 paired:false만 해제, 404(서버가 이 차를 모름)는 서버를 다시 켠 것일 수 있어 해제가 아니다.
+  describe('GET /pairing/cars/:carId: 모르는 차와 자리 없는 아는 차', () => {
+    it('서버가 모르는 차는 404 unknown-car다(서버를 다시 켠 뒤·한 번도 코드를 받지 않은 차)', async () => {
+      const app = makeApp();
+      const res = await app.request('/pairing/cars/never-seen');
+      expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({ reason: 'unknown-car' });
+      expect((await app.request(`/pairing/cars/${'x'.repeat(101)}`)).status).toBe(400);
+    });
+
+    it('코드를 받은 뒤 자리가 없는 아는 차는 200 paired:false다', async () => {
+      const app = makeApp();
+      await issue(app);
+      const res = await app.request('/pairing/cars/car-1');
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ paired: false, pairedAt: null, codeActive: true });
+    });
+
+    it('연결됐다가 폰이 해제하면(자리 0개) 200 paired:false다: 진짜 해제', async () => {
+      const app = makeApp();
+      const { code } = await issue(app);
+      const claimed = (await (await post(app, '/pairing/claim', { code })).json()) as { phoneToken: string };
+      expect((await status(app)).paired).toBe(true);
+      const released = await app.request('/pair', { method: 'DELETE', headers: { authorization: `Bearer ${claimed.phoneToken}` } });
+      expect(released.status).toBe(200);
+      const res = await app.request('/pairing/cars/car-1');
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ paired: false, pairedAt: null, codeActive: false });
+    });
+
+    it('자리 없는 차는 TTL 동안 알고 있다가(200) 지난 뒤에는 모른다(404)', async () => {
+      const app = makeApp();
+      await issue(app);
+      clockMs += CODE_TTL_MS + SEATLESS_CAR_TTL_MS - 1;
+      expect((await app.request('/pairing/cars/car-1')).status).toBe(200);
+      clockMs += 1;
+      expect((await app.request('/pairing/cars/car-1')).status).toBe(404);
+    });
+
+    it('404 뒤에 차가 새 코드를 받으면 서버가 차를 다시 만들어 200이 된다(차 앱의 재발급 경로)', async () => {
+      const app = makeApp();
+      expect((await app.request('/pairing/cars/car-1')).status).toBe(404);
+      await issue(app);
+      expect((await app.request('/pairing/cars/car-1')).status).toBe(200);
+    });
   });
 });
