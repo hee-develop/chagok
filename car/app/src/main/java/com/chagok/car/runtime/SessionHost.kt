@@ -90,7 +90,7 @@ class SessionHost(
         zone = { clock.zone },
         logger = AndroidLogger,
     )
-    private val session = DriveSession(clock, source, store.load(), paired = store.paired)
+    private val session = DriveSession(clock, source, store.load(), paired = store.paired, exitCardTimeout = DebugHooks::exitCardDuration)
     private val pairing = PairingController(pairingClient, store, ::post)
     private val refresher = ScheduleRefresher(source, ::post, ::dispatch)
 

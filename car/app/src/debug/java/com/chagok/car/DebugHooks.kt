@@ -1,6 +1,7 @@
 package com.chagok.car
 
 import com.chagok.car.domain.Place
+import com.chagok.car.domain.Rules
 import com.chagok.car.flow.Event
 import com.chagok.car.runtime.Adapters
 import com.chagok.car.runtime.Navigator
@@ -24,11 +25,20 @@ object DebugInjection {
     /** `heard`를 세션이 처리한 뒤 불린다. 디버그 줄이 화면에 표시한다. */
     @Volatile var heardProcessed: ((String) -> Unit)? = null
 
+    /**
+     * 하차 카드가 떠 있는 시간(초). null이면 [Rules.EXIT_CARD](5초)다.
+     * 5초는 Maestro 확인에 빠듯해 E2E만 늘려 쓴다. 정책 기준값은 바꾸지 않고 release에는 없다. 신호 `exitcard=<초>`로 바꾼다.
+     */
+    @Volatile var exitCardSeconds: Long? = null
+
     const val NO_TRIP = -1L
 }
 
 /** 디버그 빌드의 어댑터 묶음. 내비 결과와 듣기를 [DebugInjection]이 가로챌 수 있게 감싼다. */
 object DebugHooks {
+    /** 하차 카드를 띄워 두는 시간. [DebugInjection.exitCardSeconds]가 없으면 정책 기준값이다. */
+    fun exitCardDuration(): Duration = DebugInjection.exitCardSeconds?.let { Duration.ofSeconds(it) } ?: Rules.EXIT_CARD
+
     fun wrap(adapters: Adapters, post: (Event) -> Unit): Adapters = Adapters(
         navi = InjectedNavigator(adapters.navi, post),
         voice = InjectedSpeaker(adapters.voice),

@@ -29,6 +29,42 @@ class SnapshotCodecTest {
         assertEquals(Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3), null), SnapshotCodec.decode(old))
     }
 
+    @Test fun `하차 카드 대기도 저장하고 복원한다`() {
+        val snapshot = Snapshot(
+            BoardingLog(), mapOf("a" to ScheduleStatus.ARRIVED), LocalDate.of(2026, 12, 3),
+            exitTargetId = "a", exitArrivedAt = Instant.parse("2026-12-03T01:00:00Z"),
+        )
+        val decoded = SnapshotCodec.decode(SnapshotCodec.encode(snapshot))
+        assertEquals(snapshot, decoded)
+        assertEquals("a", decoded?.exitTargetId)
+    }
+
+    @Test fun `하차 카드 칸이 없는 이전 저장분은 대기 없음으로 복원한다`() {
+        val old = """{"date":"2026-12-03","statuses":{"a":"ARRIVED"},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false},"noticeDate":null}"""
+        val decoded = SnapshotCodec.decode(old)
+        assertNull(decoded?.exitTargetId)
+        assertNull(decoded?.exitArrivedAt)
+        assertEquals(mapOf("a" to ScheduleStatus.ARRIVED), decoded?.statuses)
+    }
+
+    @Test fun `하차 대기 칸이 손상돼도 나머지 상태는 살리고 대기만 버린다`() {
+        val base = """"date":"2026-12-03","statuses":{"a":"ARRIVED"},"log":{"lastBoardedOn":"2026-12-03","lastParkedAt":null,"parkedAfterDriveSinceBoarding":true},"noticeDate":null"""
+        listOf(
+            """{$base,"exitTargetId":123,"exitArrivedAt":"x"}""",
+            """{$base,"exitTargetId":"a","exitArrivedAt":"not-a-number"}""",
+            """{$base,"exitTargetId":{"k":1},"exitArrivedAt":5}""",
+        ).forEach { text ->
+            val decoded = SnapshotCodec.decode(text)!!
+            assertEquals(mapOf("a" to ScheduleStatus.ARRIVED), decoded.statuses)
+            assertEquals(LocalDate.of(2026, 12, 3), decoded.log.lastBoardedOn)
+        }
+        assertNull(SnapshotCodec.decode("""{$base,"exitTargetId":{"k":1},"exitArrivedAt":5}""")!!.exitTargetId)
+        // 숫자·불리언은 문자열로 바꿔 받지 않는다.
+        assertNull(SnapshotCodec.decode("""{$base,"exitTargetId":123,"exitArrivedAt":5}""")!!.exitTargetId)
+        assertNull(SnapshotCodec.decode("""{$base,"exitTargetId":true,"exitArrivedAt":5}""")!!.exitTargetId)
+        assertEquals("a", SnapshotCodec.decode("""{$base,"exitTargetId":"a","exitArrivedAt":5}""")!!.exitTargetId)
+    }
+
     @Test fun `기록이 비어 있어도 왕복한다`() {
         val snapshot = Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3))
         assertEquals(snapshot, SnapshotCodec.decode(SnapshotCodec.encode(snapshot)))

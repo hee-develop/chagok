@@ -74,6 +74,8 @@
 | `requestRoute` 실패 | 내비에 연결된 뒤 요청이 예외 없이 전달되는가, 연결 전(시작·재시작 직후)에는 앱이 요청하지 않고 실패로 안내하는가 | 미확인 |
 | 도착 알림 | 차곡이 시작한 길안내로 목적지에 닿으면 `onDestinationArrived`가 오는가(안내 취소 `onRouteCancelled`와 구분되는가). 오면 그 일정이 도착이 되어 다시 탈 때 다음 일정을 묻는가(`docs/arrival.md`) | 미확인 |
 | 현재 위치 답 | P단에 넣을 때 `getCurrentLocationInfo()`에 `onCurrentLocationInfo`로 위도·경도가 오는가. 길안내 중이 아닐 때도 오는가 | 미확인 |
+| 하차 카드 | 실제 주행 뒤 목적지에서 P단에 넣으면 도착 알림(`onDestinationArrived`)과 P단 신호의 순서가 어떻든 하차 카드가 한 번 뜨는가(알림이 P단보다 늦게 오는 경우 포함). 주차 중 N단·잠깐 다른 곳 정차에서 오탐이 없는가. 15분(`Rules.EXIT_PENDING_MAX`)이 실제 주차 동선에 맞는가(`docs/exit-card.md`) | 미확인 |
+| 하차 카드의 말 | 하차 카드를 말하는 TTS가 5초(카드 닫힘) 안에 끝나는가. 말은 30자 이하로 줄였지만 실제 TTS 속도·끊김은 실측 필요 | 미확인 |
 | 듣는 중 표시 | 음성을 받는 중임을 화면에 알리는 표시. 프로토타입에 듣는 중 표시와 문구가 없어 만들지 않았다. 카드 머리 파형(VoiceIndicator)은 말하는 동안만 움직인다 | 미확인 |
 
 debug 빌드는 `chagok-debug://signal?trip=<초>&route=ok|fail&listen=off&heard=<들은 말>`로 소요 시간·경로 요청 결과·들은 말을 주입한다(자동 E2E용). 위 항목을 사람이 확인할 때는 `trip=real&route=real&listen=real`로 주입을 풀고 실제 내비·STT를 쓴다.
