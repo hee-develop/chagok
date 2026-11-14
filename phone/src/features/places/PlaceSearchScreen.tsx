@@ -20,11 +20,13 @@ type Props = ({ target: PlaceTarget; scheduleId?: never } | { scheduleId: string
   api?: PlacesApi;
   timeoutMs?: number;
   debounceMs?: number;
+  /** 첫 설정 밖(오늘·장소 탭)에서 열었으면 true. 단계 표시를 빼고 닫으면 열었던 화면으로 돌아간다. */
+  standalone?: boolean;
 };
 
 type SearchState = { status: 'idle' } | { status: 'loading' } | { status: 'error' } | { status: 'ready'; places: Place[]; source: PlaceSearchSource };
 
-export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePlacesApi, api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS, debounceMs = 300 }: Props) {
+export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePlacesApi, api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS, debounceMs = 300, standalone = false }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
@@ -83,8 +85,8 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
-    else router.replace(scheduleId === undefined ? '/setup/places' : '/setup/fill-places');
-  }, [router, scheduleId]);
+    else router.replace(standalone ? '/' : scheduleId === undefined ? '/setup/places' : '/setup/fill-places');
+  }, [router, scheduleId, standalone]);
 
   /** 해당 자리 또는 일정 하나만 저장한다. 일정이 거절되면 목록 확인을 안내한다. */
   const pick = async (place: Place, source: PlaceSearchSource) => {
@@ -136,7 +138,7 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <SetupHeader step={scheduleId === undefined ? 2 : 3} />
+        <SetupHeader step={standalone ? undefined : scheduleId === undefined ? 2 : 3} />
         <Text accessibilityRole="header" style={[styles.title, font(600)]}>
           {title}
         </Text>

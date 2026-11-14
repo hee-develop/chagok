@@ -15,6 +15,8 @@ import { SuggestionCard } from './SuggestionCard';
 type Props = {
   api?: PlacesApi;
   timeoutMs?: number;
+  /** 'setup'은 첫 설정 2단계(단계 표시·다음·건너뛰기). 'tab'은 장소 탭(단계 표시·다음 없음, 검색 화면도 단계 표시 없이 열림). */
+  mode?: 'setup' | 'tab';
 };
 
 /** retry: 같은 요청을 다시 보낼 수 있는 실패. reload: 서버가 요청을 거절해 최신 상태를 다시 불러온 경우. */
@@ -24,7 +26,7 @@ type LoadState = { status: 'loading' } | { status: 'error' } | { status: 'ready'
 
 const NEXT_ROUTE = '/setup/fill-places';
 
-export function PlacesScreen({ api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS }: Props) {
+export function PlacesScreen({ api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS, mode = 'setup' }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
@@ -135,7 +137,7 @@ export function PlacesScreen({ api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS }
   };
 
   const openSearch = (target: PlaceTarget) => {
-    router.push({ pathname: '/setup/place-search', params: { target } });
+    router.push({ pathname: '/setup/place-search', params: mode === 'tab' ? { target, from: 'tab' } : { target } });
   };
 
   const saving = savingKey !== null;
@@ -146,7 +148,7 @@ export function PlacesScreen({ api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS }
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <SetupHeader step={2} />
+        <SetupHeader step={mode === 'tab' ? undefined : 2} />
         <View style={styles.titles}>
           <Text accessibilityRole="header" style={[styles.title, font(600)]}>
             {t.title}
@@ -222,11 +224,23 @@ export function PlacesScreen({ api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS }
             >
               <Text style={[styles.manualText, font(500)]}>{t.addManually}</Text>
             </Pressable>
+
+            {mode === 'tab' ? (
+              // 다음 묶음(J2b)에서 채울 자리. 지금은 빈 상태만 보인다.
+              <>
+                {([['remembered', strings.placesTab.remembered, strings.placesTab.rememberedEmpty], ['noTravel', strings.placesTab.noTravel, strings.placesTab.noTravelEmpty]] as const).map(([key, heading, empty]) => (
+                  <View key={key} style={styles.suggestions} testID={`places-tab-${key}`}>
+                    <Text accessibilityRole="header" style={[styles.heading, font(600)]}>{heading}</Text>
+                    <Text style={[styles.placeholder, font(400)]}>{empty}</Text>
+                  </View>
+                ))}
+              </>
+            ) : null}
           </>
         ) : null}
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 32) }]}>
+      <View style={[styles.footer, { paddingBottom: mode === 'tab' ? 16 : Math.max(insets.bottom, 32) }]}>
         {saveIssue ? (
           <View style={styles.saveError} accessibilityLiveRegion="polite">
             <Text style={[styles.errorText, font(500)]}>{t.saveFailed}</Text>
@@ -237,7 +251,7 @@ export function PlacesScreen({ api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS }
             ) : null}
           </View>
         ) : null}
-        <Pressable
+        {mode === 'tab' ? null : <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: !ready || saving }}
           disabled={!ready || saving}
@@ -245,16 +259,17 @@ export function PlacesScreen({ api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS }
           style={[styles.primary, (!ready || saving) && styles.primaryDisabled]}
         >
           <Text style={[styles.primaryText, font(600)]}>{t.next}</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" onPress={() => router.push(NEXT_ROUTE)} style={styles.skip}>
+        </Pressable>}
+        {mode === 'tab' ? null : <Pressable accessibilityRole="button" onPress={() => router.push(NEXT_ROUTE)} style={styles.skip}>
           <Text style={[styles.skipText, font(400)]}>{t.skip}</Text>
-        </Pressable>
+        </Pressable>}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  placeholder: { fontSize: 15, lineHeight: 22, color: colors.textMuted },
   screen: { flex: 1, backgroundColor: colors.background },
   content: { paddingHorizontal: 20, paddingBottom: 16, gap: 22 },
   titles: { gap: 10 },

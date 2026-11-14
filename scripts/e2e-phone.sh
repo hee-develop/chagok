@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 폰 앱 E2E (Android 기준): 서버와 Metro를 띄우고 Expo Go에서 Maestro flow(calendar-select, places, fill-places, pair-car)를 차례로 실행한다.
+# today-tabs(아래 탭·오늘 화면)는 기본 목록에 없고 E2E_FLOWS=today-tabs 로 따로 돌린다(기준 시각이 고정된 pt-day 픽스처를 쓴다).
 # 사용법: scripts/e2e-phone.sh
 #
 # 캘린더 출처: 기본 flow는 목 캘린더(EXPO_PUBLIC_CALENDAR_SOURCE=mock)로 돈다. 실제 기기 캘린더 flow(device-calendar)는
@@ -8,8 +9,8 @@
 # device-calendar는 서버가 폰 일정을 받아 /schedules/today를 바꾸므로 같은 서버에서 다른 flow 뒤에 돌도록 항상 마지막에 둔다.
 #
 # 환경 변수
-#   E2E_FLOWS         실행할 flow 이름 (기본 "calendar-select places fill-places pair-car", 선택 항목: device-calendar)
-#   E2E_FIXTURE_PATH  서버가 읽을 일정 파일 (기본 fixtures/schedules/gwangju-day.json)
+#   E2E_FLOWS         실행할 flow 이름 (기본 "calendar-select places fill-places pair-car", 선택 항목: device-calendar, today-tabs)
+#   E2E_FIXTURE_PATH  서버가 읽을 일정 파일 (기본 fixtures/schedules/gwangju-day.json, E2E_FLOWS=today-tabs 단독이면 fixtures/schedules/pt-day.json)
 #   E2E_SERVER_PORT   서버 포트 (기본 8788)
 #   E2E_METRO_PORT    Metro 포트 (기본 8082)
 #   E2E_AVD           Android AVD 이름 (기본 Pixel_10_Pro_XL)
@@ -39,10 +40,13 @@ EMULATOR="$SDK/emulator/emulator"
 FLOWS="${E2E_FLOWS:-calendar-select places fill-places pair-car}"
 for flow in $FLOWS; do
   case "$flow" in
-    calendar-select|places|fill-places|pair-car|device-calendar) ;;
-    *) echo "알 수 없는 flow입니다: $flow (calendar-select, places, fill-places, pair-car, device-calendar만 가능)" >&2; exit 2 ;;
+    calendar-select|places|fill-places|pair-car|device-calendar|today-tabs) ;;
+    *) echo "알 수 없는 flow입니다: $flow (calendar-select, places, fill-places, pair-car, device-calendar, today-tabs만 가능)" >&2; exit 2 ;;
   esac
 done
+# today-tabs는 오늘 일정이 시각에 흔들리지 않도록 기준 시각이 고정된 PT 픽스처로 돈다. 다른 flow는 gwangju-day 기대라 섞어 돌리지 않는다.
+if [ "$FLOWS" = today-tabs ] && [ -z "${E2E_FIXTURE_PATH:-}" ]; then E2E_FIXTURE_PATH="$ROOT/fixtures/schedules/pt-day.json"; fi
+case " $FLOWS " in *" today-tabs "*) [ "$FLOWS" = today-tabs ] || { echo "today-tabs는 다른 flow와 섞어 돌릴 수 없습니다(픽스처가 다름). E2E_FLOWS=today-tabs 로 따로 돌려 주세요." >&2; exit 2; } ;; esac
 # device-calendar는 마지막에 돌린다(폰 일정이 서버에 남아 다른 flow의 목 일정 기대를 깨므로).
 ORDERED=""
 for flow in $FLOWS; do [ "$flow" = device-calendar ] || ORDERED="$ORDERED $flow"; done

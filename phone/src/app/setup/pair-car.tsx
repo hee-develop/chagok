@@ -1,18 +1,17 @@
-import { useRouter } from 'expo-router';
+import { useEffect } from 'react';
 
+import { markSetupDone } from '../../features/entry/setupGate';
 import { PairCarScreen } from '../../features/pair-car/PairCarScreen';
-import { askNotificationPermissionOnce } from '../../features/notifications/permission';
+import { pairingApi } from '../../features/pair-car/pairingApi';
+import { recordPairedCar } from '../../features/today/carConnection';
+
+// 연결에 성공하면 그 차 id를 폰에 남겨 오늘·설정 탭이 연결 상태를 묻는다. 화면 코드는 그대로 두고 api만 감싼다.
+const recordingApi = recordPairedCar(pairingApi);
 
 export default function PairCarRoute() {
-  const router = useRouter();
-  // 첫 설정의 끝(차 연결을 마칠 때)에 알림 권한을 한 번 묻는다(정책서 10.4). 거부해도 다음으로 넘어가고 알림은 홈에만 보인다.
-  // 이동 목적지는 PairCarScreen의 기본 동작과 같다(main 그대로). 아래 탭 구조(J5a)가 들어오면 docs/notifications.md의 '이어 붙일 지점'을 따른다.
-  return (
-    <PairCarScreen
-      onDone={() => {
-        void askNotificationPermissionOnce();
-        router.replace('/setup/fill-places');
-      }}
-    />
-  );
+  // 4단계에 닿았다는 것은 1~3단계를 끝냈거나 건너뛰었다는 뜻이다. 다음에 앱을 열면 탭으로 들어간다.
+  useEffect(() => {
+    void markSetupDone();
+  }, []);
+  return <PairCarScreen api={recordingApi} />;
 }
