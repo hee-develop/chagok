@@ -3,6 +3,7 @@ package com.chagok.car.flow
 import com.chagok.car.domain.AskReason
 import com.chagok.car.domain.Briefing
 import com.chagok.car.domain.BoardingDecision
+import com.chagok.car.domain.DestinationOption
 import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.HomePickup
@@ -67,6 +68,9 @@ object Phrases {
     const val HINT_AUTO_FOLD = "출발하면 자동으로 접혀요"
 
     const val ASK_DESTINATION = "어디로 갈까요?"
+
+    /** 대안("다른 데")으로 후보를 하나씩 바꿔 보일 때 그 후보를 묻는 말. 예: "회사로 갈까요?" */
+    fun askAlternative(name: String) = "${ro(name)} 갈까요?"
 
     // 목적지 묻기 후보 타일 머리. 일정 없음은 자주 가는 곳만, 여유 많음은 일정 장소와 자주 가는 곳을 함께 보인다.
     const val FAVORITES_LABEL = "자주 가는 곳"
@@ -249,16 +253,22 @@ object Phrases {
     }
 
     /**
-     * 목적지 묻기 후보 이름. 화면 줄·주 버튼·음성 고르기에 같이 쓰고, 순서는 [Question.AskDestination.candidates]와 같다.
-     * 여유 많음은 일정 장소 이름이 1번이다.
+     * 목적지 묻기 후보 이름. 화면 줄·주 버튼·음성 고르기에 같이 쓰고, 순서는 [Question.AskDestination.options]와 같다.
+     * 여유 많음은 일정 장소 이름이 1번이다. 대안으로 한 곳만 보일 때는 그 하나다.
      */
-    fun candidateNames(question: Question.AskDestination): List<String> = when (question.reason) {
-        AskReason.PLENTY_OF_TIME -> listOfNotNull(question.suggested?.place?.name) + question.favorites.map(::favoriteName)
-        AskReason.NO_SCHEDULE -> question.favorites.map(::favoriteName)
-        AskReason.PLACE_UNKNOWN -> emptyList()
+    fun candidateNames(question: Question.AskDestination): List<String> = question.options.map(::optionName)
+
+    /** 후보를 부르는 이름: 대상 일정은 장소 이름, 자주 가는 곳은 [favoriteName]. */
+    private fun optionName(option: DestinationOption): String = when (option) {
+        is DestinationOption.OfSchedule -> option.place.name
+        is DestinationOption.OfFavorite -> favoriteName(option.favorite)
     }
 
-    private fun favoriteRows(favorites: List<Favorite>) = favorites.map { CandidateRow(favoriteName(it), favoriteDetail(it)) }
+    /** 후보 줄: 이름과 둘째 글(대상 일정은 "13:00 육전집 점심", 자주 가는 곳은 [favoriteDetail]). */
+    private fun optionRow(option: DestinationOption, zone: ZoneId): CandidateRow = when (option) {
+        is DestinationOption.OfSchedule -> CandidateRow(optionName(option), "${time(option.schedule, zone)} ${option.schedule.title}")
+        is DestinationOption.OfFavorite -> CandidateRow(optionName(option), favoriteDetail(option.favorite))
+    }
 
     // ---- 카드 조립 ----
 
@@ -300,47 +310,39 @@ object Phrases {
                 primary = ACCEPT_DEPART,
                 secondary = HOLD,
             )
-            is Question.AskDestination -> when (q.reason) {
-                // 자주 가는 곳이 없으면 후보 없이 묻는다("응"으로는 고를 곳이 없다).
-                AskReason.NO_SCHEDULE -> if (q.favorites.isEmpty()) {
-                    base.copy(
-                        voice = ASK_DESTINATION,
-                        secondary = JUST_GO,
-                        hints = listOf(HINT_SAY_JUST_GO, HINT_AUTO_FOLD),
-                    )
-                } else {
-                    base.copy(
-                        voice = ASK_DESTINATION,
-                        tiles = listOf(TileView.Candidates(FAVORITES_LABEL, favoriteRows(q.favorites))),
-                        primary = ro(candidateNames(q).first()),
-                        secondary = JUST_GO,
-                    )
-                }
-                AskReason.PLENTY_OF_TIME -> {
-                    val target = checkNotNull(q.suggested)
-                    val departBy = checkNotNull(q.departBy)
-                    val name = target.place?.name.orEmpty()
-                    val line = "${time(target, zone)} ${target.title}"
-                    // 자주 가는 곳이 붙으면 일정 장소를 1번 줄로 둔 후보 목록, 아니면 일정 장소 타일 하나
-                    val tile = if (q.favorites.isEmpty()) {
-                        TileView.PlaceTile(name, line)
-                    } else {
-                        TileView.Candidates(CANDIDATES_LABEL, listOf(CandidateRow(name, line)) + favoriteRows(q.favorites))
-                    }
-                    base.copy(
-                        voice = askDestinationPlenty(target, departBy, zone),
-                        tiles = listOf(tile),
-                        primary = ro(name),
-                        secondary = JUST_GO,
-                    )
-                }
-                AskReason.PLACE_UNKNOWN -> base.copy(
-                    voice = askPlace(q.suggested?.title.orEmpty()),
-                    secondary = JUST_GO,
-                    hints = listOf(HINT_SAY_JUST_GO, HINT_AUTO_FOLD),
-                )
-            }
+            is Question.AskDestination -> askDestinationCard(base, q, zone)
         }
+    }
+
+    /**
+     * 목적지 묻기 카드. 일정 없음은 자주 가는 곳, 여유 많음은 일정 장소와 자주 가는 곳을 후보로 보인다(1번 후보가 주 버튼, 보조는 "그냥 갈게").
+     * 후보가 없으면 버튼은 "그냥 갈게"뿐이다. 대안("다른 데")으로 한 곳만 보일 때는 그 후보를 "{이름}으로 갈까요?"로 묻는다.
+     */
+    private fun askDestinationCard(base: CardContent, q: Question.AskDestination, zone: ZoneId): CardContent {
+        if (q.reason == AskReason.PLACE_UNKNOWN) {
+            return base.copy(voice = askPlace(q.suggested?.title.orEmpty()), secondary = JUST_GO, hints = listOf(HINT_SAY_JUST_GO, HINT_AUTO_FOLD))
+        }
+        val options = q.options
+        // 자주 가는 곳이 없으면 후보 없이 묻는다("응"으로는 고를 곳이 없다).
+        if (options.isEmpty()) {
+            return base.copy(voice = ASK_DESTINATION, secondary = JUST_GO, hints = listOf(HINT_SAY_JUST_GO, HINT_AUTO_FOLD))
+        }
+        val first = options.first()
+        val alternative = q.only != null
+        val voice = when {
+            alternative -> askAlternative(optionName(first))
+            q.reason == AskReason.PLENTY_OF_TIME -> askDestinationPlenty(checkNotNull(q.suggested), checkNotNull(q.departBy), zone)
+            else -> ASK_DESTINATION
+        }
+        val label = if (q.reason == AskReason.NO_SCHEDULE) FAVORITES_LABEL else CANDIDATES_LABEL
+        // 여유 많음에서 자주 가는 곳이 붙지 않았으면 일정 장소 타일 하나, 아니면 후보 목록
+        val tile = if (q.reason == AskReason.PLENTY_OF_TIME && !alternative && options.size == 1) {
+            val row = optionRow(first, zone)
+            TileView.PlaceTile(row.name, row.detail)
+        } else {
+            TileView.Candidates(label, options.map { optionRow(it, zone) })
+        }
+        return base.copy(voice = voice, tiles = listOf(tile), primary = ro(optionName(first)), secondary = JUST_GO)
     }
 
     /**

@@ -237,6 +237,39 @@ class PhrasesTest {
         assertEquals(q.candidates.size, Phrases.candidateNames(q).size)
     }
 
+    @Test fun `대안으로 한 곳만 보일 때는 그 후보를 묻고 후보 이름도 그 하나다`() {
+        val all = Question.AskDestination(AskReason.NO_SCHEDULE, favorites = listOf(home, work, station))
+        val alt = checkNotNull(all.nextAlternative())
+        val c = card(briefing(Briefing.Level.FULL, null, emptyList()), alt, "09:00")
+        assertEquals("회사로 갈까요?", c.voice)
+        assertEquals(listOf<TileView>(TileView.Candidates("자주 가는 곳", listOf(CandidateRow("회사", "광주 예시 업무지구")))), c.tiles)
+        assertEquals("회사로", c.primary)
+        assertEquals("그냥 갈게", c.secondary)
+        assertEquals(listOf("회사"), Phrases.candidateNames(alt))
+        assertEquals(listOf(work.place), alt.candidates)
+        assertEquals("광주송정역으로 갈까요?", card(briefing(Briefing.Level.FULL, null, emptyList()), checkNotNull(alt.nextAlternative()), "09:00").voice)
+        // 마지막 후보 뒤에는 없다.
+        assertNull(alt.nextAlternative()?.nextAlternative())
+    }
+
+    @Test fun `여유 많음의 대안은 일정 장소 다음 후보부터이고 일정 장소 말은 다시 하지 않는다`() {
+        val meeting = sched("m", "육전집 점심", "13:30", place = "광주 육전집")
+        val q = Question.AskDestination(AskReason.PLENTY_OF_TIME, meeting, at("12:50"), listOf(work, station))
+        val alt = checkNotNull(q.nextAlternative())
+        val c = card(briefing(Briefing.Level.FULL, meeting), alt, "09:00")
+        assertEquals("회사로 갈까요?", c.voice)
+        assertEquals(listOf<TileView>(TileView.Candidates("갈 곳", listOf(CandidateRow("회사", "광주 예시 업무지구")))), c.tiles)
+        assertEquals("회사로", c.primary)
+    }
+
+    @Test fun `후보가 하나이거나 없거나 장소 모름은 대안이 없다`() {
+        assertNull(Question.AskDestination(AskReason.NO_SCHEDULE, favorites = listOf(home)).nextAlternative())
+        assertNull(Question.AskDestination(AskReason.NO_SCHEDULE).nextAlternative())
+        assertNull(Question.AskDestination(AskReason.PLACE_UNKNOWN, sched("c", "치과", "13:00"), favorites = listOf(home)).nextAlternative())
+        val meeting = sched("m", "육전집 점심", "13:30", place = "광주 육전집")
+        assertNull(Question.AskDestination(AskReason.PLENTY_OF_TIME, meeting, at("12:50")).nextAlternative())
+    }
+
     @Test fun `장소 모름은 후보 이름이 없다`() {
         val noPlace = sched("c", "치과", "13:00")
         assertEquals(emptyList<String>(), Phrases.candidateNames(Question.AskDestination(AskReason.PLACE_UNKNOWN, noPlace, favorites = listOf(home))))

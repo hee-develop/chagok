@@ -16,23 +16,36 @@ sealed interface Question {
      * "어디로 갈까요?" suggested는 후보에 올릴 대상 일정(여유 많음·장소 없음일 때).
      * departBy는 여유 많음일 때 "{출발 시각}에 출발하면 돼요"에 쓰는 출발해야 할 시각.
      * favorites는 후보로 함께 보일 자주 가는 곳(일정 없음·여유 많음일 때만, 개수는 이미 줄여 둠).
+     * only는 대안("다른 데", 7장)으로 후보를 하나씩 바꿔 볼 때 지금 보이는 한 곳의 번호([all] 기준). null이면 후보가 모두 보인다.
      */
     data class AskDestination(
         val reason: AskReason,
         val suggested: Schedule? = null,
         val departBy: Instant? = null,
         val favorites: List<Favorite> = emptyList(),
+        val only: Int? = null,
     ) : Question {
         /**
-         * 화면·음성 후보 장소. 순서가 후보 번호다. 여유 많음이면 대상 일정 장소가 1번이고 자주 가는 곳이 뒤에 붙는다.
-         * 장소 모름은 후보가 없다. 1번이 주 버튼이고 "응"이 고르는 곳이다.
+         * 이 질문이 가진 모든 후보(지금 보이지 않는 것 포함). 순서가 후보 번호다. 여유 많음이면 대상 일정 장소가 1번이고 자주 가는 곳이 뒤에 붙는다.
+         * 장소 모름은 후보가 없다.
          */
-        val candidates: List<Place>
+        val all: List<DestinationOption>
             get() = when (reason) {
-                AskReason.PLENTY_OF_TIME -> listOfNotNull(suggested?.place) + favorites.map { it.place }
-                AskReason.NO_SCHEDULE -> favorites.map { it.place }
+                AskReason.PLENTY_OF_TIME -> listOfNotNull(suggested?.takeIf { it.place != null }?.let { DestinationOption.OfSchedule(it) }) +
+                    favorites.map { DestinationOption.OfFavorite(it) }
+                AskReason.NO_SCHEDULE -> favorites.map { DestinationOption.OfFavorite(it) }
                 AskReason.PLACE_UNKNOWN -> emptyList()
             }
+
+        /** 화면·음성에 보이는 후보. 대안으로 한 곳만 보일 때는 그 하나다. 순서가 후보 번호이고 1번이 주 버튼이며 "응"이 고르는 곳이다. */
+        val options: List<DestinationOption>
+            get() = only?.let { listOfNotNull(all.getOrNull(it)) } ?: all
+
+        /** [options]의 장소. 길안내는 이 번호로 고른 곳으로 한다. */
+        val candidates: List<Place> get() = options.map { it.place }
+
+        /** 다음 후보 하나만 보이는 같은 질문. 더 보여 줄 후보가 없으면 null("다른 곳은 찾지 못했어요."). */
+        fun nextAlternative(): AskDestination? = ((only ?: 0) + 1).takeIf { it < all.size }?.let { copy(only = it) }
     }
 
     /** 출발 제안. arrival은 지금 출발하면 도착할 시각(소요 시간을 알 때만). */
@@ -46,6 +59,21 @@ sealed interface Question {
 }
 
 enum class AskReason { NO_SCHEDULE, PLENTY_OF_TIME, PLACE_UNKNOWN }
+
+/** 목적지 후보 한 곳. 화면 줄·음성 이름·길안내 장소가 모두 이것에서 나온다. */
+sealed interface DestinationOption {
+    val place: Place
+
+    /** 대상 일정의 장소(여유 많음의 1번 후보). */
+    data class OfSchedule(val schedule: Schedule) : DestinationOption {
+        override val place: Place get() = checkNotNull(schedule.place)
+    }
+
+    /** 폰 앱에 등록한 집·회사·자주 가는 곳. */
+    data class OfFavorite(val favorite: Favorite) : DestinationOption {
+        override val place: Place get() = favorite.place
+    }
+}
 
 /** 5장 '말할 양': 첫 탑승은 오늘 일정 수·대상 일정·챙길 것, 재탑승은 대상 일정 한 줄. */
 data class Briefing(

@@ -1,6 +1,8 @@
 package com.chagok.car.runtime
 
 import com.chagok.car.domain.BoardingLog
+import com.chagok.car.domain.PendingReask
+import com.chagok.car.domain.ReaskKind
 import com.chagok.car.domain.ScheduleStatus
 import com.chagok.car.flow.Snapshot
 import org.junit.Assert.assertEquals
@@ -134,5 +136,36 @@ class SnapshotCodecTest {
         val brokenDecoded = SnapshotCodec.decode(broken)!!
         assertEquals("a", brokenDecoded.exitTargetId)
         assertEquals(false, brokenDecoded.exitByLocation)
+    }
+
+    @Test fun `다시 물을 질문도 저장하고 복원하며 이전 저장분은 없음이다`() {
+        val withId = Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3), reask = PendingReask(ReaskKind.DEPART_LATE, "cal:1,2"))
+        assertEquals(withId, SnapshotCodec.decode(SnapshotCodec.encode(withId)))
+        val noId = Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3), reask = PendingReask(ReaskKind.ASK_DESTINATION, null))
+        assertEquals(noId, SnapshotCodec.decode(SnapshotCodec.encode(noId)))
+        assertNull(SnapshotCodec.decode(SnapshotCodec.encode(Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3))))!!.reask)
+
+        // 이 칸이 생기기 전 저장분
+        val old = """{"date":"2026-12-03","statuses":{"a":"ARRIVED"},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false},"noticeDate":null,"exitTargetId":"a","exitArrivedAt":5,"exitByLocation":true}"""
+        val decoded = SnapshotCodec.decode(old)!!
+        assertNull(decoded.reask)
+        assertEquals("a", decoded.exitTargetId)
+    }
+
+    @Test fun `다시 물을 질문 칸만 손상되거나 모르는 갈래여도 나머지 상태는 살린다`() {
+        val base = """"date":"2026-12-03","statuses":{"a":"ARRIVED"},"log":{"lastBoardedOn":"2026-12-03","lastParkedAt":null,"parkedAfterDriveSinceBoarding":true},"exitTargetId":"a","exitArrivedAt":5"""
+        for (broken in listOf(
+            """"reask":"depart"""",
+            """"reask":{"kind":"NO_SUCH_KIND","scheduleId":"a"}""",
+            """"reask":{"scheduleId":"a"}""",
+            """"reask":[1]""",
+        )) {
+            val decoded = SnapshotCodec.decode("{$base,$broken}")!!
+            assertNull(broken, decoded.reask)
+            assertEquals(mapOf("a" to ScheduleStatus.ARRIVED), decoded.statuses)
+            assertEquals("a", decoded.exitTargetId)
+        }
+        // 일정 ID가 문자열이 아니면 일정 없는 질문으로 둔다.
+        assertEquals(PendingReask(ReaskKind.DEPART, null), SnapshotCodec.decode("""{$base,"reask":{"kind":"DEPART","scheduleId":123}}""")!!.reask)
     }
 }

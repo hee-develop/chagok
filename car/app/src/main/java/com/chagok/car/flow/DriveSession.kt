@@ -5,6 +5,7 @@ import com.chagok.car.domain.BoardingDecider
 import com.chagok.car.domain.BoardingDecision
 import com.chagok.car.domain.BoardingKind
 import com.chagok.car.domain.BoardingLog
+import com.chagok.car.domain.Briefing
 import com.chagok.car.domain.DayPlan
 import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.FavoriteKind
@@ -15,6 +16,7 @@ import com.chagok.car.domain.Intent
 import com.chagok.car.domain.IntentMatcher
 import com.chagok.car.domain.LatLng
 import com.chagok.car.domain.Motion
+import com.chagok.car.domain.PendingReask
 import com.chagok.car.domain.Place
 import com.chagok.car.domain.Question
 import com.chagok.car.domain.Rules
@@ -147,6 +149,11 @@ data class Snapshot(
     val homeCardShown: Boolean = false,
     /** [exitTargetId]가 위치로 정한 하차 대기인가(D·R이 되면 지운다). 이전 저장분에는 없어 false. */
     val exitByLocation: Boolean = false,
+    /**
+     * 30초 동안 대답이 없어 접힌 질문 하나. 다음 정차(달린 뒤 넣은 P단) 또는 다음 탑승 판단 때 한 번만 다시 묻는다(`docs/reask.md`).
+     * 프로세스가 다시 떠도 이어지게 저장한다. 이전 저장분에는 없어 null.
+     */
+    val reask: PendingReask? = null,
 )
 
 /** 세션이 내보내는 출력. 어댑터는 이것을 실행하기만 한다. */
@@ -328,6 +335,21 @@ class DriveSession(
     /** 마지막으로 P단이 된 것이 달린 뒤였는가. 이미 P단일 때 도착이 기록되면 이것이 true일 때만 바로 하차 카드를 띄운다. */
     private var lastParkWasRun = false
 
+    /**
+     * 다시 물을 질문(무응답·보류 뒤 30초가 지나 접힌 질문 하나). 다음 정차 때 한 번만 묻고 지운다.
+     * 날짜 변경·초기화·연결 해제·그 질문의 대상 일정이 도착·건너뜀이 되거나 새 길안내를 수락하면 지운다.
+     */
+    private var reask: PendingReask? = restored?.reask
+
+    /**
+     * 방금 달린 뒤 P단에 넣었고 다시 물을 질문이 있어 그 P단에서 다시 물을 기회를 보는 중인가.
+     * 위치로 도착을 판단하는 동안은 기다리고(도착 하차 카드가 먼저), 판단이 끝나면 [settleReaskAtPark]가 한 번 물어본다. D·R이 되거나 P단을 벗어나면 접는다.
+     */
+    private var reaskAtPark = false
+
+    /** 일정을 받는 중에 보류한 탑승 판단이 P단에서 다시 묻는 것이었는가(받기가 끝나 이어 갈 때 잠깐 정차 규칙을 건너뛰어야 한다). */
+    private var heldReaskNow = false
+
     private var paired = paired
 
     /** 연결 전 마지막으로 받은 연결 코드. 연결되면 버린다. */
@@ -337,12 +359,12 @@ class DriveSession(
     /** 결과 한 줄을 보이고 있으면 그 타이머 ID, 아니면 null */
     private var resultTimerId: Int? = null
 
-    private class PendingBoarding(val requestId: Int, val kind: BoardingKind, val targetId: String)
+    private class PendingBoarding(val requestId: Int, val kind: BoardingKind, val targetId: String, val reasking: Boolean)
 
     private class CardState(
-        val view: CardContent,
-        /** 질문 카드의 질문. 일정 안내 카드는 null */
-        val question: Question?,
+        var view: CardContent,
+        /** 질문 카드의 질문. 일정 안내 카드는 null. 대안("다른 데")으로 후보를 바꾸면 다음 후보 하나만 보이는 같은 질문으로 바뀐다. */
+        var question: Question?,
         var timerId: Int,
         /** 듣기가 열려 있는가. 질문 카드가 말을 마치면 듣고, 결과를 받으면 닫는다(다시 물을 때만 다시 연다). */
         var voiceOpen: Boolean = false,
@@ -355,6 +377,10 @@ class DriveSession(
         val isPairing: Boolean = false,
         /** 하차 카드인가. 질문이 없고 [챙겼어요] 또는 [Rules.EXIT_CARD] 뒤 닫힌다. */
         val isExit: Boolean = false,
+        /** 이 카드의 질문을 판단한 브리핑. 대안으로 카드를 다시 만들 때 쓴다. */
+        val briefing: Briefing? = null,
+        /** 접힌 질문을 다시 묻는 카드인가. 이 카드가 또 무응답으로 접혀도 다시 묻지 않는다(한 번만). */
+        val isReask: Boolean = false,
     )
 
     init {
@@ -362,6 +388,7 @@ class DriveSession(
         // 저장분의 날짜가 오늘이 아니면(어제 저장 뒤 자정을 넘겨 다시 뜸) 하차 대기도 지난 날의 것이라 버린다.
         if (restored != null && restored.date != statusDate) {
             clearExit()
+            reask = null
             homeItemsAnnounced = emptySet()
             homeCardShown = false
         }
@@ -376,7 +403,7 @@ class DriveSession(
     val isDriving: Boolean get() = motion() == Motion.DRIVING
     private fun plan() = DayPlan(schedules, statuses)
     private fun snapshot() =
-        Snapshot(log, statuses, statusDate, noticeSpokenOn, exitTargetId, exitArrivedAt, homeItemsAnnounced, homeCardShown, exitByLocation)
+        Snapshot(log, statuses, statusDate, noticeSpokenOn, exitTargetId, exitArrivedAt, homeItemsAnnounced, homeCardShown, exitByLocation, reask)
 
     fun handle(event: Event): List<Effect> {
         val out = mutableListOf<Effect>()
@@ -408,6 +435,7 @@ class DriveSession(
         if (!loadingSchedules) {
             rollDate()
             statuses = plan().skipOverdue(now()).statuses
+            pruneReask()
         }
         // 도착 뒤 오래 지난 하차 대기는 버린다(도착 알림 뒤 다른 곳에서 한참 있다 P단에 넣어도 하차가 아니다).
         if (exitTargetId != null || exitHome) {
@@ -439,7 +467,10 @@ class DriveSession(
             Event.PrimaryPressed -> onButton(primary = true, out)
             Event.SecondaryPressed -> onButton(primary = false, out)
             is Event.CandidatePressed -> onCandidate(event.index, out)
-            is Event.CardTimedOut -> if (card?.timerId == event.timerId) closeCard(out)
+            is Event.CardTimedOut -> card?.takeIf { it.timerId == event.timerId }?.let { state ->
+                keepForReask(state)
+                closeCard(out)
+            }
             Event.Reset -> onReset(out)
             is Event.LocationChanged -> onLocation(event, out)
             is Event.LocationTimedOut -> onLocationTimeout(event.timerId, out)
@@ -449,6 +480,7 @@ class DriveSession(
             is Event.Paired -> onPaired(event.brief, out)
             Event.Unpaired -> onUnpaired(out)
         }
+        settleReaskAtPark(out)
         // 연결 전에는 정차 중이면 늘 연결 카드를 둔다(초기화·주행 뒤 정차에도 다시 보인다).
         if (!paired) showPairingCard(out)
         needsLocation = computeNeedsLocation()
@@ -473,8 +505,9 @@ class DriveSession(
         val midnight = today.atStartOfDay(zone).toInstant()
         val spanning = schedules.filter { it.start.isBefore(midnight) && it.end.isAfter(now) }.map { it.id }.toSet()
         statuses = statuses.filterKeys { it in spanning }
-        // 지난 날의 하차 카드는 보이지 않고, 집 하차 알림 기록도 새 날부터 다시 센다.
+        // 지난 날의 하차 카드는 보이지 않고, 집 하차 알림 기록도 새 날부터 다시 센다. 접힌 질문도 지난 날의 것이라 다시 묻지 않는다.
         clearExit()
+        reask = null
         homeItemsAnnounced = emptySet()
         homeCardShown = false
     }
@@ -510,6 +543,7 @@ class DriveSession(
         pending = null
         acceptedRoute = false
         heldBoarding = false
+        reaskAtPark = false
         // 위치 답을 기다리던 중이면 그만둔다(어댑터·내비도 멈추므로 답이 와도 쓰지 않는다).
         stopAwaitingLocation()
         // 시동을 끄면 내릴 때가 된 것이라 아직 못 보인 하차 카드는 접는다.
@@ -530,9 +564,12 @@ class DriveSession(
     /**
      * 탑승 판단. 일정을 받는 중이면 보류하고, 받기가 끝나면 [onSchedulesLoaded]가 이어 간다.
      * 일정 출처가 최신이 아니면 판단 전에 다시 받는다([allowRefresh]가 true일 때 한 번만).
+     * [reaskNow]는 달린 뒤 P단에서 접힌 질문을 다시 묻는 것이다([settleReaskAtPark]): 방금 P단에 넣은 것이라 잠깐 정차 규칙을 건너뛰고 재탑승 한 줄로 판단한다.
+     * 다시 물을 질문이 있을 때의 탑승 판단(다음 탑승)도 그 질문을 다시 묻는 것으로 치고, 카드를 띄울 때 지운다.
      */
-    private fun onBoarded(out: MutableList<Effect>, allowRefresh: Boolean = true) {
+    private fun onBoarded(out: MutableList<Effect>, allowRefresh: Boolean = true, reaskNow: Boolean = false) {
         if (suspended || motion() != Motion.STOPPED || pending != null) return
+        if (reaskNow && reask == null) return
         // 연결 전에는 탑승을 소진하지 않고 연결 카드만 보인다. 연결되면 [onPaired]가 탑승으로 이어 간다.
         if (!paired) {
             showPairingCard(out)
@@ -540,9 +577,10 @@ class DriveSession(
         }
         if (loadingSchedules) {
             heldBoarding = true
+            heldReaskNow = reaskNow
             return
         }
-        val kind = log.classify(now(), zone)
+        val kind = if (reaskNow) BoardingKind.AGAIN else log.classify(now(), zone)
         // 질문 카드가 떠 있으면 새 탑승은 무시한다. 일정 안내 카드는 다시 판단한다.
         // 하차 카드가 떠 있을 때의 탑승 신호는 5장 '잠깐 정차'를 따른다: 방금 P단에 넣은 뒤 10분 안이면 탑승이 아니라 카드를 그대로 둔다.
         // 10분이 지난 진짜 탑승이면(도착 알림이 이미 정차 중에 와서 P단 기록이 오래된 경우 등) 이미 내릴 때가 지난 카드라 접고 탑승 판단을 이어 간다.
@@ -558,6 +596,7 @@ class DriveSession(
             loadingSchedules = true
             loadGeneration = AWAITING_GENERATION
             heldBoarding = true
+            heldReaskNow = reaskNow
             out += Effect.RefreshSchedules
             return
         }
@@ -571,14 +610,15 @@ class DriveSession(
         }
         if (notice) closeCard(out, instant = true)
 
+        val reasking = reaskNow || reask != null
         val target = plan().target()
         val place = target?.place
         if (place == null) {
-            decide(kind, null, out)
+            decide(kind, null, out, reasking)
             return
         }
         val id = ++seq
-        pending = PendingBoarding(id, kind, checkNotNull(target).id)
+        pending = PendingBoarding(id, kind, checkNotNull(target).id, reasking)
         out += Effect.RequestTravelTime(id, place)
     }
 
@@ -622,6 +662,8 @@ class DriveSession(
         pending = null
         acceptedRoute = false
         heldBoarding = false
+        reask = null
+        reaskAtPark = false
         clearExit()
         // 연결이 풀리면 집 좌표(일정 응답의 자주 가는 곳)는 [SessionHost]가 지운다. 세션은 위치와 집 판정 기록을 버린다.
         forgetLocation()
@@ -644,8 +686,10 @@ class DriveSession(
 
     private fun onSchedulesLoaded(out: MutableList<Effect>) {
         val held = heldBoarding
+        val reaskNow = heldReaskNow
         heldBoarding = false
-        if (held || card?.isScheduleNotice == true) onBoarded(out, allowRefresh = false)
+        heldReaskNow = false
+        if (held || card?.isScheduleNotice == true) onBoarded(out, allowRefresh = false, reaskNow = held && reaskNow)
     }
 
     private fun showScheduleNotice(out: MutableList<Effect>) {
@@ -665,10 +709,10 @@ class DriveSession(
         if (!canSpeak()) return
         // 기다리는 사이 대상 일정이 바뀌었으면 그 소요 시간은 쓰지 않는다.
         val sameTarget = plan().target()?.id == waiting.targetId
-        decide(waiting.kind, event.travelTime.takeIf { sameTarget }, out)
+        decide(waiting.kind, event.travelTime.takeIf { sameTarget }, out, waiting.reasking)
     }
 
-    private fun decide(kind: BoardingKind, travelTime: Duration?, out: MutableList<Effect>) {
+    private fun decide(kind: BoardingKind, travelTime: Duration?, out: MutableList<Effect>, reasking: Boolean = false) {
         val decision = BoardingDecider.decide(
             now(), kind, plan(), planIsFallback = origin == ScheduleOrigin.STORED, travelTime = travelTime, favorites = favorites,
         )
@@ -681,7 +725,9 @@ class DriveSession(
 
         val view = Phrases.card(decision, now(), zone)
         val timerId = ++seq
-        val state = CardState(view, question, timerId, voiceOpen = true)
+        val state = CardState(view, question, timerId, voiceOpen = true, briefing = decision.briefing, isReask = reasking)
+        // 다시 묻는 카드를 띄우면 그 기회는 쓴 것이다(한 번만).
+        if (reasking) reask = null
         card = state
         resultTimerId = null
         out += Effect.ShowCard(view(state))
@@ -706,6 +752,7 @@ class DriveSession(
             if (!drivenSincePark) driveStartedAt = now()
             drivenSincePark = true
             exitCardShownThisPark = false
+            reaskAtPark = false
             // 위치로 정한 하차 대기(집 하차 포함)는 다시 달리면 지운다. 내비 도착 대기는 그대로 다음 P단을 기다린다.
             if (exitByLocation) clearExit()
         }
@@ -716,18 +763,23 @@ class DriveSession(
             lastParkWasRun = ran
             drivenSincePark = false
             if (ran) {
+                // 다시 묻기는 잠깐 정차 P단을 건너뛴다: P단 시각을 갱신하기 전의 기록으로 이 P단이 마지막 P단 뒤 10분 안인지 본다(탑승 판단의 잠깐 정차와 같은 분류).
+                val quickPark = log.classify(now(), zone) == BoardingKind.QUICK_STOP
                 log = log.parked(now())
                 // 내비 도착으로 기다리던 하차 대기가 있으면 그 카드가 먼저다(3장: 내비 도착 또는 300m 안 P단, 둘 중 하나로 도착이 된다).
                 // 그 P단에서도 위치 판정은 한다. 다른 일정의 도착 기록은 살리고, 카드는 먼저 기다린 것 하나만 둔다([arrive]의 규칙). 집 하차는 이 P단에서 하지 않는다.
                 val naviPending = exitTargetId != null
                 showExitCard(out)
                 judgeAtPark(out, allowHome = !naviPending)
+                reaskAtPark = reask != null && !quickPark
             } else {
                 // 앱을 켠 순간 이미 P단(UNKNOWN→P)이거나 달리지 않고 넣은 P단은 하차가 아니라서 대기를 버린다. 도착이 없던 P단은 대기가 없어 아무 일 없다.
                 clearExit()
+                reaskAtPark = false
             }
         } else if (newGear != Gear.PARK) {
             lastParkWasRun = false
+            reaskAtPark = false
         }
         enforceDriving(out)
     }
@@ -758,6 +810,42 @@ class DriveSession(
         card = null
         out += Effect.StopVoice
         out += Effect.CollapseCard(instant)
+    }
+
+    /**
+     * 30초 동안 대답이 없어(보류한 뒤 접힌 것 포함) 접히는 질문 카드를 다시 물을 질문으로 남긴다(정책서 6장 무응답, 7장 보류).
+     * 이미 다시 묻는 카드였으면 남기지 않는다(한 번만). 질문이 없는 카드(하차·안내·연결)와 거절·수락·주행 시작으로 접히는 카드는 해당 없다.
+     */
+    private fun keepForReask(state: CardState) {
+        val question = state.question ?: return
+        if (state.isReask) return
+        reask = PendingReask.of(question)
+    }
+
+    /** 다시 물을 질문이 다룬 대상 일정이 도착·건너뜀이 됐으면 지운다. */
+    private fun pruneReask() {
+        val id = reask?.scheduleId ?: return
+        if (plan().statusOf(id).isFinal) reask = null
+    }
+
+    /**
+     * 달린 뒤 넣은 P단에서 다시 물을 질문을 한 번 묻는다(정책서 6장 '무응답: 다음 정차 때 한 번만 다시 묻기').
+     * - 위치로 도착을 판단하는 동안은 기다린다. 도착이 되면 하차 카드가 먼저라 이 P단에서는 묻지 않는다(다음 탑승 판단으로 남는다).
+     * - 이 P단에서 하차 카드(일정 장소·집)를 보였거나 보이려고 기다리면 묻지 않는다. 지우지도 않아 다음 정차나 다음 탑승 판단에서 묻는다.
+     * - 그 밖에는 재탑승 한 줄로 [onBoarded]를 다시 판단한다(그 사이 대상 일정이 바뀌었거나 이미 늦었으면 그 판단으로 만든 질문이다).
+     *   다른 카드가 떠 있거나 판단을 못 하면(일정을 받는 중이면 받기가 끝난 뒤 이어 간다) 이 P단에서는 건너뛴다.
+     */
+    private fun settleReaskAtPark(out: MutableList<Effect>) {
+        if (!reaskAtPark) return
+        if (gear != Gear.PARK) {
+            reaskAtPark = false
+            return
+        }
+        if (awaitingParkLocation) return
+        reaskAtPark = false
+        pruneReask()
+        if (reask == null || exitCardShownThisPark || exitTargetId != null || exitHome) return
+        onBoarded(out, reaskNow = true)
     }
 
     private fun onButton(primary: Boolean, out: MutableList<Effect>) {
@@ -806,14 +894,33 @@ class DriveSession(
             is Intent.Pick -> if (intent.index in candidates.indices) accept(state, out, intent.index) else unrecognized(state, out)
             Intent.Reject -> reject(out)
             Intent.Hold -> hold(state, out)
-            Intent.Alternative -> {
-                state.notice = Phrases.NO_ALTERNATIVE
-                out += Effect.ShowCard(view(state))
-                speak(out, Phrases.NO_ALTERNATIVE, thenListen = false)
-            }
+            Intent.Alternative -> alternative(state, out)
             Intent.Unrecognized -> unrecognized(state, out)
             Intent.Chatter, Intent.Silence -> Unit
         }
+    }
+
+    /**
+     * 대안("다른 데", 7장): 후보가 있는 질문이면 다음 후보 하나만 보이는 카드로 바꿔 "{이름}으로 갈까요?"를 묻는다(듣기를 다시 열고 30초를 다시 센다).
+     * 더 보여 줄 후보가 없거나 후보가 있는 질문이 아니면(출발 제안 등) "다른 곳은 찾지 못했어요."만 알리고 카드는 그대로 둔다.
+     */
+    private fun alternative(state: CardState, out: MutableList<Effect>) {
+        val next = (state.question as? Question.AskDestination)?.nextAlternative()
+        val briefing = state.briefing
+        if (next == null || briefing == null) {
+            state.notice = Phrases.NO_ALTERNATIVE
+            out += Effect.ShowCard(view(state))
+            speak(out, Phrases.NO_ALTERNATIVE, thenListen = false)
+            return
+        }
+        state.question = next
+        state.view = Phrases.card(BoardingDecision.Card(briefing, next), now(), zone)
+        state.notice = null
+        state.voiceOpen = true
+        state.timerId = ++seq
+        out += Effect.ShowCard(view(state))
+        speak(out, Phrases.spoken(state.view), thenListen = true)
+        out += Effect.ScheduleCardTimeout(state.timerId, Rules.CARD_TIMEOUT)
     }
 
     private fun unrecognized(state: CardState, out: MutableList<Effect>) {
@@ -860,8 +967,9 @@ class DriveSession(
         out += Effect.StopVoice
         out += Effect.CollapseCard()
         if (place == null) return
-        // 새 길안내를 수락하면 지난 도착의 하차 카드는 더 보이지 않는다.
+        // 새 길안내를 수락하면 지난 도착의 하차 카드는 더 보이지 않고, 접어 둔 질문도 다시 묻지 않는다.
         clearExit()
+        reask = null
         acceptedRoute = true
         routeScheduleId = scheduleId
         out += Effect.StartRoute(place)
@@ -1140,6 +1248,9 @@ class DriveSession(
         routeScheduleId = null
         forgetLocation()
         heldBoarding = false
+        heldReaskNow = false
+        reask = null
+        reaskAtPark = false
         noticeSpokenOn = null
         drivenSincePark = false
         clearExit()

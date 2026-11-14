@@ -83,6 +83,7 @@
 | 앱 카테고리 | 위치(도착·집 하차)를 쓰는 차곡이 어느 앱 카테고리(주행 중 위치 사용 가능 범위, 지도·내비 외 앱의 위치 권한)인지 Pleos 앱 카테고리 정의가 필요하다. 가이드가 카테고리별 권한 범위를 정하면 위치 권한을 요청할 수 있는지부터 달라진다 | 미확인 |
 | FusedLocation 대체 | 실차에서 `pleos.car.permission.FUSED_LOCATION`(SDK 신청 '준비 중')으로 `Locator`를 대체해도 `LocationChanged(position, ageMillis)` 의미(측위한 지 얼마나 됐는가)를 지킬 수 있는가. 측위 시각을 주지 않는 API면 나이를 0으로 넣어 위치 나이·이번 주행 전 측위 규칙이 무력해지므로 따로 정해야 한다 | 미확인 |
 | 위치 도착·집 하차 | 일정 '시작 60분 전 ~ 종료' 창·300m·5분(`Rules.ARRIVAL_WINDOW_LEAD`·`ARRIVAL_RADIUS_METERS`·`LOCATION_MAX_AGE`)과 집 반경 300m(`HOME_RADIUS_METERS`)·30초(`LOCATION_TRUST_AGE`)·정확도 100m(`LOCATION_MAX_ACCURACY_METERS`)가 실제 주차 동선(지하주차장 GPS 오차 포함)에 맞는가. 집을 떠났다 돌아와야 하는 규칙이 실제 귀가에서 오탐·누락을 만드는가(`docs/home-exit.md`) | 미확인 |
+| 다시 묻기 | 질문 카드가 30초 무응답으로 접힌 뒤 실제 주행 → 목적지가 아닌 곳 P단에서 재탑승 한 줄이 한 번 뜨고 말하는가. 사람이 없는 채로 주차장 이동·잠깐 정차(마지막 P단 뒤 10분 안)에서 오탐이 없는가. P단에 머문 시간(10분 타이머)이 아니라 '마지막 P단 뒤 10분' 기준이 실제 주차 동선에 맞는가(`docs/reask.md`) | 미확인 |
 | 듣는 중 표시 | 음성을 받는 중임을 화면에 알리는 표시. 프로토타입에 듣는 중 표시와 문구가 없어 만들지 않았다. 카드 머리 파형(VoiceIndicator)은 말하는 동안만 움직인다 | 미확인 |
 
 debug 빌드는 `chagok-debug://signal?trip=<초>&route=ok|fail&listen=off&heard=<들은 말>`로 소요 시간·경로 요청 결과·들은 말을 주입한다(자동 E2E용). 위 항목을 사람이 확인할 때는 `trip=real&route=real&listen=real`로 주입을 풀고 실제 내비·STT를 쓴다.

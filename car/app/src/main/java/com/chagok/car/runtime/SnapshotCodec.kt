@@ -1,6 +1,8 @@
 package com.chagok.car.runtime
 
 import com.chagok.car.domain.BoardingLog
+import com.chagok.car.domain.PendingReask
+import com.chagok.car.domain.ReaskKind
 import com.chagok.car.domain.ScheduleStatus
 import com.chagok.car.flow.Snapshot
 import org.json.JSONArray
@@ -28,6 +30,7 @@ object SnapshotCodec {
             .put("homeItemsAnnounced", JSONArray(snapshot.homeItemsAnnounced.sorted()))
             .put("homeCardShown", snapshot.homeCardShown)
             .put("exitByLocation", snapshot.exitByLocation)
+            .put("reask", snapshot.reask?.let { JSONObject().put("kind", it.kind.name).put("scheduleId", it.scheduleId ?: JSONObject.NULL) } ?: JSONObject.NULL)
             .toString()
     }
 
@@ -60,6 +63,12 @@ object SnapshotCodec {
         val cardShown = root.opt("homeCardShown") as? Boolean ?: false
         // 위치로 정한 하차 대기인지도 나중에 생긴 칸이라 없으면 false(내비 도착 대기로 본다).
         val exitByLocation = root.opt("exitByLocation") as? Boolean ?: false
-        Snapshot(log, statuses, date, noticeDate, exitTargetId, exitArrivedAt, announced, cardShown, exitByLocation)
+        // 다시 물을 질문도 나중에 생긴 칸이라 없으면 null. 이 칸만 손상됐거나 모르는 갈래면 그 질문만 버린다.
+        val reask = runCatching {
+            root.optJSONObject("reask")?.let { json ->
+                PendingReask(ReaskKind.valueOf(json.getString("kind")), json.opt("scheduleId") as? String)
+            }
+        }.getOrNull()
+        Snapshot(log, statuses, date, noticeDate, exitTargetId, exitArrivedAt, announced, cardShown, exitByLocation, reask)
     }.getOrNull()
 }
