@@ -42,6 +42,7 @@ class DepartRouteTest {
 
     @After
     fun tearDown() {
+        E2eApp.failFetch = false
         host.post(Event.RestrictionChanged(false))
         host.post(Event.GearChanged(Gear.PARK))
         device.pressHome()
@@ -279,6 +280,24 @@ class DepartRouteTest {
 
         assertGone("광주 직관 날이에요!")
         assertNull(device.wait(Until.findObject(By.textContains("길안내를 시작할게요.")), 1_000))
+    }
+
+    @Test
+    fun 서버에_연결하지_못해_사본으로_띄운_카드도_버튼이_잘리지_않는다() {
+        // 정상 카드에서 주 버튼 높이를 잰다(받은 일정은 같은 날 사본으로 남는다).
+        departOffer()
+        val full = device.findObject(By.text("응, 출발")).visibleBounds.height()
+
+        // 받기가 실패하면 사본을 쓰고 '서버에 연결하지 못해' 한 줄이 붙는다. 고정 높이 카드라 넘치면 버튼 줄이 잘렸었다.
+        device.pressHome()
+        E2eApp.failFetch = true
+        host.resetDemo()
+        host.post(Event.GearChanged(Gear.PARK))
+        launch()
+        assertNotNull("사본 안내", waitFor("서버에 연결하지 못해 마지막으로 받은 일정 기준이에요."))
+        assertNotNull(waitFor("광주 직관 날이에요!"))
+        assertEquals("주 버튼이 잘리지 않아야 함", full, device.findObject(By.text("응, 출발")).visibleBounds.height())
+        assertEquals(full, device.findObject(By.text("잠깐만")).visibleBounds.height())
     }
 
     private companion object {

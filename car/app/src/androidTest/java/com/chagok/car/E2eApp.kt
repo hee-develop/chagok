@@ -86,6 +86,7 @@ class E2eApp : ChagokApp() {
             this,
             clock = DemoClock(Clock.fixed(NOW, ZoneId.of("Asia/Seoul"))),
             fetcher = ScheduleFetcher { at ->
+                if (failFetch) throw java.io.IOException("E2E: 서버에 연결하지 못함")
                 FixtureResponses.response(if (emptyDay) EMPTY_DAY else fixtureJson(), at, calendarsJson(), JSONArray(favoritesJson))
             },
             adapters = { post, onSpeaking, onDucking, onIgnitionSupport ->
@@ -114,6 +115,9 @@ class E2eApp : ChagokApp() {
 
         /** true면 일정이 하나도 없는 날로 답한다. 다음 일정 받기부터 쓴다. */
         @Volatile var emptyDay: Boolean = false
+
+        /** true면 일정 받기가 실패한다(서버 연결 실패). 같은 날 받아 둔 사본이 있으면 앱은 그 사본을 쓴다. */
+        @Volatile var failFetch: Boolean = false
 
         private const val EMPTY_DAY = """{"schedules":[]}"""
 
