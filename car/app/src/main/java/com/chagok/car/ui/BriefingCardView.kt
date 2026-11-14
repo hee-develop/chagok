@@ -31,6 +31,9 @@ class BriefingCardView(context: Context, private val d: DesignScale) : LinearLay
     /** 지금 그린 카드의 목적지 후보 줄. 고정 높이 카드에서 내용이 넘치면 [onMeasure]가 이 줄들의 높이를 줄인다. */
     private var candidateRows: List<View> = emptyList()
 
+    /** 본문에서 위쪽 간격(space-xl)을 둔 블록. 내용이 넘치면 [onMeasure]가 이 간격부터 줄인다. */
+    private var gapViews: List<View> = emptyList()
+
     /** 말하는 동안만 true. 파형이 움직인다. */
     var speaking: Boolean
         get() = voiceIndicator.speaking
@@ -125,6 +128,7 @@ class BriefingCardView(context: Context, private val d: DesignScale) : LinearLay
             body.addView(buttonRow(card), LayoutParams(-1, -2).apply { topMargin = gap() })
         }
         candidateRows = body.descendants().filter { it.getTag(R.id.candidate_row) == true }
+        gapViews = (0 until body.childCount).map { body.getChildAt(it) }.filter { (it.layoutParams as MarginLayoutParams).topMargin > 0 }
         if (card.autoDismiss != null) {
             val bar = AutoDismissBar(context, d)
             dismissBar = bar
@@ -136,24 +140,42 @@ class BriefingCardView(context: Context, private val d: DesignScale) : LinearLay
     }
 
     /**
-     * 후보 줄은 버튼 높이(candidate_row_h)로 먼저 재 보고, 고정 높이 카드의 내용이 넘치면 넘친 만큼을 줄 수로 나눠
-     * 줄 높이를 줄여(candidate_row_min_h까지) 다시 잰다. 두 줄 t-voice·안내 한 줄·후보 3줄이 함께 있어도 버튼 줄이 잘리지 않는다.
+     * 고정 높이 카드(592)의 내용이 넘치면 버튼 줄이 잘리지 않게 줄여서 다시 잰다. 줄이는 순서:
+     * 1. 블록 사이 간격(space-xl)을 space-s까지 — 보기만 촘촘해지고 누르는 크기는 그대로다.
+     * 2. 그래도 넘치면 후보 줄 높이(candidate_row_h, 버튼 높이)를 candidate_row_min_h까지.
+     * 두 줄 t-voice·오늘 일정·채비 타일·'서버에 연결하지 못해' 한 줄이 함께 있는 첫 탑승 카드나,
+     * 후보 3줄과 안내 한 줄이 함께 있는 목적지 묻기 카드가 여기에 걸린다. 넘치지 않으면 규격 그대로다.
      */
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val full = d.dimenInt(R.dimen.candidate_row_h)
-        candidateRows.forEach { it.minimumHeight = full }
+        val fullGap = gap()
+        val fullRow = d.dimenInt(R.dimen.candidate_row_h)
+        gapViews.forEach { (it.layoutParams as MarginLayoutParams).topMargin = fullGap }
+        candidateRows.forEach { it.minimumHeight = fullRow }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-        if (candidateRows.isEmpty()) return
+
+        var overflow = bodyOverflow()
+        if (overflow > 0 && gapViews.isNotEmpty()) {
+            val shrink = (overflow + gapViews.size - 1) / gapViews.size
+            val reduced = maxOf(d.dimenInt(R.dimen.space_s), fullGap - shrink)
+            gapViews.forEach { (it.layoutParams as MarginLayoutParams).topMargin = reduced }
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            overflow = bodyOverflow()
+        }
+        if (overflow > 0 && candidateRows.isNotEmpty()) {
+            val shrink = (overflow + candidateRows.size - 1) / candidateRows.size
+            val reduced = maxOf(d.dimenInt(R.dimen.candidate_row_min_h), fullRow - shrink)
+            candidateRows.forEach { it.minimumHeight = reduced }
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        }
+    }
+
+    /** 본문 자식(간격 포함)의 높이 합이 본문 높이를 넘는 만큼. 넘치지 않으면 0 이하. */
+    private fun bodyOverflow(): Int {
         val used = (0 until body.childCount).map { body.getChildAt(it) }.sumOf {
             val lp = it.layoutParams as MarginLayoutParams
             it.measuredHeight + lp.topMargin + lp.bottomMargin
         }
-        val overflow = used - body.measuredHeight
-        if (overflow <= 0) return
-        val shrink = (overflow + candidateRows.size - 1) / candidateRows.size
-        val reduced = maxOf(d.dimenInt(R.dimen.candidate_row_min_h), full - shrink)
-        candidateRows.forEach { it.minimumHeight = reduced }
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        return used - body.measuredHeight
     }
 
     private fun View.descendants(): List<View> =
