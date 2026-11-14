@@ -6,6 +6,10 @@ import type { EnergySources } from './energy/types.js';
 import { createEnergyRoute } from './routes/energy.js';
 import { createEventsRoute, isLoopbackRequest, type EventsStore } from './routes/events.js';
 import { createFamilyRoute, type FamilyStore } from './routes/family.js';
+import { createFamilyGuard } from './family/guard.js';
+import { createFamilyRequests, type FamilyRequests } from './family/service.js';
+import { createFamilyGroupRoute } from './routes/familyGroup.js';
+import { createDriveStateRoute, createRequestsRoute } from './routes/requests.js';
 import { createCarRoute, createDriversRoute, createPairRoute, createPresenceRoute } from './routes/pair.js';
 import { createNotificationsRoute } from './routes/notifications.js';
 import { createPairingRoute } from './routes/pairing.js';
@@ -50,6 +54,11 @@ export type AppOptions = {
    * 직접 만들어 넘긴다(FCM 같은 추가 `PushSender`를 붙일 때도 여기서). 자리가 지워지거나 폰이 바뀌면 그 자리의 알림을 버린다.
    */
   notifications?: Notifications;
+  /**
+   * 가족 묶기·가족 요청(`POST /family/invite` 등, `/requests`, `/drive-state`)의 저장소와 알림 연결. 없으면 인스턴스마다 만든다. 서버 시작 코드(`index.ts`)는
+   * 날짜가 지난 요청을 지우는 정기 작업이 같은 저장소를 보도록 직접 만들어 넘긴다. 자리가 지워지거나 폰이 바뀌면 이 저장소가 따라간다.
+   */
+  familyRequests?: FamilyRequests;
   /** 코드 시도 횟수를 세는 요청 주소. 기본은 연결 주소이고, 프록시 뒤에서는 바꿔야 한다. 테스트에서도 바꾼다. */
   clientAddress?: (c: Context) => string;
   /**
@@ -98,6 +107,7 @@ export const createApp = ({
   familyStore,
   seats = createSeatStore(now),
   notifications = createNotifications({ now }),
+  familyRequests = createFamilyRequests({ now, seats, notifier: notifications.notifier }),
   clientAddress = connectionAddress,
   legacyDriverFallback = true,
   fixtureSeats = false,
@@ -137,6 +147,8 @@ export const createApp = ({
     allow: (c: Context) => searchLimiter.take(clientAddress(c)),
     allowMemoryWrite: (c: Context) => memoryLimiter.take(clientAddress(c)),
   };
+  // 가족 묶기·요청 API의 자리 정하기는 옛 차 앱 호환 읽기·기본 자리를 쓰지 않는 따로 둔 엄격한 가드다.
+  const familyGuard = createFamilyGuard(seats, familyRequests);
   return new Hono()
     .get('/health', (c) => c.json({ ok: true as const }))
     .route('/calendars', createCalendarsRoute(calendars, guard))
@@ -144,6 +156,9 @@ export const createApp = ({
     .route('/places', createPlaceResolveRoute(guard, searchDeps))
     .route('/events', createEventsRoute(guard, { now, isLoopback, loopbackOnly: eventsLoopbackOnly, onReceived: onEventsReceived }))
     .route('/family', createFamilyRoute(familyMembers, guard))
+    .route('/family', createFamilyGroupRoute(familyGuard, familyRequests, { now, clientAddress }))
+    .route('/requests', createRequestsRoute(familyGuard, familyRequests, now))
+    .route('/drive-state', createDriveStateRoute(familyGuard, familyRequests))
     .route('/pairing', createPairingRoute(seats, { clientAddress, isLoopback }))
     .route('/pair', createPairRoute(seats, { now, clientAddress, isLoopback }))
     .route('/notifications', createNotificationsRoute(seats, notifications))

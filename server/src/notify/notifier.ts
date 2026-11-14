@@ -1,5 +1,5 @@
 import { createOutbox, type Outbox, type OutboxOptions } from './outbox.js';
-import { isNotificationKind, type AppNotification, type NotifyInput, type NotifyResult, type PushSender } from './types.js';
+import { isNotificationKind, type AppNotification, type NotificationKind, type NotifyInput, type NotifyResult, type PushSender } from './types.js';
 
 /** 같은 `dedupeKey`를 다시 만들지 않는 시간. 키에 날짜를 넣어 쓰므로 하루가 지나도 남을 만큼(2일)이면 된다. */
 export const DEDUPE_TTL_MS = 2 * 24 * 60 * 60_000;
@@ -29,6 +29,11 @@ export type Notifier = {
   notify(seatId: string, input: NotifyInput): NotifyResult;
   /** 그 자리의 중복 억제 기록과 보낼 곳에 쌓아 둔 것을 버린다(자리 삭제·폰 바꾸기). */
   forget(seatId: string): void;
+  /**
+   * 이 종류의 알림 중 조건에 맞는 것을 모든 자리의 알림함에서 지운다(예: 가족 요청이 지워졌을 때 그 요청의 `family-status`).
+   * 중복 억제 키는 남긴다(지운 일이 다시 알림을 만들지 않게).
+   */
+  retract(kind: NotificationKind, predicate: (notification: AppNotification) => boolean): void;
   /** 알림 id의 현재 기준값(`IdClock.peek`). `GET /notifications`가 폰에게 알려 준다. */
   cursor(): string;
 };
@@ -104,15 +109,17 @@ export function createNotifier({ now = () => new Date(), senders, dedupeTtlMs = 
     notify: (seatId, input) => {
       const clean = sanitize(input);
       const key = input?.dedupeKey;
+      const ttlMs = input?.ttlMs;
       if (clean === null || (key !== undefined && (typeof key !== 'string' || key === '' || key.length > MAX_DEDUPE_KEY_CHARS))) {
         return { ok: false, reason: 'invalid' };
       }
+      if (ttlMs !== undefined && (typeof ttlMs !== 'number' || !Number.isFinite(ttlMs) || ttlMs <= 0)) return { ok: false, reason: 'invalid' };
       if (key !== undefined && remembered(seatId, key)) return { ok: false, reason: 'duplicate' };
       const notification: AppNotification = { id: nextId(), ...clean, createdAt: now().toISOString() };
       if (key !== undefined) remember(seatId, key);
       for (const sender of senders) {
         try {
-          Promise.resolve(sender.send(seatId, notification)).catch(report);
+          Promise.resolve(sender.send(seatId, notification, ttlMs === undefined ? undefined : { ttlMs })).catch(report);
         } catch (e) {
           report(e);
         }
@@ -122,6 +129,15 @@ export function createNotifier({ now = () => new Date(), senders, dedupeTtlMs = 
     forget: (seatId) => {
       seen.delete(seatId);
       for (const sender of senders) sender.forget?.(seatId);
+    },
+    retract: (kind, predicate) => {
+      for (const sender of senders) {
+        try {
+          sender.drop?.(kind, predicate);
+        } catch (e) {
+          report(e);
+        }
+      }
     },
     cursor: () => nextId.peek(),
   };

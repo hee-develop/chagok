@@ -116,6 +116,31 @@ describe('알림함(Outbox)', () => {
     expect(outbox.list('s')).toHaveLength(MAX_LIST_SIZE);
   });
 
+  it('알림 하나에 짧은 보관 시간(ttlMs)을 줄 수 있고, 잘못된 값은 invalid다', () => {
+    const outbox = createOutbox({ now });
+    const notifier = createNotifier({ now, senders: [outbox] });
+    expect(notifier.notify('s', input({ title: '짧게', ttlMs: 1000 })).ok).toBe(true);
+    notifier.notify('s', input({ title: '기본' }));
+    for (const ttlMs of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) expect(notifier.notify('s', input({ ttlMs })), String(ttlMs)).toEqual({ ok: false, reason: 'invalid' });
+    clockMs += 999;
+    expect(outbox.list('s').map((n) => n.title)).toEqual(['짧게', '기본']);
+    clockMs += 1;
+    expect(outbox.list('s').map((n) => n.title)).toEqual(['기본']);
+  });
+
+  it('retract는 이 종류의 알림 중 조건에 맞는 것을 모든 자리 알림함에서 지우고 중복 억제 키는 남긴다', () => {
+    const outbox = createOutbox({ now });
+    const notifier = createNotifier({ now, senders: [outbox] });
+    notifier.notify('a', input({ kind: 'family-status', title: '지울 것', data: { requestId: 'r1' }, dedupeKey: 'k1' }));
+    notifier.notify('b', input({ kind: 'family-status', title: '지울 것 2', data: { requestId: 'r1' } }));
+    notifier.notify('a', input({ kind: 'family-status', title: '남길 것', data: { requestId: 'r2' } }));
+    notifier.notify('a', input({ kind: 'events-stale', title: '다른 종류', data: { requestId: 'r1' } }));
+    notifier.retract('family-status', (n) => n.data.requestId === 'r1');
+    expect(outbox.list('a').map((n) => n.title)).toEqual(['남길 것', '다른 종류']);
+    expect(outbox.list('b')).toEqual([]);
+    expect(notifier.notify('a', input({ kind: 'family-status', dedupeKey: 'k1' }))).toEqual({ ok: false, reason: 'duplicate' });
+  });
+
   it('TTL이 지난 알림은 읽을 때 버린다', async () => {
     const t = fresh();
     const a = await connect(t, '폰A');
