@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DayFixture, FamilyMember, MockCalendar, MockPlace, PlaceSuggestion, PlacesCatalog, RememberedPlace } from './fixture-types.js';
+import { parseAt } from './time.js';
 
 export type { DayFixture, MockCalendar, PlaceFixture, ScheduleFixture } from './fixture-types.js';
 
@@ -87,6 +88,9 @@ export function parseDayFixture(value: unknown, calendars: MockCalendar[] = load
   const root = value as Partial<DayFixture> | null;
   if (!root || typeof root.id !== 'string' || typeof root.name !== 'string' || !Array.isArray(root.schedules)) {
     throw new Error('픽스처 형식이 올바르지 않습니다: id, name, schedules가 필요합니다');
+  }
+  if (root.anchor !== undefined && (typeof root.anchor !== 'string' || parseAt(root.anchor) === null)) {
+    throw new Error(`픽스처 anchor는 오프셋이 있는 ISO8601 시각이어야 합니다: ${JSON.stringify(root.anchor)}`);
   }
   const ids = new Set<string>();
   const calendarIds = new Set(calendars.map((c) => c.id));

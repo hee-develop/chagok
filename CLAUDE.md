@@ -64,4 +64,5 @@ Pleos Connect(현대차그룹 AAOS 기반 인포테인먼트) 차량 앱 사이�
 - 신호 주입(`chagok-debug://signal?...`, `SignalInjectActivity`)과 평문 HTTP 허용(network security config)은 `car/app/src/debug`에만 둔다. release 빌드에 들어가면 안 된다. 신호 주입 Activity는 호출자가 `android.permission.DUMP`를 가져야 해서 adb shell(Maestro `openLink` 포함)만 부를 수 있다
 - 가로·세로 창 확인: `adb shell am task resize <taskId> <left> <top> <right> <bottom>`으로 앱 창 크기를 바꾼다(taskId는 `adb shell dumpsys activity activities`의 `Task{… #<id> … com.chagok.car`). Pleos 에뮬레이터의 한 칸 창은 너비 약 848(portrait), 두 칸 창은 약 1682(landscape)다
 - Maestro에서 `clearState`는 쓰지 않는다. 이 에뮬레이터는 앱이 사용자 10에서 돌아 데이터가 지워지지 않는다. 상태 초기화는 `chagok-debug://signal?now=...`(데모 초기화)로 한다
+- PT 시연(12/3): `pnpm demo:pt server|reset|check|fallback`(`scripts/pt-demo.sh`). PT 일정은 `fixtures/schedules/pt-day.json`이고 픽스처의 `anchor`(고정 기준 시각, 12/3 08:50)로 폰과 차가 같은 시각을 본다. 진행표·대비책은 `docs/pt-demo.md`
 - Maestro `assertVisible` 글자는 정규식 전체 일치다. 줄바꿈이 낀 문장은 `.*...*`로 받고, 시각·시간 사이 공백은 NBSP라 `.`로 받는다

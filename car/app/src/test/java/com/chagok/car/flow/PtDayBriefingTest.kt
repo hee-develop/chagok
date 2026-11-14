@@ -1,0 +1,65 @@
+package com.chagok.car.flow
+
+import com.chagok.car.FixtureFile
+import com.chagok.car.FixtureResponses
+import com.chagok.car.domain.AskReason
+import com.chagok.car.domain.BoardingDecider
+import com.chagok.car.domain.BoardingDecision
+import com.chagok.car.domain.BoardingKind
+import com.chagok.car.domain.DayPlan
+import com.chagok.car.domain.Question
+import com.chagok.car.ui.CardContent
+import com.chagok.car.ui.TileRow
+import com.chagok.car.ui.TileView
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.time.Instant
+import java.time.ZoneId
+
+/** PT 시연 일정(fixtures/schedules/pt-day.json)을 12/3 08:50에 탔을 때의 첫 탑승 카드. 계약은 docs/pt-demo.md */
+class PtDayBriefingTest {
+    private val seoul = ZoneId.of("Asia/Seoul")
+    private val now = Instant.parse("2026-12-02T23:50:00Z")
+
+    /** 서버 응답(at은 PT 날짜가 아니어도 픽스처의 고정 기준 시각을 따른다)을 [edit]로 고친 뒤 첫 탑승을 판단한다. */
+    private fun board(edit: (JSONObject) -> Unit = {}): Pair<BoardingDecision.Card, CardContent> {
+        val response = JSONObject(FixtureResponses.response(FixtureFile.read("schedules/pt-day.json"), Instant.parse("2026-11-14T00:00:00Z")))
+        edit(response)
+        val plan = DayPlan(ScheduleParser.parse(response.toString()))
+        val decision = BoardingDecider.decide(now, BoardingKind.FIRST, plan, planIsFallback = false, travelTime = null) as BoardingDecision.Card
+        return decision to Phrases.card(decision, now, seoul)
+    }
+
+    /** 폰 3단계에서 육전집 장소를 고르고 KIA 직관에 채비를 적은 상태(서버가 /schedules/today에 실어 준다). */
+    private fun filledOnPhone(response: JSONObject) {
+        val schedules = response.getJSONArray("schedules")
+        for (i in 0 until schedules.length()) {
+            val s = schedules.getJSONObject(i)
+            when (s.getString("id")) {
+                "pt-lunch" -> s.put("locationText", "광주 육전집").put("place", JSONObject().put("name", "광주 육전집").put("lat", 35.1595).put("lng", 126.8526))
+                "pt-kia" -> s.put("care", "유니폼 · 응원봉")
+            }
+        }
+    }
+
+    @Test fun `화상회의는 빠지고 장소를 비운 육전집 점심이 대상이라 어디로 갈지 묻는다`() {
+        val (decision, card) = board()
+        assertEquals(listOf("pt-lunch", "pt-kia", "pt-kongmul"), decision.briefing.upcoming.map { it.id })
+        assertEquals(AskReason.PLACE_UNKNOWN, (decision.question as Question.AskDestination).reason)
+        assertEquals("'육전집 점심' 어디로 가면 될까요?", card.voice)
+    }
+
+    @Test fun `폰에서 장소와 채비를 넣으면 08시 50분 첫 탑승 브리핑이 시연 대본대로 나온다`() {
+        val (decision, card) = board(::filledOnPhone)
+        assertTrue(decision.question is Question.Depart)
+        assertEquals("광주 직관 날이에요!\n1시 육전집 점심까지 4시간 10분이에요.", card.voice)
+        assertTrue(card.sub!!, card.sub!!.contains("유니폼 · 응원봉") && card.sub!!.endsWith("출발할까요?"))
+        assertEquals(
+            TileView.Schedules(listOf(TileRow("13:00", "육전집 점심", true), TileRow("17:00", "KIA 직관", false), TileRow("21:00", "콩물 픽업", false))),
+            card.tiles.first(),
+        )
+        assertEquals("응, 출발", card.primary)
+    }
+}
