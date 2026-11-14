@@ -94,6 +94,10 @@ adb -s emulator-5554 shell am start -n com.chagok.car/.MainActivity
 
 Android Studio에서는 `car/` 폴더를 열고 Run 하면 된다.
 
+빌드 없이 써 보려면 [Releases](https://github.com/hee-develop/chagok/releases)의 차량 앱 debug APK(`chagok-car-debug-*.apk`)를 받아 `adb -s emulator-5554 install -r <파일>`로 설치한다.
+이 APK는 같은 PC의 서버(`http://10.0.2.2:8787`, 에뮬레이터에서 본 PC)에만 붙으므로 서버(`pnpm demo:pt server` 또는 `pnpm server:dev`)를 먼저 띄운다.
+PT 시연 순서(폰 → 차 연결 → 브리핑 → 도착)와 점검 명령(`pnpm demo:pt check`)은 `docs/pt-demo.md`에 있다.
+
 ## 테스트
 
 | 종류 | 명령 | 필요한 것 |
