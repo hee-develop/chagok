@@ -1,0 +1,67 @@
+{
+  "id": "pt-day",
+  "name": "PT 시연 하루(12/3 08:50 첫 탑승)",
+  "anchor": "2026-12-03T08:50:00+09:00",
+  "schedules": [
+    {
+      "id": "pt-allday",
+      "calendarId": "mock-my",
+      "title": "광주 직관",
+      "startOffsetMinutes": -530,
+      "endOffsetMinutes": 910,
+      "allDay": true,
+      "locationText": null,
+      "place": null,
+      "memo": null,
+      "attendees": []
+    },
+    {
+      "id": "pt-meeting",
+      "calendarId": "mock-work",
+      "title": "주간 회의",
+      "startOffsetMinutes": 70,
+      "endOffsetMinutes": 100,
+      "allDay": false,
+      "locationText": "https://zoom.us/j/81234567890",
+      "place": null,
+      "memo": null,
+      "attendees": []
+    },
+    {
+      "id": "pt-lunch",
+      "calendarId": "mock-family",
+      "title": "육전집 점심",
+      "startOffsetMinutes": 250,
+      "endOffsetMinutes": 310,
+      "allDay": false,
+      "locationText": null,
+      "place": null,
+      "memo": null,
+      "attendees": []
+    },
+    {
+      "id": "pt-kia",
+      "calendarId": "mock-my",
+      "title": "KIA 직관",
+      "startOffsetMinutes": 490,
+      "endOffsetMinutes": 670,
+      "allDay": false,
+      "locationText": "광주-기아 챔피언스필드",
+      "place": { "name": "광주-기아 챔피언스필드", "lat": 35.1681, "lng": 126.8888 },
+      "memo": null,
+      "attendees": []
+    },
+    {
+      "id": "pt-kongmul",
+      "calendarId": "mock-work",
+      "title": "콩물 픽업",
+      "startOffsetMinutes": 730,
+      "endOffsetMinutes": 790,
+      "allDay": false,
+      "locationText": "단골 콩물집",
+      "place": { "name": "단골 콩물집", "lat": 35.146, "lng": 126.922 },
+      "memo": null,
+      "attendees": []
+    }
+  ]
+}

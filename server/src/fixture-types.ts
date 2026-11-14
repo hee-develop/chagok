@@ -16,6 +16,11 @@ export type ScheduleFixture = {
 export type DayFixture = {
   id: string;
   name: string;
+  /**
+   * 고정 기준 시각(오프셋 있는 ISO8601). 있으면 이 픽스처의 일정 시각은 요청 시각(at)·서버 시계와 상관없이 늘 이 시각 기준이다.
+   * PT 시연처럼 폰(기준 시각을 보내지 않음)과 차(데모 시계)가 같은 시각을 봐야 할 때 쓴다. 없으면 요청의 at, 그것도 없으면 서버 시계.
+   */
+  anchor?: string;
   schedules: ScheduleFixture[];
 };
 

@@ -172,7 +172,10 @@ export const createSchedulesRoute = (
     if (anchor === null) return c.json({ error: 'at은 ISO8601 시각이어야 합니다' }, 400);
     return { at: value.at } as { at?: string };
   });
-  const anchorOf = (at: string | undefined) => (at === undefined ? now() : parseAt(at)!);
+  /** 픽스처가 고정 기준 시각을 두면(PT 시연) 픽스처 일정은 늘 그 시각 기준이다. 폰 일정은 실제 시각이라 상관없다. */
+  const fixedAnchor = fixture.anchor === undefined ? null : parseAt(fixture.anchor);
+  const anchorOf = (at: string | undefined) =>
+    fixedAnchor !== null && events.get() === null ? fixedAnchor : at === undefined ? now() : parseAt(at)!;
   const times = (s: Row) => ({ start: new Date(s.start).toISOString(), end: new Date(s.end).toISOString() });
   return new Hono()
     .get('/today', anchorValidator, (c) => {
@@ -216,7 +219,7 @@ export const createSchedulesRoute = (
         }
         return c.json({ error: '알려진 placeId 또는 noTravel: true 하나가 필요합니다' }, 400);
       }), (c) => {
-        const schedule = selectedSchedules(now()).find((s) => s.id === c.req.param('id'));
+        const schedule = selectedSchedules(anchorOf(undefined)).find((s) => s.id === c.req.param('id'));
         if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
         if (schedule.allDay) return c.json({ error: '종일 일정은 이동 대상이 아닙니다' }, 409);
         const change = c.req.valid('json');
@@ -237,7 +240,7 @@ export const createSchedulesRoute = (
         if (care.length > MAX_CARE_LENGTH) return c.json({ error: `care는 ${MAX_CARE_LENGTH}자 이하여야 합니다` }, 400);
         return { care: care === '' ? null : care };
       }), (c) => {
-        const schedule = selectedSchedules(now()).find((s) => s.id === c.req.param('id'));
+        const schedule = selectedSchedules(anchorOf(undefined)).find((s) => s.id === c.req.param('id'));
         if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
         const { care } = c.req.valid('json');
         if (care === null) cares.delete(schedule.id);
@@ -255,7 +258,7 @@ export const createSchedulesRoute = (
         // RPC 타입 추론이 이 반환값을 본문 모양으로 쓰므로 받은 모양({ memberId }) 그대로 돌려준다.
         return { memberId: value.memberId };
       }), (c) => {
-        const schedule = selectedSchedules(now()).find((s) => s.id === c.req.param('id'));
+        const schedule = selectedSchedules(anchorOf(undefined)).find((s) => s.id === c.req.param('id'));
         if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
         if (schedule.allDay) return c.json({ error: '종일 일정은 보낼 수 없습니다' }, 409);
         const member = family.members.find((m) => m.id === c.req.valid('json').memberId)!;

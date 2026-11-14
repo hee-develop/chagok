@@ -9,8 +9,10 @@ import java.time.format.DateTimeFormatter
 
 /**
  * 픽스처(fixtures/schedules 아래 JSON)로 서버의 `GET /schedules/today` 응답 본문을 만든다.
- * 서버 라우트와 같은 규칙을 쓴다: 시각 = at + 오프셋, 일정은 저장된 선택이 없을 때의 기본 선택(fixtures/calendars/mock-device.json의
- * defaultSelected) 캘린더 것만 담는다. 또 anchor와 같은 서울 날짜에 시작하는 일정, 전날 시작해 anchor 시각에 아직 안 끝난 일정만 담는다.
+ * 서버 라우트와 같은 규칙을 쓴다: 시각 = at + 오프셋(픽스처에 고정 기준 시각 `anchor`가 있으면 at 대신 그 시각), 일정은 저장된 선택이 없을 때의
+ * 기본 선택(fixtures/calendars/mock-device.json의 defaultSelected) 캘린더 것만 담는다. 또 anchor와 같은 서울 날짜에 시작하는 일정,
+ * 전날 시작해 anchor 시각에 아직 안 끝난 일정만 담는다. 이동 없는 일정(server/src/noTravel.ts)은 핵심 규칙만 따라 뺀다:
+ * 장소 칸에 화상 회의 주소·'온라인'·'zoom'·'회의실'이 있으면 차로 가지 않는 일정이다.
  */
 object FixtureResponses {
     /** JVM 단위 테스트에서는 테스트 리소스에서 읽는다. 계측 테스트는 assets에서 읽어 직접 넘긴다. */
@@ -27,6 +29,9 @@ object FixtureResponses {
         favorites: JSONArray = JSONArray(),
     ): String {
         val fixture = JSONObject(fixtureJson)
+        @Suppress("NAME_SHADOWING")
+        val anchor = fixture.optString("anchor").takeIf { it.isNotEmpty() }
+            ?.let { java.time.OffsetDateTime.parse(it).toInstant() } ?: anchor
         val calendars = JSONObject(calendarsJson).getJSONArray("calendars")
         val selected = (0 until calendars.length()).map { calendars.getJSONObject(it) }
             .filter { it.getBoolean("defaultSelected") }.map { it.getString("id") }.toSet()
@@ -36,6 +41,7 @@ object FixtureResponses {
             val item = items.getJSONObject(i)
             if (item.getString("calendarId") !in selected) continue
             if (!isToday(anchor, item.getLong("startOffsetMinutes"), item.getLong("endOffsetMinutes"))) continue
+            if (isNoTravel(item.optString("locationText"))) continue
             schedules.put(
                 JSONObject()
                     .put("id", item.getString("id"))
@@ -54,6 +60,12 @@ object FixtureResponses {
     }
 
     private val seoul = ZoneId.of("Asia/Seoul")
+
+    private val noTravelPhrases = listOf(
+        "zoom.us", "meet.google.com", "teams.microsoft.com", "webex.com", "온라인", "화상회의", "화상 회의", "zoom", "회의실", "meeting room",
+    )
+
+    private fun isNoTravel(locationText: String): Boolean = locationText.lowercase().let { text -> noTravelPhrases.any { it in text } }
 
     private fun isToday(anchor: Instant, startOffsetMinutes: Long, endOffsetMinutes: Long): Boolean {
         val today = anchor.atZone(seoul).toLocalDate()
