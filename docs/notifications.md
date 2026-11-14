@@ -32,7 +32,7 @@
 | --- | --- | --- | --- |
 | `events-stale` | 마지막 일정 수신 24시간 뒤, 서울 저녁 8시, 하루 한 번(정책서 10.6) | 앱이 열리며 일정 동기화를 한 번 부른다 | 이번 묶음에서 만든다 |
 | `late-sms` | 늦을 때 연락 → 내용이 채워진 문자 창(정책서 10.6 '문자를 보내 주세요') | 문자 창 | 종류만 정의. 만드는 곳은 늦을 때 연락 묶음(J9) |
-| `family-status` | 가족 요청 전달·수락·거절·완료, 5분 전(정책서 10.6) | 그 요청의 상태 화면 | 종류만 정의. 만드는 곳은 가족 묶음(J10) |
+| `family-status` | 가족 요청 전달·수락·거절·완료, 5분 전(정책서 10.6) | 그 요청의 상태 화면 | 가족 요청 서버(J10a, `family/service.ts`)가 보낸 사람 자리에 넣는다. `data`는 `{ requestId, category, status, stage?, etaAt? }`, 문구·계약은 `docs/family-requests.md` |
 
 모르는 `kind`로 `notify`하면 `invalid`다. 새 종류는 `NOTIFICATION_KINDS`에 더한다.
 
@@ -80,7 +80,7 @@
 - `createScheduler({ now, intervalMs = 5분, onError })`. `register({ name, run(now) })`로 작업을 더하고, `start()`가 `setInterval` 하나를 켜고(`unref`라 프로세스 종료를 막지 않음) `stop()`이 끈다. `tick()`은 등록된 작업을 한 번 차례로 돈다(도는 중이면 겹쳐 돌지 않고 그 실행을 기다린다). 한 작업이 던져도 다음 작업은 돈다(`onError`에는 작업 이름과 오류만).
 - 작업은 `now`를 받아 **스스로 '이번에 할 일인가'를 판정**하고 자주 불려도 안전해야 한다.
 - **시작은 서버 프로세스(`server/src/index.ts`)만 한다.** `createApp`·`createNotificationRuntime`은 타이머를 켜지 않으므로 테스트에서는 꺼져 있다. `NOTIFY_SCHEDULER=0`이면 서버도 켜지 않는다.
-- 등록된 작업은 지금 `events-stale` 하나다. 정책서 11장의 나머지 정기 작업(새벽에 지난 일정·날짜 지난 가족 요청 삭제, 30일 동안 일정이 안 온 자리 삭제)은 **J6**가 `createNotificationRuntime`이 돌려주는 `runtime.scheduler.register(...)`로 더한다(`index.ts`에서 `runtime.scheduler`를 쓰면 된다). 모든 자리를 훑는 `SeatStore.allSeats()`를 이번에 더했다.
+- 등록된 작업은 지금 `events-stale` 하나다. 날짜 지난 가족 요청 삭제는 `family-requests-expire`(`family/jobs.ts`, J10a)가 `index.ts`에서 등록한다. 정책서 11장의 나머지 정기 작업(새벽에 지난 일정 삭제, 30일 동안 일정이 안 온 자리 삭제)은 **J6**가 `createNotificationRuntime`이 돌려주는 `runtime.scheduler.register(...)`로 더한다(`index.ts`에서 `runtime.scheduler`를 쓰면 된다). 모든 자리를 훑는 `SeatStore.allSeats()`를 이번에 더했다.
 
 ## 폰 (`phone/src/features/notifications/`)
 
