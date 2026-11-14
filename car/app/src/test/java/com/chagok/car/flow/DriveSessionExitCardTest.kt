@@ -501,16 +501,18 @@ class DriveSessionExitCardTest {
     }
 
     @Test
-    fun 먼저_기다리던_대기를_뒤_도착이_덮어쓰지_않는다() {
+    fun 내비_도착_대기가_있는_P단은_위치로_판정하지_않고_먼저_기다린_카드가_우선이다() {
         driveAndArrive()
         session.handle(Event.RestrictionChanged(true))
-        assertTrue(park().has<Effect.RequestLocation>())
-        // 제한이 안 풀린 P단에서 위치 답으로 다음 일정(점심 약속)도 도착이 되지만 먼저 기다린 고객 미팅 카드가 우선이다.
+        // 내비 도착 대기가 있으면 그 P단은 위치로 판정하지 않는다(내비 쪽이 먼저고 중복 도착·중복 카드는 없다. 사용자 결정 2026-11-11 위치 도착 규칙).
+        // 전에는 이 P단에서도 위치를 물어 다음 일정(점심 약속)의 도착을 함께 기록했다.
+        assertFalse(park().has<Effect.RequestLocation>())
         val answered = session.handle(Event.LocationChanged(nearCityHall))
-        assertEquals(ScheduleStatus.ARRIVED, answered.filterIsInstance<Effect.Save>().last().snapshot.statuses["b"])
         assertTrue(answered.noExitCard())
-        assertEquals("a", answered.savedExitTarget())
+        assertTrue(answered.none { it is Effect.Save })
         assertEquals("고객 미팅 메모에 ‘계약서 2부’가 있어요.", session.handle(Event.RestrictionChanged(false)).exitCard()!!.voice)
+        val later = session.handle(Event.GearChanged(Gear.DRIVE)).filterIsInstance<Effect.Save>().lastOrNull()
+        assertNull(later?.snapshot?.statuses?.get("b"))
     }
 
     @Test

@@ -8,6 +8,7 @@ import com.chagok.car.domain.LatLng
 import com.chagok.car.domain.Place
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -37,6 +38,10 @@ class ServerScheduleSourceTest {
         override fun loadCopy() = copy
         override fun saveCopy(copy: StoredCopy) {
             this.copy = copy
+        }
+
+        override fun clearCopy() {
+            copy = null
         }
     }
 
@@ -265,5 +270,28 @@ class ServerScheduleSourceTest {
         val source = source({ error("서버 꺼짐") })
         source.refresh {}
         assertEquals(emptyList<Favorite>(), source.snapshot().favorites)
+    }
+
+    @Test fun `연결이 풀려 지우면 일정과 집 좌표와 저장된 사본이 모두 사라지고 다시 받기 전에는 빈 NONE이다`() {
+        val copies = MemoryCopies()
+        val ok = source({ at -> FixtureResponses.response(fixture, at, favorites = favoritesJson) }, copies)
+        ok.refresh {}
+        assertEquals(listOf(home), ok.snapshot().favorites)
+        assertTrue(ok.snapshot().schedules.isNotEmpty())
+        assertTrue(copies.copy != null)
+
+        ok.clear()
+        val cleared = ok.snapshot()
+        assertEquals(ScheduleOrigin.NONE, cleared.origin)
+        assertEquals(emptyList<Any>(), cleared.schedules)
+        assertEquals(emptyList<Favorite>(), cleared.favorites)
+        assertNull(copies.copy)
+
+        // 서버를 못 받아도 지운 사본·메모리 캐시로 되살아나지 않는다(집이 없다).
+        val failing = source({ error("서버 꺼짐") }, copies)
+        failing.refresh {}
+        assertEquals(ScheduleOrigin.NONE, failing.snapshot().origin)
+        ok.refresh {}
+        assertEquals(listOf(home), ok.snapshot().favorites)
     }
 }

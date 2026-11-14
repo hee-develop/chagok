@@ -40,6 +40,10 @@ class ChagokStore(context: Context) : ScheduleCopyStore {
         prefs.edit().putString(KEY_COPY_BODY, copy.body).putString(KEY_COPY_DATE, copy.date.toString()).apply()
     }
 
+    override fun clearCopy() {
+        prefs.edit().remove(KEY_COPY_BODY).remove(KEY_COPY_DATE).apply()
+    }
+
     /** 설치 때 한 번 만드는 익명 차 id(UUID). 휴대폰과 연결할 때 서버에 보낸다. 사람·차량 식별 정보는 담지 않는다. */
     @Synchronized
     fun carId(): String = prefs.getString(KEY_CAR_ID, null) ?: UUID.randomUUID().toString().also {

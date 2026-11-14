@@ -12,7 +12,7 @@
 | 연료 종류 ("Vehicle SDK의 연료 종류") | ❌→✅ | Vehicle SDK에는 없음. AAOS `INFO_FUEL_TYPE`으로 가능(실측: 전기) |
 | 주행 가능 거리 ("Vehicle SDK") | ❌→✅ | Vehicle SDK `Odometer`에는 set만 있다. AAOS `RANGE_REMAINING`으로 가능(실측 500km) |
 | 남은 에너지 | ✅ | Vehicle SDK `EvBattery.getEvBatteryStateOfCharge` 실측 100%. `Fuel.getFuelPercent`는 EV 에뮬레이터에서 미지원 예외 |
-| 위치 (300m 판정) | ✅ | FusedLocation 실측(런타임 권한 필요). 단 SDK 신청 상태가 "준비 중" |
+| 위치 (300m 판정) | ✅ | FusedLocation 실측(런타임 권한 필요). 단 SDK 신청 상태가 "준비 중". 지금은 표준 `LocationManager`(`LocationAdapter`)와 내비 `getCurrentLocationInfo`를 함께 쓰고, 실차에서 FusedLocation으로 바꿀 때는 `Locator`만 갈아끼운다(`docs/home-exit.md`) |
 
 ## 내비게이션
 
@@ -76,6 +76,10 @@
 | 현재 위치 답 | P단에 넣을 때 `getCurrentLocationInfo()`에 `onCurrentLocationInfo`로 위도·경도가 오는가. 길안내 중이 아닐 때도 오는가 | 미확인 |
 | 하차 카드 | 실제 주행 뒤 목적지에서 P단에 넣으면 도착 알림(`onDestinationArrived`)과 P단 신호의 순서가 어떻든 하차 카드가 한 번 뜨는가(알림이 P단보다 늦게 오는 경우 포함). 주차 중 N단·잠깐 다른 곳 정차에서 오탐이 없는가. 15분(`Rules.EXIT_PENDING_MAX`)이 실제 주차 동선에 맞는가(`docs/exit-card.md`) | 미확인 |
 | 하차 카드의 말 | 하차 카드를 말하는 TTS가 5초(카드 닫힘) 안에 끝나는가. 말은 30자 이하로 줄였지만 실제 TTS 속도·끊김은 실측 필요 | 미확인 |
+| 위치 권한 창 | 위치 권한 설명 카드("현재 위치를 쓸게요.") 뒤 [계속할게요]를 누르면 시스템 권한 창이 Pleos 실차·에뮬레이터에서 뜨는가(`ACCESS_FINE_LOCATION`·`COARSE` 함께 요청). 정확한 위치를 거부하거나 대략 위치만 허용하면 "위치 권한이 없어 위치로 도착을 알 수 없어요…" 한 줄만 보이고 기어·시동·내비 도착은 그대로 동작하는가. 다른 카드(연결·탑승·하차)가 떠 있을 때는 닫힌 뒤에 카드가 보이는가 | 미확인 |
+| 실제 측위 주기 | 차곡 화면이 앞에 있을 때 30초·50m 갱신과 수동(passive) 10초·25m 갱신이 실차·에뮬레이터(`adb emu geo fix <경도> <위도>`)에서 실제로 오는가. 화면이 뒤(내비가 앞)일 때 위치가 오지 않는 것이 예상 결과인데, P단에 넣는 순간의 시스템 마지막 위치(`refreshNow`)가 최근 것(5분 이내)으로 남아 있는가 없는가. 백그라운드 위치 권한 없이 충분한지 | 미확인 |
+| FusedLocation 대체 | 실차에서 `pleos.car.permission.FUSED_LOCATION`(SDK 신청 '준비 중')으로 `Locator`를 대체해도 `LocationChanged(position, ageMillis)` 의미(측위한 지 얼마나 됐는가)를 지킬 수 있는가. 측위 시각을 주지 않는 API면 나이를 0으로 넣어 위치 나이·이번 주행 전 측위 규칙이 무력해지므로 따로 정해야 한다 | 미확인 |
+| 위치 도착·집 하차 | 일정 '시작 60분 전 ~ 종료' 창·300m·5분(`Rules.ARRIVAL_WINDOW_LEAD`·`ARRIVAL_RADIUS_METERS`·`LOCATION_MAX_AGE`)과 집 반경 300m(`HOME_RADIUS_METERS`)가 실제 주차 동선(지하주차장 GPS 오차 포함)에 맞는가. 집을 떠났다 돌아와야 하는 규칙이 실제 귀가에서 오탐·누락을 만드는가(`docs/home-exit.md`) | 미확인 |
 | 듣는 중 표시 | 음성을 받는 중임을 화면에 알리는 표시. 프로토타입에 듣는 중 표시와 문구가 없어 만들지 않았다. 카드 머리 파형(VoiceIndicator)은 말하는 동안만 움직인다 | 미확인 |
 
 debug 빌드는 `chagok-debug://signal?trip=<초>&route=ok|fail&listen=off&heard=<들은 말>`로 소요 시간·경로 요청 결과·들은 말을 주입한다(자동 E2E용). 위 항목을 사람이 확인할 때는 `trip=real&route=real&listen=real`로 주입을 풀고 실제 내비·STT를 쓴다.

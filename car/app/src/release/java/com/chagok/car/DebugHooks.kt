@@ -10,6 +10,12 @@ object DebugHooks {
     /** 릴리스는 늘 정책 기준값이다. */
     fun exitCardDuration(): Duration = Rules.EXIT_CARD
 
+    /** 릴리스는 내비의 위치 답을 그대로 내보낸다. */
+    fun naviSink(post: (Event) -> Unit): (Event) -> Unit = post
+
+    /** 릴리스는 위치 이벤트를 그대로 내보낸다. */
+    fun locationSink(post: (Event) -> Unit): (Event) -> Unit = post
+
     @Suppress("UNUSED_PARAMETER")
     fun wrap(adapters: Adapters, post: (Event) -> Unit): Adapters = adapters
 }

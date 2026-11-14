@@ -18,6 +18,7 @@ open class ChagokApp : Application() {
         super.onCreate()
         host = createHost()
         host.start()
+        // 기어·시동은 host.start()가 위치 권한과 무관하게 늘 켠다. 위치만 권한이 모두 있을 때 켠다(없으면 설명 카드 뒤 MainActivity가 요청한다).
         if (runtimePermissions.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
             host.startPermissionGatedSources()
         }
@@ -25,9 +26,14 @@ open class ChagokApp : Application() {
 
     companion object {
         /**
-         * 런타임(dangerous) 동의가 필요한 권한. 지금 쓰는 CAR_POWERTRAIN·NAVI_ROUTE·NAVI_ROUTE_SEARCH·TTS_SERVICE·STT_SERVICE는
-         * 모두 normal이라 비어 있다. dangerous 권한을 쓰는 기능(예: CAR_SPEED, FUSED_LOCATION)이 생기면 여기에 더한다.
+         * 런타임(dangerous) 동의가 필요한 권한: 위치(일정 장소 도착·집 하차). Android 12 이상은 정밀 위치(FINE)를 요청할 때 대략 위치(COARSE)도 한 번에 요청해야 한다.
+         * 백그라운드 위치 권한은 쓰지 않는다. 지금 쓰는 CAR_POWERTRAIN·NAVI_ROUTE·NAVI_ROUTE_SEARCH·TTS_SERVICE·STT_SERVICE는 모두 normal이다.
+         * 거부하거나 대략 위치만 허용하면 위치 판정만 빠지고 나머지(기어·시동·내비 도착)는 그대로 동작한다.
+         * 다른 dangerous 권한을 쓰는 기능(예: CAR_SPEED)이 생기면 여기에 더한다.
          */
-        val RUNTIME_PERMISSIONS = emptyList<String>()
+        val RUNTIME_PERMISSIONS = listOf(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+        )
     }
 }

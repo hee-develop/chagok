@@ -163,7 +163,7 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != PERMISSION_REQUEST) return
-        // 거부하면 짧은 안내만 보여 주고 말하지 않는다. 허용된 신호(기어 등)는 그대로 쓴다.
+        // 거부하면(대략 위치만 허용한 경우 포함) 짧은 안내만 보여 주고 말하지 않는다. 기어·시동은 권한과 무관하게 늘 읽는다.
         if (!driving && missingPermissions().isNotEmpty()) showPermissionNotice(Phrases.PERMISSION_DENIED)
         host.startPermissionGatedSources()
     }
@@ -196,6 +196,12 @@ class MainActivity : Activity() {
             if (driving) hidePermissionUi() else requestRuntimePermissions()
         }
         val view = state.card
+        // 세션 카드가 뜨면 권한 설명 카드는 같은 자리에서 겹치지 않게 걷고, 세션 카드가 닫힌 뒤 다시 보인다.
+        if (view != null && permissionCardShown) {
+            permissionCardShown = false
+            CardMotion.exit(permissionCard, d, instant = true)
+        }
+        val sessionCardClosed = view == null && cardShown
         if (view != null) {
             if (view != boundCard) card.bind(view, freshlyShown = !cardShown)
             boundCard = view
@@ -211,6 +217,7 @@ class MainActivity : Activity() {
             CardMotion.exit(card, d, instant = state.collapseInstantly || firstRender)
         }
         firstRender = false
+        if (sessionCardClosed && !driving) requestRuntimePermissions()
         card.speaking = state.speaking && view != null
         nextChip.show(state.nextChip)
         ducking.visibility = if (state.ducking) View.VISIBLE else View.GONE
@@ -275,7 +282,8 @@ class MainActivity : Activity() {
                 showPermissionNotice(Phrases.PERMISSION_DENIED)
                 host.startPermissionGatedSources()
             }
-            PermissionStep.EXPLAIN -> if (!permissionCardShown) showPermissionCard()
+            // 다른 카드가 떠 있으면 미루고, 그 카드가 닫힐 때([render]) 다시 판단한다.
+            PermissionStep.EXPLAIN -> if (!permissionCardShown && host.ui.card == null) showPermissionCard()
         }
     }
 

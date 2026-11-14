@@ -26,14 +26,15 @@ import java.time.Instant
  * - `advance`: 분 단위(1~10080, 7일). 범위를 벗어나면 그 신호 전체를 거부한다(아무것도 적용하지 않음). 데모 시계를 그만큼 앞으로 보낸다(상태는 지우지 않음, 디버그 버튼 [시간 +10분]과 같다).
  *   다른 신호처럼 메인 큐에 순서대로 넣는다. `now`와 같이 오면 `now`(시계 맞춤) 뒤에 적용되어 `now`+`advance`분이 되고,
  *   같은 주소의 `ignition`·`gear`·`enter`·`board` 이벤트보다 먼저 처리된다(재탑승 시각을 정한 뒤 탑승을 넣는 순서).
- *   `gear=P`와 같은 주소에 쓰면 P단 시각도 앞당겨지므로 P단을 넣은 뒤 따로 보낸다
+ *   `gear=P`와 같은 주소에 쓰면 P단 시각도 앞당겨지므로 P단을 넣은 뒤 따로 보낸다. 위치 도착은 측위한 지 5분 이내만 쓰므로 `loc`은 `advance`를 보낸 뒤에 넣는다
  * - `listen`: `off`면 말이 끝나도 실제 STT를 열지 않는다. `real`이면 연다
  * - `ignition`: LOCK·OFF·ACC·ON·START
  * - `gear`: P·R·N·D
  * - `restricted`: true·false (주행 제한 알림)
  * - `enter`: true면 앱 진입(탑승 규칙 적용), `board`: true면 규칙 없이 탑승
- * - `loc`: 현재 위치 `위도,경도`(내비가 답한 것처럼). 기어보다 뒤에 넣어 `gear=P&loc=…`가 P단 도착 판단의 답이 되게 한다.
- *   가짜 내비가 켜져 있어도 주입한 동안은 가짜 경로 위치 대신 이 값이 쓰인다. `real`이면 주입을 풀어 가짜 경로·실제 내비로 돌아간다
+ * - `loc`: 현재 위치 `위도,경도`(내비가 답한 것처럼, 방금 측위한 값). 기어보다 뒤에 넣어 `gear=P&loc=…`가 P단 도착 판단의 답이 되게 한다.
+ *   주입한 동안에는 위치 어댑터가 읽은 실제 위치·가짜 경로 위치·실제 내비의 위치 답을 모두 세션에 넣지 않고 이 값만 쓴다. `real`이면 주입을 풀어 가짜 경로·실제 위치로 돌아간다.
+ *   가짜 내비가 켜져 있으면 주입하지 않아도 어댑터의 실제 위치(에뮬레이터 GPS)는 세션에 넣지 않는다
  * - `arrived`: true면 내비 목적지 도착 알림(차곡이 길안내를 시작한 일정이 도착이 된다). 가짜 내비는 목적지에 닿으면 이 알림을 스스로 넣는다
  * - `heard`: 들은 말(STT 결과). 빈 값이면 아무것도 못 들은 것(가장 마지막에 처리). 세션이 처리한 뒤 디버그 줄([DebugRow])에 "들은 말 처리: <말>"을 보인다
  */
@@ -106,6 +107,12 @@ object DebugSignals {
         else -> text.toLong().also { require(it > 0) { "exitcard는 양수 초여야 합니다: $text" } }
     }
 
+    /** advance 상한(분). 7일. 이보다 크면 시계가 며칠씩 건너뛰어 일정 판단이 어긋나므로 신호를 거부한다. */
+    internal const val MAX_ADVANCE_MINUTES = 10_080L
+
+    internal fun advanceOf(text: String): Long =
+        text.toLong().also { require(it in 1..MAX_ADVANCE_MINUTES) { "advance는 1~$MAX_ADVANCE_MINUTES 분이어야 합니다: $text" } }
+
     private fun routeOf(text: String): Boolean? = when (text.lowercase()) {
         "real" -> null
         "ok" -> true
@@ -125,12 +132,6 @@ object DebugSignals {
         require(seconds.isFinite() && seconds > 0) { "drive는 양수 초여야 합니다: $text" }
         return (seconds * 1000).toLong().coerceAtLeast(1L)
     }
-
-    /** advance 상한(분). 7일. 이보다 크면 시계가 며칠씩 건너뛰어 일정 판단이 어긋나므로 신호를 거부한다. */
-    internal const val MAX_ADVANCE_MINUTES = 10_080L
-
-    internal fun advanceOf(text: String): Long =
-        text.toLong().also { require(it in 1..MAX_ADVANCE_MINUTES) { "advance는 1~$MAX_ADVANCE_MINUTES 분이어야 합니다: $text" } }
 
     private fun progressOf(text: String): Double =
         text.toDouble().also { require(it in 0.0..1.0) { "progress는 0~1이어야 합니다: $text" } }

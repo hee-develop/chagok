@@ -76,6 +76,9 @@ data class StoredCopy(val body: String, val date: LocalDate)
 interface ScheduleCopyStore {
     fun loadCopy(): StoredCopy?
     fun saveCopy(copy: StoredCopy)
+
+    /** 저장해 둔 사본을 지운다(연결이 풀렸을 때: 일정·집 좌표를 차에 남기지 않는다). */
+    fun clearCopy()
 }
 
 /**
@@ -107,6 +110,20 @@ class ServerScheduleSource(
         private set
 
     override fun snapshot(): ScheduleSnapshot = synchronized(lock) { ScheduleSnapshot(cache, current, cachedFavorites) }
+
+    /**
+     * 받아 둔 일정·자주 가는 곳(집 좌표 포함)과 저장된 사본을 모두 지우고 "받은 적 없음"([ScheduleOrigin.NONE])으로 돌린다. 휴대폰 연결이 풀렸을 때 쓴다.
+     * 진행 중인 받기는 건드리지 않는다(세대·완료 알림이 어긋나지 않게). 그 받기가 끝나면 서버가 준 대로 다시 채워진다.
+     */
+    fun clear() {
+        synchronized(lock) {
+            cache = emptyList()
+            cachedFavorites = emptyList()
+            current = ScheduleOrigin.NONE
+            cacheDate = null
+        }
+        runCatching { copies?.clearCopy() }.onFailure { logger.warn(TAG, "일정 사본 지우기 실패", it) }
+    }
 
     /**
      * 기준 시각(anchor)으로 다시 받고 이 받기의 세대 번호를 돌려준다. 마지막 세대가 끝나면(성공·실패 모두)

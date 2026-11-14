@@ -5,7 +5,9 @@ import com.chagok.car.domain.Briefing
 import com.chagok.car.domain.BoardingDecision
 import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.FavoriteKind
+import com.chagok.car.domain.HomePickup
 import com.chagok.car.domain.MemoNote
+import com.chagok.car.domain.PickupItem
 import com.chagok.car.domain.Question
 import com.chagok.car.domain.Rules
 import com.chagok.car.domain.Schedule
@@ -45,6 +47,12 @@ object Phrases {
     const val GOT_IT = "챙겼어요"
     const val EXIT_GREETING = "잘 다녀오세요."
 
+    /** 집 하차에서 챙길 물건이 없을 때(정책서 9장). 버튼 없이 5초 뒤 닫힌다. */
+    const val HOME_GREETING = "오늘도 수고했어요."
+
+    /** 집 하차에서 챙길 물건이 길어 말로 다 읽기 어려울 때 말하는 문장. 물건은 화면에 남는다. */
+    const val HOME_ITEMS_EXIST = "챙길 물건이 있어요."
+
     // 버튼 라벨은 운전자가 소리 내 말할 문장 그대로
     const val ACCEPT_DEPART = "응, 출발"
     const val HOLD = "잠깐만"
@@ -73,10 +81,13 @@ object Phrases {
     const val NEXT_CHIP_LABEL = "다음"
 
     // 권한 설명 카드
-    const val PERMISSION_VOICE = "기어와 시동 상태를 쓸게요."
-    const val PERMISSION_SUB = "차가 멈췄는지, 시동이 켜졌는지 알려면 필요해요."
+    // 위치 권한 설명(임시 문구). 기어·시동은 런타임 동의가 없고 늘 읽는다.
+    const val PERMISSION_VOICE = "현재 위치를 쓸게요."
+    const val PERMISSION_SUB = "일정 장소나 집에 도착했는지 알려면 필요해요."
     const val PERMISSION_CONFIRM = "계속할게요"
-    const val PERMISSION_DENIED = "권한이 없어 정차·탑승 판단을 쓸 수 없어요. 설정에서 허용하면 쓸 수 있어요."
+
+    /** 위치 권한을 거부했거나 대략 위치(COARSE)만 허용한 경우 같은 안내. 위치 판정만 빠지고 나머지는 그대로다. */
+    const val PERMISSION_DENIED = "위치 권한이 없어 위치로 도착을 알 수 없어요. 설정에서 정확한 위치를 허용하면 쓸 수 있어요."
 
     // 일정 안내 카드
     const val SCHEDULE_UNAVAILABLE = "일정을 불러오지 못했어요. 연결을 확인해 주세요."
@@ -362,6 +373,48 @@ object Phrases {
             )
             is ExitText.Sentence -> base.copy(voice = "$title ${text.noun}에 ‘${text.raw}’${iGaJosa(text.raw)} 있어요.", primary = GOT_IT)
         }
+    }
+
+    /**
+     * 집 하차 카드(정책서 4·6·9장): 집 반경 안에서 달린 뒤 P단에 넣었을 때. 상태 칩·닫힘·버튼은 [exitCard]와 같다.
+     * - 챙길 물건이 있으면 "{물건}·{물건} 챙기세요!" + 채비 타일 + 그 일정의 한 줄 + [챙겼어요]. 물건은 큰 문구 두 줄에 들게 [shortTitle]로 줄인다.
+     *   한 줄은 말에 섞지 않고 화면에만 보인다(문장형 글을 '챙기세요!'에 넣지 않는 규칙과 같다). 일정에 앱 채비가 있으면 메모보다 먼저 읽는 우선순위도
+     *   일정 장소 하차와 같다([MemoNote.forExit]): 물건 순서대로 처음 한 줄(30자 이하)이 있는 일정의 것을 "‘제목’ 일정 메모|채비: …"로 보인다.
+     * - 물건이 없으면 "오늘도 수고했어요."(alert 한 문장, 버튼 없음)
+     * 오늘 요약 줄은 두지 않는다.
+     */
+    fun homeExitCard(items: List<PickupItem>, timeout: Duration = Rules.EXIT_CARD): CardContent {
+        val base = CardContent(
+            status = STATUS_BEFORE_EXIT,
+            voice = "",
+            hints = listOf(exitAutoCloseHint(timeout)),
+            autoDismiss = timeout,
+            fixedHeight = false,
+        )
+        val shown = HomePickup.dedupedForCard(items)
+        if (shown.isEmpty()) return base.copy(voice = HOME_GREETING, alert = true)
+        val names = shown.map { shortTitle(it.name) }
+        val line = shown.firstNotNullOfOrNull { item ->
+            val note = MemoNote.forExit(item.schedule)
+            (note.note as? MemoNote.ReadAloud)?.let { Triple(item.schedule, note.fromCare, it.text) }
+        }
+        return base.copy(
+            voice = "${names.joinToString("·")} 챙기세요!",
+            tiles = listOf(TileView.Care(names)),
+            footnote = line?.let { (schedule, fromCare, text) -> "‘${shortTitle(schedule.title)}’ 일정 ${if (fromCare) "채비" else "메모"}: $text" },
+            primary = GOT_IT,
+        )
+    }
+
+    /**
+     * 집 하차 카드에서 말하는 문장. 물건이 없으면 인사, 있으면 큰 문구([homeExitCard])를 그대로 말한다.
+     * 카드는 5초 뒤 닫히고 말은 닫힐 때 멈추므로 [Rules.MEMO_READ_MAX_CHARS]자를 넘으면 "챙길 물건이 있어요."로 줄인다(물건은 화면에 남는다).
+     */
+    fun homeExitSpoken(items: List<PickupItem>): String {
+        val shown = HomePickup.dedupedForCard(items)
+        if (shown.isEmpty()) return HOME_GREETING
+        val full = "${shown.joinToString("·") { it.name }} 챙기세요!"
+        return if (full.length <= Rules.MEMO_READ_MAX_CHARS) full else HOME_ITEMS_EXIST
     }
 
     /** 하차 카드가 읽을 글의 갈래. [noun]은 메모 출처면 "메모", 앱 채비 출처면 "채비". */

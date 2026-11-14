@@ -42,6 +42,8 @@ PT 대본의 "폰에서 일정·주소·채비를 넣고 → 마지막에 차 �
 2. 폰 첫 설정 4단계(`/setup/pair-car`)에서 [QR 찍기](카메라)나 번호 입력으로 서버에 코드와 **기기 이름**을 보냅니다. 서버는 폰 토큰을 주고(이 폰의 기기 id 버킷에 모아 둔 연결 전 데이터가 새 자리로 옮겨짐), 폰은 `expo-secure-store`에 저장해 이후 모든 요청에 붙입니다.
 3. 차는 연결됐는지 묻다가 연결되면 저장하고, 카드를 접고, 일정을 다시 받은 뒤 **첫 탑승 브리핑**을 합니다(정차 중일 때. 주행 중이면 다음 탑승).
 
+- 연결이 풀리면(지금은 debug `paired=false`) 차는 받아 둔 일정·집 좌표와 사본을 지웁니다(`SessionHost.setPaired`, `docs/home-exit.md`). 서버의 해제를 차가 스스로 알아채는 경로는 아직 없습니다.
+
 ## 서버 API (정책서 이름: `server/src/routes/pair.ts`)
 
 차 쪽 API는 `Authorization: Bearer <carToken>`이 필요하고, 폰 쪽은 `Bearer <phoneToken>`입니다. 오류 본문은 `{ error, reason? }`입니다.

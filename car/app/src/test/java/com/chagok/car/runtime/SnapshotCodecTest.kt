@@ -84,4 +84,34 @@ class SnapshotCodecTest {
         assertNull(SnapshotCodec.decode("{}"))
         assertNull(SnapshotCodec.decode("""{"date":"2026-12-03"}"""))
     }
+
+    @Test fun `집 하차 알림 기록도 저장하고 복원한다`() {
+        val snapshot = Snapshot(
+            BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3),
+            homeItemsAnnounced = setOf("k", "a,b:c"), homeCardShown = true,
+        )
+        assertEquals(snapshot, SnapshotCodec.decode(SnapshotCodec.encode(snapshot)))
+    }
+
+    @Test fun `집 하차 알림 기록이 없는 이전 저장분은 빈 기록으로 복원한다`() {
+        val old = """{"date":"2026-12-03","statuses":{},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false},"exitTargetId":"a","exitArrivedAt":5}"""
+        val decoded = SnapshotCodec.decode(old)!!
+        assertEquals(emptySet<String>(), decoded.homeItemsAnnounced)
+        assertEquals(false, decoded.homeCardShown)
+        assertEquals("a", decoded.exitTargetId)
+    }
+
+    @Test fun `집 하차 알림 칸만 손상돼도 나머지 상태는 살린다`() {
+        val base = """"date":"2026-12-03","statuses":{"a":"ARRIVED"},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false}"""
+        for (broken in listOf(
+            """"homeItemsAnnounced":{"k":1},"homeCardShown":"yes"""",
+            """"homeItemsAnnounced":[{"k":1}],"homeCardShown":1""",
+            """"homeItemsAnnounced":"k","homeCardShown":null""",
+        )) {
+            val decoded = SnapshotCodec.decode("{$base,$broken}")!!
+            assertEquals(mapOf("a" to ScheduleStatus.ARRIVED), decoded.statuses)
+            assertEquals(emptySet<String>(), decoded.homeItemsAnnounced)
+            assertEquals(false, decoded.homeCardShown)
+        }
+    }
 }

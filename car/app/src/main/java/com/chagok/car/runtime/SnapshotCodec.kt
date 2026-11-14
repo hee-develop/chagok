@@ -3,6 +3,7 @@ package com.chagok.car.runtime
 import com.chagok.car.domain.BoardingLog
 import com.chagok.car.domain.ScheduleStatus
 import com.chagok.car.flow.Snapshot
+import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
@@ -24,6 +25,8 @@ object SnapshotCodec {
             .put("noticeDate", snapshot.noticeDate?.toString() ?: JSONObject.NULL)
             .put("exitTargetId", snapshot.exitTargetId ?: JSONObject.NULL)
             .put("exitArrivedAt", snapshot.exitArrivedAt?.toEpochMilli() ?: JSONObject.NULL)
+            .put("homeItemsAnnounced", JSONArray(snapshot.homeItemsAnnounced.sorted()))
+            .put("homeCardShown", snapshot.homeCardShown)
             .toString()
     }
 
@@ -49,6 +52,11 @@ object SnapshotCodec {
         // 문자열 타입일 때만 받는다(getString은 숫자도 문자열로 바꿔 주므로 쓰지 않는다).
         val exitTargetId = root.opt("exitTargetId") as? String
         val exitArrivedAt = runCatching { if (root.isNull("exitArrivedAt")) null else Instant.ofEpochMilli(root.getLong("exitArrivedAt")) }.getOrNull()
-        Snapshot(log, statuses, date, noticeDate, exitTargetId, exitArrivedAt)
+        // 집 하차 알림 기록도 나중에 생긴 칸이라 이전 저장분에는 없다(없으면 빈 집합·false). 이 칸이 손상돼도 나머지는 살린다.
+        val announced = runCatching {
+            root.optJSONArray("homeItemsAnnounced")?.let { array -> (0 until array.length()).map(array::getString).toSet() }.orEmpty()
+        }.getOrDefault(emptySet())
+        val cardShown = root.opt("homeCardShown") as? Boolean ?: false
+        Snapshot(log, statuses, date, noticeDate, exitTargetId, exitArrivedAt, announced, cardShown)
     }.getOrNull()
 }

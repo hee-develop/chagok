@@ -1,5 +1,6 @@
 # 도착 → 다음 일정 E2E(PT 장면 4). 서버가 떠 있고 debug 앱이 설치된 에뮬레이터에서 돈다(scripts/e2e-car.sh).
-# 도착은 두 길로 본다: 내비 목적지 도착 알림(디버그 [도착] 버튼)과, P단에 넣은 곳이 대상 일정 장소에서 300m 안(loc=위도,경도 주입).
+# 도착은 두 길로 본다: 내비 목적지 도착 알림(디버그 [도착] 버튼)과, 달린 뒤 P단에 넣은 곳이 일정 장소에서 300m 안(loc=위도,경도 주입).
+# 위치 도착은 일정 '시작 60분 전 ~ 종료' 창 안에서만 인정하므로 4번은 advance로 시계를 16:10쯤으로 보낸다(KIA 직관 17:00 → 16:00~20:00).
 # 도착 알림 순간에는 말도 카드도 없고, 달린 다음 P단에 넣으면 하차 카드("도착 · 내리기 전")를 한 번 보인다(docs/exit-card.md).
 # 잠깐 정차(10분)가 지나 다시 타면 다음 일정을 한 줄로 묻는다(5장 재탑승).
 #   now: 데모 시계·일정 기준 시각, trip: 소요 시간(초, none이면 모름), route=ok: 길안내 요청 성공, listen=off: 실제 STT를 열지 않음
@@ -61,6 +62,7 @@ env:
     visible: "길안내를 시작할게요."
     timeout: 5000
 - openLink: chagok-debug://signal?gear=D
+- openLink: chagok-debug://signal?advance=390
 - openLink: chagok-debug://signal?gear=P&loc=35.1690,126.8888
 # 위치로 도착이 기록되면 그 시점에 바로 하차 카드가 뜬다(경기장 일정의 메모도 목록).
 - extendedWaitUntil:

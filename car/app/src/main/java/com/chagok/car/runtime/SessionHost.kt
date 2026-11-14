@@ -11,6 +11,7 @@ import android.os.SystemClock
 import com.chagok.car.BuildConfig
 import com.chagok.car.DebugHooks
 import com.chagok.car.FlowLog
+import com.chagok.car.domain.Gear
 import com.chagok.car.flow.DriveSession
 import com.chagok.car.flow.Effect
 import com.chagok.car.flow.Event
@@ -47,6 +48,8 @@ class Adapters(
     val navi: Navigator,
     val voice: Speaker,
     val signals: VehicleSignals,
+    /** 차 위치. 위치를 쓰지 않는 구성(계측 테스트)은 [Locator.None]. */
+    val location: Locator = Locator.None,
 )
 
 /**
@@ -74,9 +77,10 @@ class SessionHost(
         { post, onSpeaking, onDucking, onIgnitionSupport ->
             DebugHooks.wrap(
                 Adapters(
-                    navi = NaviAdapter(context, post),
+                    navi = NaviAdapter(context, DebugHooks.naviSink(post)),
                     voice = VoiceAdapter(context, post, onSpeaking, onDucking),
                     signals = CarSignals(context, post, onIgnitionSupport),
+                    location = LocationAdapter(context, DebugHooks.locationSink(post)),
                 ),
                 post,
             )
@@ -102,6 +106,7 @@ class SessionHost(
     private val navi = parts.navi
     private val voice = parts.voice
     private val carSignals = parts.signals
+    private val location = parts.location
 
     var ui = UiState()
         private set
@@ -135,6 +140,8 @@ class SessionHost(
         navi.start()
         voice.start()
         carSignals.start()
+        // 기어·시동은 런타임 권한과 무관하다. 위치 권한을 묻는 중이거나 거부해도 늘 읽는다(위치만 [startPermissionGatedSources]가 권한 결정 뒤에 켠다).
+        if (Source.VEHICLE_SIGNALS in PermissionGate.ALWAYS_ON) carSignals.startPermissionGated()
         registerShutdownReceiver()
         registerClockReceiver()
         refreshSchedules()
@@ -161,14 +168,18 @@ class SessionHost(
         }
     }
 
-    /** 런타임 권한을 받은 뒤(또는 이미 받았을 때) 권한이 필요한 신호를 시작한다. */
+    /**
+     * 위치 권한 결정 뒤(또는 이미 받았을 때) 위치를 시작한다([PermissionGate.AFTER_PERMISSION]).
+     * 어댑터가 권한을 다시 확인해 없으면(거부·대략 위치만 허용) 아무것도 하지 않아 위치 판정만 빠진다.
+     */
     fun startPermissionGatedSources() {
-        carSignals.startPermissionGated()
+        if (Source.LOCATION in PermissionGate.AFTER_PERMISSION) location.start()
     }
 
     fun onActivityResumed() {
         main.post {
             resumed = true
+            location.setForeground(true)
             updatePairing()
             // Suspend 중이었다면 어댑터를 다시 켠다. 포커스·재생은 되찾지 않는다.
             post(Event.Resumed)
@@ -181,6 +192,7 @@ class SessionHost(
     fun onActivityPaused() {
         main.post {
             resumed = false
+            location.setForeground(false)
             updatePairing()
         }
     }
@@ -194,7 +206,12 @@ class SessionHost(
 
     /** 이벤트를 메인 스레드에서 세션에 넣는다. SDK 콜백(바인더 스레드 등)은 모두 이 경로로 들어온다. */
     fun post(event: Event) {
-        main.post { dispatch(event) }
+        main.post {
+            // P단에 넣는 순간 시스템이 아는 최근 위치를 먼저 세션에 넣는다(차곡이 뒤에 있어 주기 갱신을 못 받았어도 판정할 수 있게).
+            // 이 위치가 낡았거나 이번 주행 전 것이면 세션이 쓰지 않고 내비에 현재 위치를 묻는다.
+            if (event is Event.GearChanged && event.gear == Gear.PARK) location.refreshNow(::dispatch)
+            dispatch(event)
+        }
     }
 
     /** 데모 초기화. [at]을 주면 데모 시계를 그 시각으로 맞추고 일정 기준 시각도 그 시각으로 한다. */
@@ -208,7 +225,11 @@ class SessionHost(
     }
 
     /** 디버그·데모용: 휴대폰 연결 상태를 바꾼다. 같은 스레드에서 이어 넣는 이벤트보다 먼저 세션에 들어간다. */
-    fun setPaired(paired: Boolean) = pairing.setPaired(paired)
+    fun setPaired(paired: Boolean) {
+        // 연결이 풀리면 받아 둔 일정·집 좌표와 저장된 사본을 지운다(세션 이벤트보다 먼저 지워 다음 이벤트부터 집이 없다).
+        if (!paired && store.paired) source.clear()
+        pairing.setPaired(paired)
+    }
 
     fun advanceClock(by: Duration) {
         clock.offset += by
@@ -250,11 +271,14 @@ class SessionHost(
             Effect.EnterSuspend -> {
                 navi.stop()
                 voice.stop()
+                location.stop()
                 suspended = true
             }
             Effect.ExitSuspend -> {
                 navi.start()
                 voice.start()
+                // 권한을 다시 확인하고 켠다(Suspend 중에 권한이 바뀌었을 수 있다). 권한이 없으면 아무것도 하지 않는다.
+                location.start()
                 suspended = false
             }
             is Effect.RequestTravelTime -> navi.requestTravelTime(effect.requestId, effect.place)
