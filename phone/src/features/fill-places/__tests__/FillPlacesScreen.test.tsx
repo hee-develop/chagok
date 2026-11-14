@@ -300,6 +300,43 @@ describe('폰이 거른 일정(서버로 보내지 않은 것)', () => {
     expect(screen.getByRole('button', { name: '바꾸기' })).toBeDisabled();
   });
 
+  describe('확인 중인 줄이 바뀌면 확인을 닫는다', () => {
+    const rerenderWith = (view: Awaited<ReturnType<typeof renderScreen>>, api: SchedulePlacesApi, filteredEvents: React.ComponentProps<typeof FillPlacesScreen>['filteredEvents'], mark: jest.Mock) =>
+      view.rerender(<SafeAreaProvider initialMetrics={insets}><FillPlacesScreen api={api} filteredEvents={filteredEvents} travelMark={{ mark }} /></SafeAreaProvider>);
+    const question = '‘고객사 주간 회의’ 일정을 이동 일정으로 바꿀까요?';
+
+    it('동기화로 그 줄이 사라지면 닫는다(다른 제목으로 저장되지 않는다)', async () => {
+      const mark = jest.fn().mockResolvedValue('ok');
+      const api = makeApi();
+      const view = await renderScreen(api, undefined, { filteredEvents: [zoom, room], travelMark: { mark } });
+      await fireEvent.press(await markRow());
+      expect(screen.getByText(question)).toBeOnTheScreen();
+      await rerenderWith(view, api, [room], mark);
+      expect(screen.queryByText(question)).toBeNull();
+      expect(screen.queryByRole('button', { name: '바꾸기' })).toBeNull();
+      expect(mark).not.toHaveBeenCalled();
+    });
+
+    it('같은 줄의 제목이 바뀌면 닫는다', async () => {
+      const mark = jest.fn().mockResolvedValue('ok');
+      const api = makeApi();
+      const view = await renderScreen(api, undefined, { filteredEvents: [zoom], travelMark: { mark } });
+      await fireEvent.press(await markRow());
+      await rerenderWith(view, api, [{ ...zoom, title: '고객사 월간 회의' }], mark);
+      expect(screen.queryByText(question)).toBeNull();
+      expect(screen.queryByRole('button', { name: '바꾸기' })).toBeNull();
+    });
+
+    it('다른 줄만 바뀌면 확인은 그대로 남는다', async () => {
+      const mark = jest.fn().mockResolvedValue('ok');
+      const api = makeApi();
+      const view = await renderScreen(api, undefined, { filteredEvents: [zoom, room], travelMark: { mark } });
+      await fireEvent.press(await markRow());
+      await rerenderWith(view, api, [zoom], mark);
+      expect(screen.getByText(question)).toBeOnTheScreen();
+    });
+  });
+
   it('서버 목록에 같은 id가 이미 있으면 서버 쪽만 보인다', async () => {
     await renderScreen(makeApi(), undefined, { filteredEvents: [{ ...zoom, id: 'lunch' }] });
     await screen.findByText('장소가 빈 일정이 1개 있어요');

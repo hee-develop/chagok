@@ -23,6 +23,12 @@ export type TravelExceptions = {
   add(title: string): Promise<void>;
   /** 예외를 지운다(다시 거르게 됨). */
   remove(title: string): Promise<void>;
+  /**
+   * 방금 `add`한 것을 취소한다(저장에 실패해 되돌릴 때). `remove`와 달리 저장소를 아직 읽지 못한 동안에는 이 세션의 메모리 목록에서만 빼고
+   * 저장소의 기존 이름을 지우지 않는다(읽은 뒤에 되살아난다). 읽지 못해 `has`가 틀렸을 수 있으므로, 원래 예외였는지는 부르는 쪽이 `add` 전에 `has`로 본 값을 넘긴다.
+   * `wasException`이 true면 아무것도 하지 않는다. 읽지 못한 동안의 취소는 바뀐 것을 알릴 수 없어 `subscribe` 알림도 하지 않는다.
+   */
+  rollbackAdd(title: string, wasException: boolean): Promise<void>;
   /** 저장소를 아직 읽지 못한 상태인가(true인 동안 `has`는 저장된 이름을 모른다). */
   readFailed(): boolean;
   /** 바뀔 때마다 부른다. 해제 함수를 돌려준다(J2b가 서버 목록에 올리는 자리). */
@@ -121,7 +127,7 @@ export function createTravelExceptions(
 
   const notify = (change: TravelExceptionChange) => listeners.forEach((l) => l(change));
 
-  return {
+  const store: TravelExceptions = {
     load,
     has: (title) => names.includes(normalizeTitle(title)),
     readFailed: () => failed,
@@ -148,11 +154,22 @@ export function createTravelExceptions(
       }
       notify({ name, travel: false });
     },
+    async rollbackAdd(title, wasException) {
+      if (wasException) return;
+      const name = normalizeTitle(title);
+      if (loaded) {
+        await store.remove(title);
+        return;
+      }
+      // 저장소를 읽지 못했다: 이 세션이 더한 이름만 메모리에서 빼고, 저장소에 원래 있던 이름은 건드리지 않는다.
+      names = names.filter((n) => n !== name);
+    },
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
   };
+  return store;
 }
 
 /** 앱 전체가 하나를 공유한다. */

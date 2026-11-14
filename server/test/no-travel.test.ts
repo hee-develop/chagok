@@ -67,6 +67,23 @@ describe('온라인 표시(정책서 12장과 오탐 방지)', () => {
     ['장소: 온라인(Zoom)', { locationText: '온라인(Zoom)' }],
     ['장소: 온라인 미팅', { locationText: '온라인 미팅' }],
     ['webex 호스트', { notes: '접속: company.webex.com/meet/kim' }],
+    ['장소: 줌 회의', { locationText: '줌 회의' }],
+    ['장소: zoom미팅', { locationText: 'zoom미팅' }],
+    ['장소: 줌미팅', { locationText: '줌미팅' }],
+    ['장소: Teams Meeting', { locationText: 'Teams Meeting' }],
+    ['장소: Microsoft Teams Meeting', { locationText: 'Microsoft Teams Meeting' }],
+    ['장소: 구글밋', { locationText: '구글밋' }],
+    ['장소: 온라인/오프라인', { locationText: '온라인/오프라인' }],
+    ['장소: Zoom / Teams', { locationText: 'Zoom / Teams' }],
+    ['장소: 줌 또는 Teams', { locationText: '줌 또는 Teams' }],
+    ['장소: zoom으로', { locationText: 'zoom으로' }],
+    ['장소: 온라인(줌)', { locationText: '온라인(줌)' }],
+    ['장소: 7층 회의실 또는 온라인(둘 다 이동 없음)', { locationText: '7층 회의실 또는 온라인' }],
+    ['장소: 웨비나', { locationText: '웨비나' }],
+    ['빈 장소의 제목: Zoom 미팅', { title: 'Zoom 미팅' }],
+    ['빈 장소의 제목: Teams 회의', { title: 'Teams 회의' }],
+    ['빈 장소의 제목: 줌 회의', { title: '줌 회의' }],
+    ['빈 장소의 제목: 웨비나', { title: '웨비나' }],
   ])('온라인이다: %s', (_name, over) => {
     expect(online(over)).toBe(true);
   });
@@ -92,6 +109,16 @@ describe('온라인 표시(정책서 12장과 오탐 방지)', () => {
     // 메모에 호스트 이름만 스쳐 언급되고 장소 칸에 실제 장소가 있음
     ['메모에 zoom.us가 문장 속에 있고 장소가 있음', { locationText: '코엑스', notes: '발표자료는 zoom.us 녹화본 참고' }],
     ['메모에 teams 호스트가 문장 속에 있고 장소가 있음', { locationText: '광주 육전집', notes: 'teams.microsoft.com 사용법 공유' }],
+    // 가게 이름이 온라인 낱말과 같음
+    ['zoom 카페', { locationText: 'zoom 카페' }],
+    ['Zoom Cafe 강남', { locationText: 'Zoom Cafe 강남' }],
+    ['teams 레스토랑', { locationText: 'teams 레스토랑' }],
+    ['Meet & Greet 홀', { locationText: 'Meet & Greet 홀' }],
+    // 실제 장소가 함께 있음
+    ['온라인 또는 강남역', { locationText: '온라인 또는 강남역' }],
+    ['강남역 또는 온라인', { locationText: '강남역 또는 온라인' }],
+    ['강남역 / 온라인', { locationText: '강남역 / 온라인' }],
+    ['제목의 줌 회의 + 장소가 있음', { title: '줌 회의 후기', locationText: '스타벅스 강남점' }],
   ])('온라인이 아니다: %s', (_name, over) => {
     expect(online(over)).toBe(false);
   });
@@ -150,6 +177,42 @@ describe('건물 안 표시(정책서 12장)', () => {
     '회의실 이동 가능',
     '회의실 출입구 옆',
     '회의실 5분 이동',
+    // 앞에 지명이 붙지 않은 숫자-숫자는 방·호 번호다
+    '회의실 2-1',
+    '회의실 1-2',
+    '2-3 회의실',
+    '7-1 세미나실',
+    '301-2호',
+    '7층 701-1호',
+    'B1-3 회의실',
+    '7층 회의실 7-1번',
+    '7층 회의실 B1-2',
+    '3층 회의실 2-1',
+    // 일반 말이 시·군·구·로로 읽히는 꼴은 주소가 아니다
+    '비상구 회의실로',
+    '임시 회의실로',
+    '입구 회의실로',
+    '출입구 회의실로',
+    '회의실로 3번',
+    '오른쪽으로 3번 회의실',
+    // 번호·안내·사람을 가리키는 말
+    '제1회의실',
+    '제2 세미나실',
+    '회의실 예약',
+    '회의실(예약됨)',
+    '회의실 예약 필요',
+    '3층 회의실 (장소 이동 가능)',
+    '김팀장 자리 옆 회의실',
+    '김팀장 회의실',
+    '팀장님 방 회의실',
+    '본사 7층 회의실 - 김대리 자리 옆',
+    '7층 회의실 / 화상 연결',
+    '7층 회의실, 오후',
+    // 지명·회사명이 앞에 붙지 않은 사옥·센터·청사·본관
+    '사옥 7층',
+    '본관 3층 회의실',
+    '청사 3층 회의실',
+    '센터 2층 회의실',
   ])('실내 표시와 일반 말만 있으면 건물 안이다: %s', (text) => {
     expect(indoor(text)).toBe(true);
   });
@@ -186,6 +249,14 @@ describe('건물 안 표시(정책서 12장)', () => {
     ['회의실 뒤에 다른 장소가 이어짐', '3층 회의실 or 강남역'],
     ['아파트 동·호 주소', '102동 1203호'],
     ['아파트 단지 이름이 있는 동·호 주소', '우리집 102동 1203호'],
+    ['도로명 주소 + 층 + 회의실', '테헤란로 152 7층 회의실'],
+    ['도로명 주소, 쉼표', '테헤란로 152, 7층 회의실'],
+    ['지명 뒤의 번지 꼴', '역삼동 123-4 3층 회의실'],
+    ['종로 ○가 번지', '종로3가 12-1 2층'],
+    ['시·구 지명 꼴', '서울 강남구 역삼로 1 3층 회의실'],
+    ['지명·회사명이 붙은 사옥', '판교 사옥 7층'],
+    ['회사명이 붙은 센터', 'R&D센터 2층 회의실'],
+    ['띄어 쓴 회사명이 붙은 센터', 'R&D 센터 2층 회의실'],
 
     ['호선', '2호선 강남역'],
     ['호점', '교촌치킨 1호점'],
@@ -227,6 +298,18 @@ describe('폰이 거르는 이유(정책서 10.3 표 1~3번)', () => {
     expect(reason({ locationText: '' })).toBeNull();
     expect(reason({ locationText: '광주 육전집' })).toBeNull();
     expect(reason({ locationText: '서울 강남구 테헤란로 152 7층 회의실' })).toBeNull();
+  });
+});
+
+describe('긴 글에서도 빨리 끝난다(장소 칸 300자 상한 전제, 그 몇 배도 확인)', () => {
+  const pieces = ['가', '가나 ', '구 ', '1-', '3층', '가룸', '가로', 'a.', '구'];
+  it.each(pieces)('반복 글 %s', (piece) => {
+    for (const length of [300, 5000, 20000]) {
+      const text = piece.repeat(Math.ceil(length / piece.length)) + ' 회의실';
+      const started = performance.now();
+      detect({ locationText: text, notes: text });
+      expect(performance.now() - started, `${piece} x ${length}`).toBeLessThan(500);
+    }
   });
 });
 

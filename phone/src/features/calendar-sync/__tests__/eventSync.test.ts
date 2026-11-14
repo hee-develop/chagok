@@ -34,9 +34,11 @@ const setup = (over: { kind?: 'mock' | 'device'; events?: DeviceEvent[] } = {}) 
   const fetchSelection = jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' });
   const send = jest.fn().mockResolvedValue({});
   const saveSelection = jest.fn().mockResolvedValue({});
+  // 서버가 폰 일정을 받은 시각(기본: 받았음).
+  const fetchReceivedAt = jest.fn().mockResolvedValue('2026-11-11T00:00:00.000Z');
   const log = jest.fn();
-  const sync = createEventSync({ source, fetchSelection, saveSelection, send, timeoutMs: 1000, now: () => new Date(clock), log });
-  return { sync, listEvents, fetchSelection, saveSelection, send, log, advance: (ms: number) => (clock += ms) };
+  const sync = createEventSync({ source, fetchSelection, saveSelection, send, fetchReceivedAt, timeoutMs: 1000, now: () => new Date(clock), log });
+  return { sync, listEvents, fetchSelection, saveSelection, send, fetchReceivedAt, log, advance: (ms: number) => (clock += ms) };
 };
 
 describe('createEventSync', () => {
@@ -196,6 +198,39 @@ describe('createEventSync', () => {
       expect(await sync.run()).toBe('sent');
     });
 
+    it('같은 내용이어도 서버가 일정을 받은 적이 없으면(receivedAt null) 다시 보낸다', async () => {
+      const { sync, send, fetchReceivedAt, advance } = setup();
+      expect(await sync.run()).toBe('sent');
+      advance(60_000);
+      fetchReceivedAt.mockResolvedValueOnce(null); // 서버 재시작·초기화
+      expect(await sync.run()).toBe('sent');
+      expect(send).toHaveBeenCalledTimes(2);
+      advance(60_000);
+      expect(await sync.run()).toBe('unchanged'); // 다시 받은 뒤에는 생략
+      expect(send).toHaveBeenCalledTimes(2);
+    });
+
+    it('서버 상태를 확인하지 못하면 생략하지 않고 보낸다', async () => {
+      const { sync, send, fetchReceivedAt, advance } = setup();
+      await sync.run();
+      advance(60_000);
+      fetchReceivedAt.mockRejectedValueOnce(new HttpError(403, 'GET /events 403'));
+      expect(await sync.run()).toBe('sent');
+      expect(send).toHaveBeenCalledTimes(2);
+    });
+
+    it('서버 상태는 같은 내용을 생략하기 직전에만 확인한다(처음 보내거나 내용이 바뀌면 묻지 않는다)', async () => {
+      const { sync, fetchReceivedAt, listEvents, advance } = setup();
+      await sync.run();
+      expect(fetchReceivedAt).not.toHaveBeenCalled();
+      listEvents.mockResolvedValue([event('b')]);
+      await sync.run();
+      expect(fetchReceivedAt).not.toHaveBeenCalled();
+      advance(60_000);
+      await sync.run();
+      expect(fetchReceivedAt).toHaveBeenCalledTimes(1);
+    });
+
     it('내용이 바뀌면 바로 보낸다', async () => {
       const { sync, send, listEvents } = setup();
       await sync.run();
@@ -209,6 +244,33 @@ describe('createEventSync', () => {
       send.mockRejectedValueOnce(new Error('x'));
       await sync.run();
       expect(await sync.run()).toBe('sent');
+    });
+  });
+
+  describe('서버가 재시작해 선택을 잃었을 때', () => {
+    it('선택을 다시 저장한 경로에서는 같은 내용이어도 일정을 다시 보낸다(15분 생략을 건너뜀)', async () => {
+      const { sync, fetchSelection, saveSelection, send, advance } = setup();
+      sync.rememberSelection(['1']);
+      expect(await sync.run()).toBe('sent');
+      advance(60_000);
+      fetchSelection.mockResolvedValueOnce({ selectedIds: null, source: null }); // 서버 재시작
+      expect(await sync.run()).toBe('sent');
+      expect(saveSelection).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledTimes(2);
+    });
+
+    it('그때 보내기가 실패해도 다음 읽기에서 서버가 받은 적 없음(receivedAt null)을 알아채 다시 보낸다', async () => {
+      const { sync, fetchSelection, send, fetchReceivedAt, advance } = setup();
+      sync.rememberSelection(['1']);
+      await sync.run();
+      advance(60_000);
+      fetchSelection.mockResolvedValueOnce({ selectedIds: null, source: null });
+      send.mockRejectedValueOnce(new HttpError(500, 'PUT /events 500'));
+      expect(await sync.run()).toBe('failed');
+      advance(60_000);
+      fetchReceivedAt.mockResolvedValueOnce(null);
+      expect(await sync.run()).toBe('sent');
+      expect(send).toHaveBeenCalledTimes(3);
     });
   });
 

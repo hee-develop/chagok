@@ -13,6 +13,11 @@ export type TravelMarkOptions = {
   undoVisibleMs?: number;
   /** 바꾸기·되돌리기가 서버 일정에 반영된 뒤(화면이 서버 목록을 다시 불러오는 자리). */
   onChanged?: () => void;
+  /**
+   * 지금 화면에 보이는 거른 줄. 확인 중인 줄이 동기화로 사라지거나 제목이 바뀌면 확인을 닫는다
+   * (확인 문구의 제목과 실제로 저장되는 이름이 어긋나지 않게). 넘기지 않으면 닫지 않는다.
+   */
+  lines?: readonly { id: string; title: string }[];
 };
 
 /**
@@ -24,6 +29,7 @@ export function useTravelMark({
   undo = undoMarkTravel,
   undoVisibleMs = UNDO_VISIBLE_MS,
   onChanged,
+  lines,
 }: TravelMarkOptions = {}) {
   const [confirming, setConfirming] = useState<{ id: string; title: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,6 +42,11 @@ export function useTravelMark({
   useEffect(() => {
     onChangedRef.current = onChanged;
   });
+
+  // 확인 중인 줄이 사라지거나 제목이 바뀌면 확인을 닫는다(렌더 중 상태 조정: 닫은 뒤 줄이 다시 나타나도 확인이 되살아나지 않는다).
+  if (confirming && lines !== undefined && !lines.some((l) => l.id === confirming.id && l.title === confirming.title)) {
+    setConfirming(null);
+  }
 
   const clearTimer = () => {
     if (timer.current !== null) clearTimeout(timer.current);

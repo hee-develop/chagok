@@ -41,7 +41,7 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
   const [saveIssue, setSaveIssue] = useState<'retry' | 'reload' | null>(null);
   const [attempt, setAttempt] = useState(0);
   // 거른 줄을 이동 일정으로 바꾸거나 되돌리면 서버가 아는 일정이 달라지므로 서버 목록을 다시 조회한다.
-  const travel = useTravelMark({ ...travelMark, onChanged: () => setAttempt((n) => n + 1) });
+  const travel = useTravelMark({ ...travelMark, lines: filtered, onChanged: () => setAttempt((n) => n + 1) });
   const loadRequest = useRef<AbortController | null>(null);
   const saveRequest = useRef<AbortController | null>(null);
   const retryLast = useRef<(() => void) | null>(null);

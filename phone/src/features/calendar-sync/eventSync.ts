@@ -6,7 +6,7 @@ import {
   saveCalendarSelection,
   type FetchSelectionState,
 } from '../calendar-select/selectionApi';
-import { putEvents, type SendEvents } from './eventsApi';
+import { fetchEventsReceivedAt, putEvents, type FetchReceivedAt, type SendEvents } from './eventsApi';
 import { appFilteredEvents, type FilteredEvent } from './filteredEvents';
 import { fitToBudget } from './payloadBudget';
 import { appTravelExceptions, type TravelExceptions } from './travelExceptions';
@@ -34,6 +34,8 @@ export type EventSyncOptions = {
   /** 서버가 선택을 잃었을 때(재시작) 기억해 둔 선택을 다시 저장한다. */
   saveSelection?: (selectedIds: string[], revision: number, signal: AbortSignal) => Promise<unknown>;
   send?: SendEvents;
+  /** 서버가 폰 일정을 받은 시각(받은 적이 없으면 null). 같은 내용 생략 직전에 확인한다. */
+  fetchReceivedAt?: FetchReceivedAt;
   /** "이동 일정이에요"로 바꾼 이름 목록(폰 저장소). */
   exceptions?: Pick<TravelExceptions, 'load' | 'has'>;
   /** 폰이 거른 일정을 받는 곳(화면이 흐리게 보인다). 서버로는 보내지 않는다. */
@@ -64,7 +66,9 @@ const devLog = (message: string) => {
  * - 동시에 하나만 보낸다. 보내는 중에 다시 불리면 하나로 합쳐 끝난 뒤 한 번만 더 돈다(PUT은 전체 교체라 순서가 뒤집히면 안 된다).
  * - 선택은 서버에 저장된 값을 읽는다. 기기 캘린더(source=device)로 저장한 선택만 쓰고, 없거나 목 캘린더 선택이면 보내지 않는다
  *   (목 id로 기기 일정을 조회해 빈 목록을 보내면 서버가 폰 출처로 영구 전환되므로).
- * - 서버에 선택이 없는데(재시작) 이 앱이 마지막 선택을 기억하면 그 선택을 다시 저장한 뒤 보낸다.
+ * - 서버에 선택이 없는데(재시작) 이 앱이 마지막 선택을 기억하면 그 선택을 다시 저장한 뒤 보낸다. 서버가 선택을 잃었다면 일정도 잃었으므로
+ *   이 경우에는 같은 내용이어도 반드시 다시 보낸다(생략하지 않는다).
+ * - 같은 내용을 생략하기 직전에 서버가 일정을 받은 적이 있는지(`GET /events`의 `receivedAt`)를 확인한다. null이면(서버 재시작·초기화·알 수 없음) 생략하지 않는다.
  * - 읽은 일정은 보내기 전에 폰에서 거른다(`travelFilter.ts`): 온라인·건물 안 일정은 보내지 않고 폰 로컬 목록에만 두며,
  *   종일 일정은 이름만 보낸다. 같은 내용 판단·크기 예산은 거른 뒤의 일정으로 한다.
  * - 거른 목록(`filtered`)은 일정을 읽은 결과다. 고른 캘린더가 없거나 권한이 없거나 캘린더를 읽지 못하면 이전 목록을 비운다(낡은 일정을 계속 보이지 않는다).
@@ -77,6 +81,7 @@ export function createEventSync({
   fetchSelection = fetchCalendarSelectionState,
   saveSelection = (ids, revision, signal) => saveCalendarSelection(ids, revision, signal, 'device'),
   send = putEvents,
+  fetchReceivedAt = fetchEventsReceivedAt,
   exceptions = appTravelExceptions,
   filtered: filteredSink = appFilteredEvents,
   timeoutMs = REQUEST_TIMEOUT_MS,
@@ -108,7 +113,10 @@ export function createEventSync({
     try {
       let state = await requestWithTimeout(fetchSelection, timeoutMs, controller);
       if (cancelled()) return 'cancelled';
+      // 서버가 선택을 잃었다면 일정도 잃었다(둘 다 메모리). 선택을 다시 저장한 이번에는 같은 내용 생략을 건너뛴다.
+      let serverLostState = false;
       if (state.selectedIds === null && remembered !== null) {
+        serverLostState = true;
         const ids = remembered;
         await requestWithTimeout((signal) => saveSelection(ids, revisions(), signal), timeoutMs, controller);
         if (cancelled()) return 'cancelled';
@@ -140,7 +148,17 @@ export function createEventSync({
       events = fitToBudget(toSend);
       const key = JSON.stringify(events);
       const startedAt = now().getTime();
-      if (lastSent && lastSent.key === key && startedAt - lastSent.at < RESEND_UNCHANGED_AFTER_MS) return 'unchanged';
+      if (!serverLostState && lastSent && lastSent.key === key && startedAt - lastSent.at < RESEND_UNCHANGED_AFTER_MS) {
+        // 내용이 같아도 서버가 폰 일정을 받은 적이 없으면(재시작·초기화) 다시 보낸다. 확인하지 못하면 보내는 쪽을 택한다.
+        let received: string | null = null;
+        try {
+          received = await requestWithTimeout((signal) => fetchReceivedAt(signal), timeoutMs, controller);
+        } catch {
+          if (cancelled()) return 'cancelled';
+        }
+        if (cancelled()) return 'cancelled';
+        if (received !== null) return 'unchanged';
+      }
       try {
         await requestWithTimeout((signal) => send(events, signal), timeoutMs, controller);
       } catch (e) {
