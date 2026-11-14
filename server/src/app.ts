@@ -10,8 +10,10 @@ import { createCarRoute, createDriversRoute, createPairRoute, createPresenceRout
 import { createNotificationsRoute } from './routes/notifications.js';
 import { createPairingRoute } from './routes/pairing.js';
 import { createSchedulesRoute } from './routes/schedules.js';
+import { createPlaceResolveRoute } from './routes/placeResolve.js';
 import { createPlacesRoute, type FavoritesStore } from './routes/places.js';
 import { createNotifications, type Notifications } from './notify/notifier.js';
+import { createMockPlaceSearch, createRateLimiter, type PlaceSearch, type RateLimiterOptions } from './placeSearch/index.js';
 import { createSeatDataRegistry } from './seatData.js';
 import { connectionAddress, createSeatGuard } from './seatScope.js';
 import { createSeatStore, type SeatStore } from './seats.js';
@@ -60,6 +62,10 @@ export type AppOptions = {
    * **실제 사용자에게 목 일정이 보이는 데모 전용 옵션**이다. 차량 Maestro(`e2e-car.sh`)·PT 시연(`pt-demo.sh`) 서버(`FIXTURE_SEATS=1`)에서만 켠다.
    */
   fixtureSeats?: boolean;
+  /** 장소 검색 포트(키워드·주소). 없으면 `places`의 목 장소로 검색한다. 서버 시작 코드가 `KAKAO_REST_KEY`가 있을 때 카카오 구현을 넘긴다. */
+  placeSearch?: PlaceSearch;
+  /** 장소 검색(`GET /places/search`·`POST /places/resolve`)의 요청 주소별 속도 제한. 기본값은 placeSearch/limits.ts. 테스트에서 바꾼다. */
+  placeSearchRateLimit?: Omit<RateLimiterOptions, 'now'>;
   /** 연결 전 버킷 수·TTL·생성 속도 제한과 일정 저장 용량 예산(연결된 자리/버킷 따로, 버킷 하나의 상한). 기본값은 seatData.ts. 테스트에서 바꾼다. */
   capacity?: Omit<NonNullable<Parameters<typeof createSeatDataRegistry>[0]>, 'now' | 'fixtureIds' | 'defaults'>;
   /**
@@ -97,6 +103,8 @@ export const createApp = ({
   onEnergyError,
   energyTimeoutMs,
   energyRateLimit,
+  placeSearch = createMockPlaceSearch(places.places),
+  placeSearchRateLimit,
 }: AppOptions) => {
   // 일정·선택·자주 가는 곳·가족 요청·보정·채비는 운전자 자리마다 따로 쌓인다. 토큰 없이 기기 id만 있는 폰은 그 기기의 연결 전 버킷을,
   // 식별이 전혀 없는 요청은 기본 자리를 쓴다(픽스처·데모·차량 E2E 경로).
@@ -118,10 +126,13 @@ export const createApp = ({
     notifications.outbox.dropKind(seatId, 'events-stale');
   };
   const guard = createSeatGuard(seats, registry, { legacyDriverFallback, fixtureSeats, clientAddress });
+  const searchLimiter = createRateLimiter({ ...placeSearchRateLimit, now: () => now().getTime() });
+  const searchDeps = { search: placeSearch, allow: (c: Context) => searchLimiter.take(clientAddress(c)) };
   return new Hono()
     .get('/health', (c) => c.json({ ok: true as const }))
     .route('/calendars', createCalendarsRoute(calendars, guard))
-    .route('/places', createPlacesRoute(places, guard))
+    .route('/places', createPlacesRoute(places, guard, searchDeps))
+    .route('/places', createPlaceResolveRoute(guard, searchDeps))
     .route('/events', createEventsRoute(guard, { now, isLoopback, loopbackOnly: eventsLoopbackOnly, onReceived: onEventsReceived }))
     .route('/family', createFamilyRoute(familyMembers, guard))
     .route('/pairing', createPairingRoute(seats, { clientAddress, isLoopback }))

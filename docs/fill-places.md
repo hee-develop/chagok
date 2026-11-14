@@ -19,6 +19,9 @@
   `place`는 `{ name, lat, lng } | null`입니다. 빈 개수는 `place === null && !noTravel`이며 후보가 있는 일정도 셉니다.
   `suggestion`은 `{ placeId, name } | null`로, 장소가 비고 이동 없음이 아닌 일정 중 제목이 기억한 장소와
   같은 일정에만 채웁니다. 기억한 장소는 `fixtures/places/remembered.json`(일정 제목 → 목 장소 id)입니다.
+  (이 파일은 픽스처·데모 자리의 시드이고 실제 자리에는 쓰지 않습니다.)
+  차가 `PUT /places/memory`로 저장한 '이름 → 장소' 기억은 `suggestion`이 아니라 **장소를 확정**합니다(`place` 채움, `suggestion: null`,
+  응답에 `placeMemory: { ambiguous }` 덧붙음). 기억 순서와 계약은 `docs/place-resolve.md`를 따릅니다.
   '여기 맞아요'는 이 `placeId`를 아래 `PUT`으로 저장합니다. 기억 후보가 틀리면 같은 카드의
   '이동 없음'·'장소 넣기'로 직접 고를 수 있게 후보 박스 아래에 그 줄을 함께 둡니다.
 - `PUT /schedules/:id/place`: `{ placeId: string | null }` 또는 `{ noTravel: true }` 중 하나를 받습니다.

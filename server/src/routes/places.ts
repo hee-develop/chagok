@@ -1,15 +1,18 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import type { MockPlace, PlacesCatalog } from '../fixture-types.js';
 import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
+import { MAX_SEARCH_RESULTS } from '../placeSearch/limits.js';
+import { normalizeQuery, searchPlaces } from '../placeSearch/match.js';
+import { isLat, isLng, type LatLng, type PlaceSearch } from '../placeSearch/types.js';
 import { openDenied, type SeatEnv, type SeatGuard } from '../seatScope.js';
 
 /** 응답에 내보내는 장소. 픽스처 전용 필드(fictional)는 뺀다. */
 export type PublicPlace = Omit<MockPlace, 'fictional'>;
 
 export const MAX_QUERY_LENGTH = 50;
-export const MAX_SEARCH_RESULTS = 10;
+export { MAX_SEARCH_RESULTS, normalizeQuery, searchPlaces };
 export const MAX_OTHER_PLACES = 20;
 
 /** 저장하는 건 장소 id뿐이고, 응답에서 목 장소 정보로 풀어 준다. revision은 저장이 바뀔 때마다 서버가 1씩 올린다. */
@@ -52,18 +55,11 @@ export function createFavoritesStore(): FavoritesStore {
   };
 }
 
-/** 앞뒤 공백을 지우고 안쪽 연속 공백을 하나로 줄인다. */
-export const normalizeQuery = (raw: string) => raw.trim().replace(/\s+/g, ' ');
-
-/** 공백으로 나눈 검색어가 모두 이름 또는 주소에 들어 있는 장소. 대소문자는 구분하지 않는다. */
-export function searchPlaces<T extends Pick<MockPlace, 'name' | 'address'>>(places: T[], query: string): T[] {
-  const tokens = normalizeQuery(query).toLowerCase().split(' ');
-  return places
-    .filter((p) => {
-      const haystack = `${p.name} ${p.address}`.toLowerCase();
-      return tokens.every((t) => haystack.includes(t));
-    })
-    .slice(0, MAX_SEARCH_RESULTS);
+/** 쿼리 문자열 lat·lng를 기준 좌표로 읽는다. 숫자 하나씩이 아니거나 범위를 벗어나면 null. */
+function nearOf(lat: unknown, lng: unknown): LatLng | null {
+  const num = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+  const parsed = { lat: num(lat), lng: num(lng) };
+  return isLat(parsed.lat) && isLng(parsed.lng) ? parsed : null;
 }
 
 type ParsedPlaceId = { ok: true; placeId: string | null } | { ok: false; error: string };
@@ -84,13 +80,12 @@ const tooLarge = bodyLimit({
 });
 
 // RPC 타입 추론을 위해 체이닝을 유지한다.
-export const createPlacesRoute = (catalog: PlacesCatalog, guard: SeatGuard) => {
+export const createPlacesRoute = (catalog: PlacesCatalog, guard: SeatGuard, deps: { search: PlaceSearch; allow: (c: Context) => boolean }) => {
   // 검색 목록과 추천에 같은 id가 있으면 같은 장소이므로 한 번만 둔다.
   const toPlace = (p: MockPlace): PublicPlace => ({ id: p.id, name: p.name, address: p.address, lat: p.lat, lng: p.lng });
   const byId = new Map<string, PublicPlace>();
   for (const p of [...catalog.places, ...catalog.suggestions]) byId.set(p.id, toPlace(p));
   const known = new Set(byId.keys());
-  const searchable = catalog.places.map(toPlace);
   const suggestions = catalog.suggestions.map((s) => ({ ...toPlace(s), hint: s.hint }));
   const resolve = (id: string): PublicPlace => byId.get(id) as PublicPlace;
   const view = (saved: SavedFavorites) => ({
@@ -115,9 +110,22 @@ export const createPlacesRoute = (catalog: PlacesCatalog, guard: SeatGuard) => {
         const q = normalizeQuery(raw);
         if (q === '') return c.json({ error: 'q가 비어 있습니다' }, 400);
         if (q.length > MAX_QUERY_LENGTH) return c.json({ error: `q는 ${MAX_QUERY_LENGTH}자 이하여야 합니다` }, 400);
-        return { q };
+        // 선택: 기준 좌표(lat·lng 함께). 있으면 가까운 순으로 돌려준다.
+        const { lat, lng } = value;
+        if ((lat === undefined) !== (lng === undefined)) return c.json({ error: 'lat과 lng는 함께 보내야 합니다' }, 400);
+        if (lat !== undefined && nearOf(lat, lng) === null) return c.json({ error: 'lat은 -90~90, lng는 -180~180 숫자 하나여야 합니다' }, 400);
+        // 반환 타입이 RPC 클라이언트의 쿼리 입력 모양이 된다(lat·lng는 선택).
+        return { q, lat, lng } as { q: string; lat?: string; lng?: string };
       }),
-      (c) => c.json({ places: searchPlaces(searchable, c.req.valid('query').q) }, 200),
+      async (c) => {
+        const { q, lat, lng } = c.req.valid('query');
+        const near = lat === undefined ? null : nearOf(lat, lng);
+        if (!deps.allow(c)) return c.json({ error: '요청이 너무 많아요. 잠시 뒤 다시 해 주세요', reason: 'rate-limited' as const }, 429);
+        const found = await deps.search.searchKeyword({ query: q, near: near ?? undefined, limit: MAX_SEARCH_RESULTS });
+        const places = found.places.map((p): PublicPlace => ({ id: p.id, name: p.name, address: p.address, lat: p.lat, lng: p.lng }));
+        // 기존 응답({ places })과 같게 두고, 목이 아닌 출처(kakao·unavailable)일 때만 source를 덧붙인다.
+        return found.source === 'mock' ? c.json({ places }, 200) : c.json({ places, source: found.source }, 200);
+      },
     )
     .get('/suggestions', (c) => c.json({ suggestions }))
     .get('/favorites', guard.read, (c) => c.json(view(c.var.seat.data.favorites.get())))

@@ -6,6 +6,7 @@ import { MAX_BODY_BYTES, MAX_CARE_LENGTH, MAX_ID_LENGTH } from '../limits.js';
 import { MINUTE_MS, parseAt, seoulDay } from '../time.js';
 import { effectiveSelectedIds } from './calendars.js';
 import { detectNoTravel, type NoTravelReason } from '../noTravel.js';
+import { normalizePlaceName } from '../placeMemory.js';
 import type { SeatData } from '../seatData.js';
 import { openDenied, type SeatEnv, type SeatGuard, type SeatScope } from '../seatScope.js';
 
@@ -26,18 +27,23 @@ type Row = {
   place: PlaceFixture | null;
   /** 장소가 비었을 때 '여기 맞아요'로 내릴 후보(지난번 기억 또는 이름이 포함되는 목 장소). */
   candidate: MockPlace | undefined;
+  /** place가 자리의 장소 기억에서 왔으면 그 기억의 애매 여부(애매하면 차가 매번 '지난번처럼 {장소}로 갈까요?'로 확인한다). 아니면 null. */
+  placeMemory: { ambiguous: boolean } | null;
   memo: string | null;
   attendees: string[];
   /** 온라인 회의·건물 안이라 저절로 '이동 없음'인 이유. 종일 일정은 거르지 않는다(차가 첫 탑승 인사에 이름을 쓴다). 보정(장소 넣기·이동 없음)이 있으면 보정이 이긴다. */
   autoNoTravel: NoTravelReason | null;
 };
 
-const normalize = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
+/** 이름 비교 정규화. 장소 기억의 이름 키(placeMemory.ts)와 같은 규칙이다. */
+const normalize = normalizePlaceName;
 
 /**
  * 일정 출처(운전자 자리마다): 폰이 보낸 일정을 한 번이라도 받았으면 그것(날짜 지난 것은 이미 지워짐), 아니면 픽스처.
- * 폰 일정의 장소는 보정(view에서 먼저 적용) → 목 장소 이름이 장소 칸과 정규화해서 완전히 같은 것 → null 순으로 정한다.
- * 지난번 기억(제목)과 이름이 일부만 겹치는 목 장소는 좌표를 확정하지 않고 픽스처 일정과 같은 계약대로 `suggestion`(확인 필요)으로만 내린다.
+ * 폰 일정의 장소는 보정(view에서 먼저 적용) → 목 장소 이름이 장소 칸과 정규화해서 완전히 같은 것 → 자리의 장소 기억 → null 순으로 정한다.
+ * 장소 기억은 차가 `PUT /places/memory`로 저장한 '이름 → 장소'이고 이름은 일정의 장소 칸 글자(비었으면 제목)다. 기억한 장소는 좌표를 확정하고
+ * 애매 기억은 응답에 `placeMemory: { ambiguous: true }`로 표시한다. 기억이 없으면(차가 쓴 적 없으면) 아래 제목 후보가 그대로 `suggestion`이다.
+ * 지난번 기억(제목, 픽스처 시드)과 이름이 일부만 겹치는 목 장소는 좌표를 확정하지 않고 픽스처 일정과 같은 계약대로 `suggestion`(확인 필요)으로만 내린다.
  */
 export const createSchedulesRoute = (
   fixture: DayFixture,
@@ -64,8 +70,15 @@ export const createSchedulesRoute = (
       return { kind, name: p.name, address: p.address, lat: p.lat, lng: p.lng };
     });
   };
+  // fixtures/places/remembered.json은 픽스처·데모 자리(기본 자리)의 제목 기억 시드이고 확정하지 않는 `suggestion`으로만 쓴다(실제 자리에는 새지 않는다).
   const remembered = new Map(catalog.remembered.map((r) => [r.title, places.get(r.placeId)!]));
+  /** 자리의 장소 기억에서 이 일정의 장소를 찾는다. 이름 키는 장소 칸 글자이고, 비었으면 제목이다. */
+  const memoryOf = (d: SeatData, locationText: string | null, title: string) => {
+    const key = locationText !== null && normalize(locationText) !== '' ? locationText : title;
+    return d.memory.get(key);
+  };
   const toPlace = (p: MockPlace): PlaceFixture => ({ name: p.name, lat: p.lat, lng: p.lng });
+  const memoryPlace = (p: { name: string; lat: number; lng: number }): PlaceFixture => ({ name: p.name, lat: p.lat, lng: p.lng });
   const namedPlaces = [...places.values()].map((p) => ({ p, name: normalize(p.name) }));
   /** 장소 칸 글자와 이름이 완전히 같은 목 장소(공백·대소문자만 무시). 좌표를 확정해도 되는 유일한 경우다. */
   const exactMatch = (locationText: string | null): MockPlace | undefined => {
@@ -81,10 +94,13 @@ export const createSchedulesRoute = (
   // 일정별 보정·채비는 자리 데이터(SeatData)에 있다. 폰 일정이 바뀌어 사라진 일정의 것은 거기서 버린다.
   const rows = (sc: SeatScope, anchor: Date): Row[] => {
     const phone = sc.data.events.get();
+    const seed = (title: string) => (sc.fixture ? remembered.get(title) : undefined);
     if (phone === null) {
       // 일정을 받은 적 없는 자리: 기본 자리(픽스처·데모 경로)만 픽스처이고, 실제 자리(연결된 자리·연결 전 버킷)는 0건이다.
       if (!sc.fixture) return [];
-      return fixture.schedules.map((s) => ({
+      return fixture.schedules.map((s) => {
+        const memory = s.place ? null : memoryOf(sc.data, s.locationText, s.title);
+        return {
         id: s.id,
         calendarId: s.calendarId,
         title: s.title,
@@ -92,15 +108,18 @@ export const createSchedulesRoute = (
         end: anchor.getTime() + s.endOffsetMinutes * MINUTE_MS,
         allDay: s.allDay,
         locationText: s.locationText,
-        place: s.place,
-        candidate: remembered.get(s.title),
+        place: s.place ?? (memory ? memoryPlace(memory.place) : null),
+        candidate: memory ? undefined : seed(s.title),
+        placeMemory: memory ? { ambiguous: memory.ambiguous } : null,
         memo: s.memo,
         attendees: s.attendees,
         autoNoTravel: s.allDay ? null : detectNoTravel({ title: s.title, locationText: s.locationText, notes: s.memo }),
-      }));
+        };
+      });
     }
     return phone.events.map((e) => {
       const exact = exactMatch(e.locationText);
+      const memory = exact ? null : memoryOf(sc.data, e.locationText, e.title);
       return {
         id: e.id,
         calendarId: e.calendarId,
@@ -109,8 +128,9 @@ export const createSchedulesRoute = (
         end: e.end,
         allDay: e.allDay,
         locationText: e.locationText,
-        place: exact ? toPlace(exact) : null,
-        candidate: exact ? undefined : remembered.get(e.title) ?? partialMatch(e.locationText),
+        place: exact ? toPlace(exact) : memory ? memoryPlace(memory.place) : null,
+        candidate: exact || memory ? undefined : seed(e.title) ?? partialMatch(e.locationText),
+        placeMemory: memory ? { ambiguous: memory.ambiguous } : null,
         memo: e.notes,
         attendees: e.attendees,
         autoNoTravel: e.travelConfirmed || e.allDay ? null : detectNoTravel({ title: e.title, locationText: e.locationText, notes: e.notes }),
@@ -149,6 +169,11 @@ export const createSchedulesRoute = (
       noTravelReason: override ? (null as NoTravelReason | null) : s.autoNoTravel,
     };
   };
+  /** 장소가 자리의 기억에서 왔을 때만 `placeMemory`를 응답에 덧붙인다(보정·이동 없음이 이기면 없음, 기억이 아니면 필드 자체가 없다). */
+  const memoryFlag = (d: SeatData, s: Row) => {
+    const override = d.overrides.get(s.id);
+    return s.placeMemory && !override?.placeId && !view(d, s).noTravel ? { placeMemory: s.placeMemory } : {};
+  };
   /** 시작이 anchor와 같은 서울 날짜이거나, 전날 시작해 anchor 시각에 아직 끝나지 않은 일정. */
   const isToday = (s: Row, anchor: Date) => {
     const day = seoulDay(anchor.getTime());
@@ -174,7 +199,7 @@ export const createSchedulesRoute = (
         schedules: selectedSchedules(sc, anchor).filter((s) => !view(d, s).noTravel && isToday(s, anchor)).map((s) => {
           const { noTravel: _, noTravelReason: _reason, ...place } = view(d, s);
           return {
-            ...place, title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, care: d.cares.get(s.id) ?? null, attendees: s.attendees,
+            ...place, ...memoryFlag(d, s), title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, care: d.cares.get(s.id) ?? null, attendees: s.attendees,
           };
         }),
         favorites: favoritePlaces(d),
@@ -191,7 +216,7 @@ export const createSchedulesRoute = (
             const v = view(d, s);
             const known = v.place || v.noTravel ? undefined : s.candidate;
             return {
-              ...v, title: s.title, ...times(s), care: d.cares.get(s.id) ?? null,
+              ...v, ...memoryFlag(d, s), title: s.title, ...times(s), care: d.cares.get(s.id) ?? null,
               suggestion: known ? { placeId: known.id, name: known.name } : null,
               familyRequests: d.family.forSchedule(s.id).map((r) => ({ memberId: r.memberId, name: r.memberName, status: r.status, sentAt: r.sentAt })),
             };
