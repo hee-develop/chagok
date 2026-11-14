@@ -355,7 +355,8 @@ class DriveSession(
     /** 결과 한 줄을 보이고 있으면 그 타이머 ID, 아니면 null */
     private var resultTimerId: Int? = null
 
-    private class PendingBoarding(val requestId: Int, val kind: BoardingKind, val targetId: String, val reasking: Boolean)
+    /** [forced]는 일정 겹침에서 사용자가 고른 일정으로 이어 가는 판단이다(겹침을 다시 묻지 않는다). */
+    private class PendingBoarding(val requestId: Int, val kind: BoardingKind, val targetId: String, val reasking: Boolean, val forced: Boolean = false)
 
     private class CardState(
         var view: CardContent,
@@ -375,6 +376,10 @@ class DriveSession(
         val briefing: Briefing? = null,
         /** 접힌 질문을 다시 묻는 카드인가. 이 카드가 또 무응답으로 접혀도 다시 묻지 않는다(한 번만). */
         val isReask: Boolean = false,
+        /** 이 카드를 만든 탑승 판단의 종류. 일정 겹침에서 고른 뒤 같은 종류(첫 탑승·재탑승)로 이어 가려고 둔다. */
+        val kind: BoardingKind? = null,
+        /** 일정 겹침에서 일정을 골라 그 일정의 소요 시간을 기다리는 중인가. 그동안 버튼·음성·후보 누름·30초 접힘은 무시한다. */
+        var resolving: Boolean = false,
     )
 
     init {
@@ -608,6 +613,11 @@ class DriveSession(
         }
         // 일정을 못 받았고 사본도 없으면(origin NONE) 일정 없음으로 본다: 일정 목록이 비어 있어 "어디로 갈까요?"를 묻는다(5장 4번). 사본이 있을 때만 "일정을 새로 못 받음" 한 줄이 붙는다.
         val reasking = reaskNow || reask != null
+        // 일정 겹침이면 어느 일정으로 갈지부터 묻는다. 소요 시간은 고른 일정으로 정해진 뒤([chooseOverlap]) 묻는다.
+        if (BoardingDecider.findOverlap(plan().boardingCandidates(now(), hereForBoarding())) != null) {
+            decide(kind, null, out, reasking)
+            return
+        }
         val target = boardingTarget()
         val place = target?.place
         if (place == null) {
@@ -693,14 +703,19 @@ class DriveSession(
         if (waiting.requestId != event.requestId) return
         pending = null
         if (!canSpeak()) return
-        // 기다리는 사이 대상 일정이 바뀌었으면 그 소요 시간은 쓰지 않는다.
+        // 일정 겹침에서 고른 일정이면 그 일정이 아직 도착·건너뜀이 아닌지만 본다. 아니면 기다리는 사이 대상 일정이 바뀌었을 때 그 소요 시간은 쓰지 않는다.
+        if (waiting.forced) {
+            val chosen = plan().pending().firstOrNull { it.id == waiting.targetId }
+            decide(waiting.kind, event.travelTime.takeIf { chosen != null }, out, forced = chosen)
+            return
+        }
         val sameTarget = boardingTarget()?.id == waiting.targetId
         decide(waiting.kind, event.travelTime.takeIf { sameTarget }, out, waiting.reasking)
     }
 
-    private fun decide(kind: BoardingKind, travelTime: Duration?, out: MutableList<Effect>, reasking: Boolean = false) {
+    private fun decide(kind: BoardingKind, travelTime: Duration?, out: MutableList<Effect>, reasking: Boolean = false, forced: Schedule? = null) {
         val decision = BoardingDecider.decide(
-            now(), kind, plan(), planIsFallback = origin == ScheduleOrigin.STORED, travelTime = travelTime, favorites = favorites, here = hereForBoarding(),
+            now(), kind, plan(), planIsFallback = origin == ScheduleOrigin.STORED, travelTime = travelTime, favorites = favorites, here = hereForBoarding(), forcedTarget = forced,
         )
         if (decision !is BoardingDecision.Card) return
         // 탑승은 카드를 실제로 띄울 때 기록한다. 판단 중에 D로 바뀌어 카드가 안 뜨면 그날 첫 탑승을 소진하지 않는다.
@@ -711,7 +726,7 @@ class DriveSession(
 
         val view = Phrases.card(decision, now(), zone)
         val timerId = ++seq
-        val state = CardState(view, question, timerId, voiceOpen = true, briefing = decision.briefing, isReask = reasking)
+        val state = CardState(view, question, timerId, voiceOpen = true, briefing = decision.briefing, isReask = reasking, kind = kind)
         // 다시 묻는 카드를 띄우면 그 기회는 쓴 것이다(한 번만).
         if (reasking) reask = null
         card = state
@@ -804,7 +819,7 @@ class DriveSession(
      */
     private fun keepForReask(state: CardState) {
         val question = state.question ?: return
-        if (state.isReask) return
+        if (state.isReask || state.resolving) return
         reask = PendingReask.of(question)
     }
 
@@ -842,31 +857,56 @@ class DriveSession(
             return
         }
         val question = state.question ?: return
+        if (state.resolving) return
         // 수락은 [accept]가 음성을 멈춘다.
         if (!primary) out += Effect.StopVoice
         when {
             primary -> accept(state, out)
+            // 일정 겹침의 보조 버튼은 다음 일정을 고르는 것이다.
+            question is Question.Overlap -> accept(state, out, 1)
             // 출발 제안·늦게 탐의 보조 버튼은 "잠깐만"(보류), 목적지 묻기의 보조 버튼은 "그냥 갈게"(거절)
             question is Question.Depart || question is Question.DepartLate -> hold(state, out)
             else -> reject(out)
         }
     }
 
+    /**
+     * 일정 겹침에서 일정을 골랐다([pick] 0이 먼저인 일정, 1이 다음 일정). 같은 카드를 둔 채 고른 일정의 소요 시간을 묻고(그동안 입력은 무시),
+     * 답이 오면 [onTravelTime]이 그 일정을 대상으로 한 출발 제안·늦게 탐·목적지 묻기로 카드를 바꾼다(5장 11번: 앞 질문의 답을 받은 뒤 같은 카드에서 다음 질문).
+     * 고르지 않은 일정은 상태를 바꾸지 않고 그대로 둔다.
+     */
+    private fun chooseOverlap(state: CardState, overlap: Question.Overlap, pick: Int, out: MutableList<Effect>) {
+        val chosen = if (pick == 0) overlap.first else overlap.second
+        val place = chosen.place ?: return
+        out += Effect.StopVoice
+        state.resolving = true
+        state.voiceOpen = false
+        // 낡은 30초 타이머는 무시하고, 소요 시간 응답이 안 와도 30초 뒤에는 접히게 새로 센다.
+        state.timerId = ++seq
+        out += Effect.ScheduleCardTimeout(state.timerId, Rules.CARD_TIMEOUT)
+        val id = ++seq
+        pending = PendingBoarding(id, state.kind ?: BoardingKind.AGAIN, chosen.id, reasking = false, forced = true)
+        out += Effect.RequestTravelTime(id, place)
+    }
+
     /** 후보 줄 누름. 목적지 묻기 카드의 후보 번호일 때만 그 후보로 길안내한다. */
     private fun onCandidate(index: Int, out: MutableList<Effect>) {
         val state = card ?: return
-        val question = state.question as? Question.AskDestination ?: return
-        if (index !in question.candidates.indices) return
-        accept(state, out, index)
+        if (state.resolving) return
+        when (val question = state.question) {
+            is Question.AskDestination -> if (index in question.candidates.indices) accept(state, out, index)
+            is Question.Overlap -> if (index in 0..1) accept(state, out, index)
+            else -> Unit
+        }
     }
 
     private fun onHeard(text: String, out: MutableList<Effect>) {
         val state = card ?: return
-        if (!state.voiceOpen) return
+        if (!state.voiceOpen || state.resolving) return
         state.voiceOpen = false
         val question = state.question
-        // 화면에 보인 후보 이름. 순서가 후보 번호다.
-        val candidates = (question as? Question.AskDestination)?.let { Phrases.candidateNames(it) }.orEmpty()
+        // 화면에 보인 후보 이름(장소 후보, 일정 겹침의 두 일정). 순서가 후보 번호다.
+        val candidates = Phrases.choiceNames(question)
         // 수락("응")은 1번 후보(주 버튼)를 고르는 것과 같은 결과다.
         val acceptPick = if (candidates.isNotEmpty()) 0 else null
         when (val intent = IntentMatcher.match(text, candidates, acceptPick)) {
@@ -932,18 +972,22 @@ class DriveSession(
     /** 수락. 목적지 묻기는 [pick]번 후보로(주 버튼·"응"은 0번), 출발 제안·늦게 탐은 대상 일정 장소로 길안내한다. */
     private fun accept(state: CardState, out: MutableList<Effect>, pick: Int = 0) {
         val question = state.question
+        if (question is Question.Overlap) {
+            chooseOverlap(state, question, pick, out)
+            return
+        }
         val place = when (question) {
             is Question.Depart -> question.target.place
             is Question.DepartLate -> question.target.place
             is Question.AskDestination -> question.candidates.getOrNull(pick)
-            null -> null
+            is Question.Overlap, null -> null
         }
         // 일정으로 가는 길안내면 그 일정을 기억해 내비 도착 알림으로 도착을 판단한다(여유 많음의 1번 후보는 대상 일정 장소).
         val scheduleId = when (question) {
             is Question.Depart -> question.target.id
             is Question.DepartLate -> question.target.id
             is Question.AskDestination -> (question.options.getOrNull(pick) as? DestinationOption.OfSchedule)?.schedule?.id
-            null -> null
+            is Question.Overlap, null -> null
         }
         card = null
         out += Effect.StopVoice

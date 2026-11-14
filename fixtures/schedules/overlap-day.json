@@ -1,0 +1,31 @@
+{
+  "id": "overlap-day",
+  "name": "일정 겹침 하루(09:20 탑승, 점심과 경기가 이동 시간상 겹침)",
+  "anchor": "2026-11-06T09:20:00+09:00",
+  "schedules": [
+    {
+      "id": "overlap-lunch",
+      "calendarId": "mock-my",
+      "title": "육전집 점심",
+      "startOffsetMinutes": 220,
+      "endOffsetMinutes": 280,
+      "allDay": false,
+      "locationText": "광주 육전집",
+      "place": { "name": "광주 육전집", "lat": 35.1595, "lng": 126.8526 },
+      "memo": null,
+      "attendees": []
+    },
+    {
+      "id": "overlap-game",
+      "calendarId": "mock-my",
+      "title": "KIA 직관",
+      "startOffsetMinutes": 250,
+      "endOffsetMinutes": 430,
+      "allDay": false,
+      "locationText": "광주-기아 챔피언스필드",
+      "place": { "name": "광주-기아 챔피언스필드", "lat": 35.1681, "lng": 126.8888 },
+      "memo": null,
+      "attendees": []
+    }
+  ]
+}

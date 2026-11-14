@@ -71,6 +71,16 @@ object Rules {
     /** 일정 장소가 지금 차 위치에서 이 거리(미터) 안이면 '이미 그곳'이라 대상에서 뺀다(정책서 12장 '이미 그곳 반경', 가안). */
     const val ALREADY_THERE_RADIUS_METERS = 300.0
 
+    /**
+     * 일정 겹침 판단에 쓰는 이동 속도(km/h, 가안). 내비가 일정 A→B의 소요 시간을 주지 않아 A 장소와 B 장소의 직선거리를 이 속도로 나눠 이동 시간으로 본다.
+     * 직선거리 ÷ 시속 30km는 시내 이동 기준이라 장거리(고속도로)에서는 겹침을 실제보다 많이 잡는다. 정책서 12장에 가안으로 추가할 값이다.
+     */
+    const val OVERLAP_SPEED_KMH = 30.0
+
+    /** 직선거리(미터)를 [OVERLAP_SPEED_KMH]로 가는 시간. 일정 겹침 판단에만 쓴다. */
+    fun overlapTravel(distanceMeters: Double): Duration =
+        Duration.ofMillis(Math.round(distanceMeters / (OVERLAP_SPEED_KMH / 3.6) * 1000))
+
     val DEPARTURE_BUFFER: Duration = Duration.ofMinutes(10)
     const val CHATTER_OVER_WORDS = 4
 

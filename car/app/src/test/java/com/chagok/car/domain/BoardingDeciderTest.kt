@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Duration
+import java.time.Instant
 
 class BoardingDeciderTest {
     private val meeting = schedule("m", "10:00", "11:00", memo = "계약서 2부")
@@ -266,5 +267,67 @@ class BoardingDeciderTest {
         // 여유 많음의 후보에서도 뺀다.
         val plenty = card(decide("08:19", favorites = all, here = atHome)).question as Question.AskDestination
         assertEquals(listOf(OFFICE, station.place, library.place).take(3), plenty.candidates)
+    }
+
+    // ---- 일정 겹침(5장·6장) ----
+
+    private val lunchPlace = Place("광주 육전집", LatLng(35.1595, 126.8526))
+
+    private fun at(id: String, title: String, start: Instant, end: Instant, place: Place?) = Schedule(id, title, start, end, place = place)
+
+    @Test fun `A 종료와 이동 시간을 더해도 B 시작보다 늦으면 겹침이고 정확히 같으면 겹침이 아니다`() {
+        val a = at("a", "육전집 점심", at("12:00"), at("13:00"), lunchPlace)
+        val travel = Rules.overlapTravel(lunchPlace.position.distanceTo(stadium.position))
+        // 이동 시간은 시속 30km 직선거리 기준: 약 3.4km면 6~7분이다.
+        assertTrue(travel > Duration.ofMinutes(6) && travel < Duration.ofMinutes(8))
+        val exactlyReachable = at("b", "경기", at("13:00") + travel, at("15:00") + travel, stadium)
+        assertEquals(null, BoardingDecider.findOverlap(listOf(a, exactlyReachable)))
+        val oneMilliTooEarly = exactlyReachable.copy(start = exactlyReachable.start - Duration.ofMillis(1))
+        assertEquals(a to oneMilliTooEarly, BoardingDecider.findOverlap(listOf(a, oneMilliTooEarly)))
+    }
+
+    @Test fun `시간이 겹치는 서로 다른 곳의 일정은 겹침이고 질문은 먼저인 일정과 다음 일정이다`() {
+        val a = at("a", "육전집 점심", at("12:00"), at("13:00"), lunchPlace)
+        val b = at("b", "경기", at("12:30"), at("15:00"), stadium)
+        val q = card(decide("09:00", plan = DayPlan(listOf(b, a)), travel = null)).question
+        assertEquals(Question.Overlap(a, b), q)
+        // 겹침이면 대상 일정은 먼저인 일정이다.
+        assertEquals(a, card(decide("09:00", plan = DayPlan(listOf(b, a)), travel = null)).briefing.target)
+    }
+
+    @Test fun `같은 곳이거나 장소를 모르면 겹침이 아니다`() {
+        val a = at("a", "육전집 점심", at("12:00"), at("13:00"), lunchPlace)
+        val sameSpot = at("b", "같은 곳 약속", at("12:30"), at("14:00"), Place("육전집 옆", northOf(lunchPlace.position, 200.0)))
+        assertEquals(null, BoardingDecider.findOverlap(listOf(a, sameSpot)))
+        val noPlace = at("c", "장소 없음", at("12:30"), at("14:00"), null)
+        assertEquals(null, BoardingDecider.findOverlap(listOf(a, noPlace)))
+        assertEquals(null, BoardingDecider.findOverlap(listOf(a)))
+        assertEquals(null, BoardingDecider.findOverlap(emptyList()))
+    }
+
+    @Test fun `겹침은 대상 일정과 바로 다음 일정만 본다`() {
+        val a = at("a", "육전집 점심", at("12:00"), at("13:00"), lunchPlace)
+        val next = at("b", "여유 있는 일정", at("15:00"), at("16:00"), stadium)
+        val farLater = at("c", "같은 시각 일정", at("12:30"), at("14:00"), Place("서울", LatLng(37.5, 127.0)))
+        // 바로 다음(시작 순)이 15:00 일정이라 겹치지 않는다. 뒤의 일정끼리는 보지 않는다.
+        assertEquals(null, BoardingDecider.findOverlap(listOf(a, next, farLater)))
+    }
+
+    @Test fun `겹침에서 고른 일정은 겹침 판단 없이 대상이고 이미 도착·건너뜀이면 무시한다`() {
+        val a = at("a", "육전집 점심", at("12:00"), at("13:00"), lunchPlace)
+        val b = at("b", "경기", at("12:30"), at("15:00"), stadium)
+        val plan = DayPlan(listOf(a, b))
+        val forcedB = BoardingDecider.decide(at("09:00"), BoardingKind.FIRST, plan, false, null, forcedTarget = b) as BoardingDecision.Card
+        assertEquals(b, forcedB.briefing.target)
+        assertTrue(forcedB.question is Question.Depart)
+        // 고른 일정이 이미 끝났으면 평소 판단(여기서는 다시 겹침)이다.
+        val done = DayPlan(listOf(a, b), mapOf("b" to ScheduleStatus.ARRIVED))
+        val ignored = BoardingDecider.decide(at("09:00"), BoardingKind.FIRST, done, false, null, forcedTarget = b) as BoardingDecision.Card
+        assertEquals(a, ignored.briefing.target)
+    }
+
+    @Test fun `이동 속도는 시속 30km다`() {
+        assertEquals(Duration.ofMinutes(60), Rules.overlapTravel(30_000.0))
+        assertEquals(Duration.ZERO, Rules.overlapTravel(0.0))
     }
 }

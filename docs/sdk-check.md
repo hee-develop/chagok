@@ -85,6 +85,7 @@
 | 위치 도착·집 하차 | 일정 '시작 60분 전 ~ 종료' 창·300m·5분(`Rules.ARRIVAL_WINDOW_LEAD`·`ARRIVAL_RADIUS_METERS`·`LOCATION_MAX_AGE`)과 집 반경 300m(`HOME_RADIUS_METERS`)·30초(`LOCATION_TRUST_AGE`)·정확도 100m(`LOCATION_MAX_ACCURACY_METERS`)가 실제 주차 동선(지하주차장 GPS 오차 포함)에 맞는가. 집을 떠났다 돌아와야 하는 규칙이 실제 귀가에서 오탐·누락을 만드는가(`docs/home-exit.md`) | 미확인 |
 | 다시 묻기 | 질문 카드가 30초 무응답으로 접힌 뒤 실제 주행 → 목적지가 아닌 곳 P단에서 재탑승 한 줄이 한 번 뜨고 말하는가. 사람이 없는 채로 주차장 이동·잠깐 정차(마지막 P단 뒤 10분 안)에서 오탐이 없는가. P단에 머문 시간(10분 타이머)이 아니라 '마지막 P단 뒤 10분' 기준이 실제 주차 동선에 맞는가(`docs/reask.md`) | 미확인 |
 | 이미 그곳·집이면 집 빼기 | 탑승 신호(앱 진입·시동 ON)에 시스템 마지막 위치(`refreshNow`)가 5분 안으로 남아 있어 '일정 장소 300m 안이면 대상에서 뺌'이 실차·에뮬레이터(`adb emu geo fix`)에서 동작하는가. 정차 중인 차는 `minDistance` 50m 때문에 주기 갱신이 오지 않아 위치가 낡을 수 있고(앞이면 첫 측위만 옴), 그러면 이 판정이 건너뛰어지는 것이 예상 결과다. 지하주차장 GPS 오차(300m 반경)가 맞는지(`docs/target-selection.md`) | 미확인 |
+| 일정 겹침 | 겹침 판정(직선거리 ÷ 시속 30km)이 실제 이동(고속도로·시내)에서 오탐·누락을 만드는가, 내비가 일정 A→B 소요 시간을 줄 수 있는지(`requestTrip`은 현재 위치 기준). 카드 문구·버튼 라벨("{일정}으로")이 운전자에게 자연스러운지, "첫 번째"·"두 번째"·일정 이름을 STT가 알아듣는지(`docs/target-selection.md`) | 미확인 |
 | 듣는 중 표시 | 음성을 받는 중임을 화면에 알리는 표시. 프로토타입에 듣는 중 표시와 문구가 없어 만들지 않았다. 카드 머리 파형(VoiceIndicator)은 말하는 동안만 움직인다 | 미확인 |
 
 debug 빌드는 `chagok-debug://signal?trip=<초>&route=ok|fail&listen=off&heard=<들은 말>`로 소요 시간·경로 요청 결과·들은 말을 주입한다(자동 E2E용). 위 항목을 사람이 확인할 때는 `trip=real&route=real&listen=real`로 주입을 풀고 실제 내비·STT를 쓴다.

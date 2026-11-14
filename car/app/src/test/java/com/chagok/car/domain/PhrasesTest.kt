@@ -270,6 +270,35 @@ class PhrasesTest {
         assertNull(Question.AskDestination(AskReason.PLENTY_OF_TIME, meeting, at("12:50")).nextAlternative())
     }
 
+    @Test fun `일정 겹침 문구는 받침에 맞게 와 과를 쓰고 긴 제목은 줄인다`() {
+        val a = sched("a", "KIA 직관", "17:00", place = "챔피언스필드")
+        val b = sched("b", "콩물 픽업", "17:30", place = "콩물집")
+        assertEquals("‘KIA 직관’과 ‘콩물 픽업’이 겹쳐요.", Phrases.overlapVoice(a, b))
+        val c = sched("c", "점심", "12:00", place = "육전집")
+        assertEquals("‘점심’과 ‘KIA 직관’이 겹쳐요.", Phrases.overlapVoice(c, a))
+        val d = sched("d", "저녁 모임", "19:00", place = "식당")
+        val e = sched("e", "병원", "19:30", place = "병원")
+        assertEquals("‘저녁 모임’과 ‘병원’이 겹쳐요.", Phrases.overlapVoice(d, e))
+        val f = sched("f", "친구 만나기", "19:30", place = "카페")
+        val g = sched("g", "회의", "19:00", place = "회사")
+        assertEquals("‘회의’와 ‘친구 만나기’가 겹쳐요.", Phrases.overlapVoice(g, f))
+        val long = sched("l", "아주아주아주아주긴일정제목입니다", "19:00", place = "어딘가")
+        assertTrue(Phrases.overlapVoice(long, f).startsWith("‘아주아주아주아주긴일정…’"))
+    }
+
+    @Test fun `일정 겹침 카드는 제목으로 고르는 이름과 두 줄 타일을 가진다`() {
+        val a = sched("a", "KIA 직관", "17:00", place = "챔피언스필드")
+        val b = sched("b", "콩물 픽업", "17:30", place = "콩물집")
+        val q = Question.Overlap(a, b)
+        val c = card(briefing(Briefing.Level.FULL, a), q, "09:00")
+        assertEquals("어디로 갈까요?", c.sub)
+        assertEquals("KIA 직관으로", c.primary)
+        assertEquals("콩물 픽업으로", c.secondary)
+        assertEquals(listOf("KIA 직관", "콩물 픽업"), Phrases.choiceNames(q))
+        assertEquals(listOf("KIA 직관", "콩물 픽업"), (c.tiles.single() as TileView.Candidates).rows.map { it.name })
+        assertEquals("‘KIA 직관’과 ‘콩물 픽업’이 겹쳐요. 어디로 갈까요?", Phrases.spoken(c))
+    }
+
     @Test fun `장소 모름은 후보 이름이 없다`() {
         val noPlace = sched("c", "치과", "13:00")
         assertEquals(emptyList<String>(), Phrases.candidateNames(Question.AskDestination(AskReason.PLACE_UNKNOWN, noPlace, favorites = listOf(home))))

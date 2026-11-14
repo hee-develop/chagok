@@ -50,6 +50,12 @@ sealed interface Question {
         fun nextAlternative(): AskDestination? = ((only ?: 0) + 1).takeIf { it < all.size }?.let { copy(only = it) }
     }
 
+    /**
+     * 일정 겹침(5장·6장): 이동 시간상 둘 다 갈 수 없는 두 일정. [first]가 먼저인 일정(주 버튼), [second]가 다음 일정(보조 버튼)이다.
+     * 고른 일정으로 출발 제안·길안내를 이어 가고, 고르지 않은 일정은 그대로 둔다(건너뜀은 종료 시각 규칙을 따른다).
+     */
+    data class Overlap(val first: Schedule, val second: Schedule) : Question
+
     /** 출발 제안. arrival은 지금 출발하면 도착할 시각(소요 시간을 알 때만). */
     data class Depart(val target: Schedule, val arrival: Instant? = null) : Question
 
@@ -158,7 +164,7 @@ sealed interface MemoNote {
 
 /**
  * 정책서 5장 '탑승했을 때 판단 순서'. 차량 신호와 SDK 없이 입력만으로 판단한다.
- * MVP 범위 밖인 일정 겹침, 장소 해석(8장), 에너지 체크(9장)는 아직 넣지 않았다.
+ * 장소 해석(8장), 에너지 체크(9장)는 아직 넣지 않았다.
  */
 object BoardingDecider {
     /**
@@ -167,6 +173,7 @@ object BoardingDecider {
      *   모르면 0으로 보고 늦음의 하한만 판단한다(`now - start > LATE_THRESHOLD`면 늦게 탐).
      *   60분 여유 판단(PLENTY_OF_TIME)은 소요 시간을 알 때만 한다.
      * @param favorites 자주 가는 곳(집 → 회사 → 추가한 순서). 일정 없음·여유 많음의 목적지 묻기 후보로 붙인다.
+     * @param forcedTarget 일정 겹침에서 사용자가 고른 일정. 있으면 이 일정을 대상으로 겹침 판단 없이 이어 간다(아직 도착·건너뜀이 아닐 때만).
      * @param here 지금 차 위치(믿을 만한 최근 측위가 있을 때만, 없으면 null). 일정 장소가 [Rules.ALREADY_THERE_RADIUS_METERS] 안이면 대상에서 빼고,
      *   지금 집이면([Rules.HOME_RADIUS_METERS]) 후보에서 집을 뺀다. null이면 두 판정을 건너뛴다.
      */
@@ -178,11 +185,14 @@ object BoardingDecider {
         travelTime: Duration?,
         favorites: List<Favorite> = emptyList(),
         here: LatLng? = null,
+        forcedTarget: Schedule? = null,
     ): BoardingDecision {
         if (kind == BoardingKind.QUICK_STOP) return BoardingDecision.StaySilent
 
         val current = plan?.skipOverdue(now)
-        val target = current?.boardingTarget(now, here)
+        val candidates = current?.boardingCandidates(now, here).orEmpty()
+        val forced = forcedTarget?.let { f -> current?.pending()?.firstOrNull { it.id == f.id } }
+        val target = forced ?: candidates.firstOrNull()
         val briefing = Briefing(
             level = if (kind == BoardingKind.FIRST) Briefing.Level.FULL else Briefing.Level.ONE_LINE,
             target = target,
@@ -192,7 +202,25 @@ object BoardingDecider {
             memo = MemoNote.forBoarding(kind == BoardingKind.FIRST, current, target),
             fromFallback = plan != null && planIsFallback,
         )
-        return BoardingDecision.Card(briefing, question(now, target, travelTime, favorites, current?.allDayWithPlace(now).orEmpty(), here))
+        // 사용자가 겹침에서 고른 일정이면 다시 겹침을 묻지 않는다.
+        val overlap = if (forced == null) findOverlap(candidates) else null
+        return BoardingDecision.Card(briefing, question(now, target, travelTime, favorites, current?.allDayWithPlace(now).orEmpty(), here, overlap))
+    }
+
+    /**
+     * 일정 겹침(정책서 5장 '이동 시간상 둘 다 갈 수 없는 일정'): 대상 일정(먼저인 일정)과 그 바로 다음 일정이 둘 다 장소가 있고,
+     * A 종료 시각 + (A 장소↔B 장소 직선거리 ÷ [Rules.OVERLAP_SPEED_KMH]) > B 시작 시각이면 겹침이다(정확히 같으면 겹침이 아니다).
+     * 두 장소가 [Rules.ARRIVAL_RADIUS_METERS] 안으로 같은 곳이면 옮겨 갈 일이 없어 겹침으로 보지 않는다(같은 경기장의 두 일정 등).
+     * [candidates]는 [DayPlan.boardingCandidates]다(첫째가 대상 일정). 둘째가 장소를 모르면(질문 대상이 아님) 판정하지 않는다.
+     */
+    fun findOverlap(candidates: List<Schedule>): Pair<Schedule, Schedule>? {
+        val a = candidates.getOrNull(0) ?: return null
+        val b = candidates.getOrNull(1) ?: return null
+        val pa = a.place ?: return null
+        val pb = b.place ?: return null
+        val distance = pa.position.distanceTo(pb.position)
+        if (distance <= Rules.ARRIVAL_RADIUS_METERS) return null
+        return if (a.end + Rules.overlapTravel(distance) > b.start) a to b else null
     }
 
     private fun question(
@@ -202,6 +230,7 @@ object BoardingDecider {
         allFavorites: List<Favorite>,
         allDay: List<Schedule>,
         here: LatLng?,
+        overlap: Pair<Schedule, Schedule>?,
     ): Question {
         // 지금 집이면 집은 후보에서 뺀다(8장).
         val favorites = allFavorites.filterNot { it.kind == FavoriteKind.HOME && here != null && here.distanceTo(it.place.position) <= Rules.HOME_RADIUS_METERS }
@@ -209,6 +238,7 @@ object BoardingDecider {
             val (days, favs) = destinationLists(null, allDay, favorites)
             return Question.AskDestination(AskReason.NO_SCHEDULE, favorites = favs, allDay = days)
         }
+        if (overlap != null) return Question.Overlap(overlap.first, overlap.second)
         if (target.place == null) return Question.AskDestination(AskReason.PLACE_UNKNOWN, target)
         // 소요 시간을 모르면 0으로 보고 늦음의 하한만 본다. 여유(60분) 판단은 소요 시간을 알 때만 한다.
         if (travelTime != null) {

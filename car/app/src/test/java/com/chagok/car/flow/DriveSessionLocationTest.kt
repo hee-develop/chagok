@@ -597,7 +597,10 @@ class DriveSessionLocationTest {
     // ---- 내비 도착과 겹침, 다른 카드, 주행·제한 ----
 
     private fun boardAndAccept() {
-        val request = session.handle(Event.Boarded).filterIsInstance<Effect.RequestTravelTime>().single()
+        var boarded = session.handle(Event.Boarded)
+        // 일정 겹침(시간이 겹치는 두 일정이 서로 다른 곳)이면 먼저인 일정(주 버튼)을 고른다. 이 테스트들은 먼저인 일정을 길안내하는 것이 전제다.
+        if (boarded.none { it is Effect.RequestTravelTime }) boarded = session.handle(Event.PrimaryPressed)
+        val request = boarded.filterIsInstance<Effect.RequestTravelTime>().single()
         session.handle(Event.TravelTimeResult(request.requestId, null))
         session.handle(Event.PrimaryPressed)
         session.handle(Event.RouteRequestResult(true))

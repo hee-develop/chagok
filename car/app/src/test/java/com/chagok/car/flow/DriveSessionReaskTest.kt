@@ -262,12 +262,12 @@ class DriveSessionReaskTest {
     @Test
     fun 그_사이_대상_일정이_바뀌면_그_시점의_판단으로_다시_만든_질문을_묻는다() {
         boardAndIgnore()
-        // 폰에서 더 이른 일정이 생겼다: 접힌 질문은 고객 미팅이었지만 지금 대상은 새 일정이다.
-        schedules = listOf(schedule("n", "새 일정", 30, cityHall)) + schedules
+        // 폰에서 더 이른 일정이 생겼다(고객 미팅과 겹치지 않게 짧게): 접힌 질문은 고객 미팅이었지만 지금 대상은 새 일정이다.
+        schedules = listOf(schedule("n", "새 일정", 12, cityHall, lengthMin = 5)) + schedules
         val request = driveAndPark(10).one<Effect.RequestTravelTime>()
         assertEquals(cityHall, request.place)
         val card = session.handle(Event.TravelTimeResult(request.requestId, null)).card()
-        assertEquals("12시 30분 새 일정까지 20분이에요.", card.voice)
+        assertEquals("12시 12분 새 일정까지 2분이에요.", card.voice)
     }
 
     @Test
@@ -364,10 +364,11 @@ class DriveSessionReaskTest {
 
     @Test
     fun 하차_카드가_뜨는_P단에서는_다시_묻지_않고_다음_탑승_판단에서_묻는다() {
-        // 접힌 질문은 고객 미팅(a). 길안내 없이 점심 약속(b) 근처 P단에서 위치로 도착한다(창: 시작 60분 전 ~ 종료).
-        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400), schedule("b", "점심 약속", 180, cityHall))
+        // 접힌 질문은 고객 미팅(a). 그 뒤 폰에서 점심 약속(b)이 들어와 길안내 없이 b 근처 P단에서 위치로 도착한다(창: 시작 60분 전 ~ 종료).
+        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400))
         newSession()
         boardAndIgnore()
+        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400), schedule("b", "점심 약속", 180, cityHall))
         drive()
         clock.now = start + Duration.ofMinutes(130)
         session.handle(Event.LocationChanged(LatLng(cityHall.position.lat + 0.001, cityHall.position.lng)))
@@ -388,7 +389,7 @@ class DriveSessionReaskTest {
 
     @Test
     fun 위치로_도착을_판단하는_동안에는_기다렸다가_도착이_아니면_그_P단에서_묻는다() {
-        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400), schedule("b", "점심 약속", 180, cityHall))
+        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400))
         newSession()
         boardAndIgnore()
         drive()
@@ -404,9 +405,10 @@ class DriveSessionReaskTest {
 
     @Test
     fun 위치_답을_기다리다_도착이_되면_하차_카드가_먼저고_다시_묻지_않는다() {
-        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400), schedule("b", "점심 약속", 180, cityHall))
+        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400))
         newSession()
         boardAndIgnore()
+        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400), schedule("b", "점심 약속", 180, cityHall))
         drive()
         clock.now = start + Duration.ofMinutes(130)
         park()
@@ -418,7 +420,7 @@ class DriveSessionReaskTest {
 
     @Test
     fun 위치_답이_끝내_없으면_타임아웃_뒤_그_P단에서_묻는다() {
-        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400), schedule("b", "점심 약속", 180, cityHall))
+        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400))
         newSession()
         boardAndIgnore()
         drive()

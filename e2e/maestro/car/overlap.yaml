@@ -1,0 +1,74 @@
+# 일정 겹침 E2E(docs/target-selection.md). 서버가 겹침 전용 픽스처(fixtures/schedules/overlap-day.json)로 떠 있어야 한다(scripts/e2e-car.sh가 이 flow에서만 그 픽스처로 다시 띄운다).
+# 장면 시각 09:20 KST. 육전집 점심 13:00~14:00(광주 육전집)과 KIA 직관 13:30~16:30(챔피언스필드)은 이동 시간(직선 약 3.4km ÷ 시속 30km ≈ 7분)을 더하면 둘 다 갈 수 없다.
+# 먼저인 점심이 주 버튼, KIA 직관이 보조 버튼이다. "첫 번째"·"두 번째"·일정 이름으로도 고른다. 신호: now, trip(소요 시간 초), route=ok, listen=off, gear, enter, heard.
+#   첫 번째=%EC%B2%AB%20%EB%B2%88%EC%A7%B8, 두 번째=%EB%91%90%20%EB%B2%88%EC%A7%B8, 아니=%EC%95%84%EB%8B%88
+# 시각 사이 공백은 화면에서 NBSP라 '.'로 받는다. 몇 십 초가 지나면 남은 시간이 1분 줄 수 있어 분 자리는 느슨하게 받는다.
+appId: com.chagok.car
+name: 일정 겹침
+env:
+  SHOT_DIR: e2e/output/car
+---
+- launchApp
+
+# 1. 겹침 카드: 두 일정과 두 버튼, 어느 일정으로 갈지부터 묻는다(소요 시간은 아직 묻지 않는다)
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&enter=true
+- extendedWaitUntil:
+    visible: ".*겹쳐요.*"
+    timeout: 20000
+- assertVisible: ".*육전집 점심.*과.*KIA 직관.*이 겹쳐요.*"
+- assertVisible: "어디로 갈까요?"
+- assertVisible: "겹치는 일정"
+- assertVisible: "육전집 점심으로"
+- assertVisible: "KIA 직관으로"
+- assertVisible: "“첫 번째”, “두 번째”라고 말해도 돼요"
+- takeScreenshot: ${SHOT_DIR}/01-overlap-card
+
+# 2. "두 번째"라고 말하면 같은 카드가 KIA 직관의 출발 제안으로 바뀐다(첫 탑승 인사 틀: 오늘 일정 타일 포함)
+- openLink: chagok-debug://signal?heard=%EB%91%90%20%EB%B2%88%EC%A7%B8
+- extendedWaitUntil:
+    visible: ".*1시.30분 KIA 직관까지 4시간.([0-9]|10)분이에요.*"
+    timeout: 10000
+- assertNotVisible: ".*겹쳐요.*"
+- assertVisible: "응, 출발"
+- assertVisible: "잠깐만"
+- takeScreenshot: ${SHOT_DIR}/02-picked-second-depart
+
+# 3. 수락하면 길안내를 시작한다
+- tapOn: "응, 출발"
+- extendedWaitUntil:
+    visible: "길안내를 시작할게요."
+    timeout: 5000
+- takeScreenshot: ${SHOT_DIR}/03-route-started
+
+# 4. 다시 첫 탑승: 보조 버튼으로 다음 일정을 고른다
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&enter=true
+- extendedWaitUntil:
+    visible: ".*겹쳐요.*"
+    timeout: 20000
+- tapOn: "KIA 직관으로"
+- extendedWaitUntil:
+    visible: ".*1시.30분 KIA 직관까지 4시간.([0-9]|10)분이에요.*"
+    timeout: 10000
+
+# 5. 다시 첫 탑승: "첫 번째"(먼저인 점심)를 고른다
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&enter=true
+- extendedWaitUntil:
+    visible: ".*겹쳐요.*"
+    timeout: 20000
+- openLink: chagok-debug://signal?heard=%EC%B2%AB%20%EB%B2%88%EC%A7%B8
+- extendedWaitUntil:
+    visible: ".*1시 육전집 점심까지 3시간.(39|40)분이에요.*"
+    timeout: 10000
+- assertNotVisible: ".*겹쳐요.*"
+- takeScreenshot: ${SHOT_DIR}/04-picked-first-depart
+
+# 6. 거절("아니")은 접고 길안내하지 않는다
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&enter=true
+- extendedWaitUntil:
+    visible: ".*겹쳐요.*"
+    timeout: 20000
+- openLink: chagok-debug://signal?heard=%EC%95%84%EB%8B%88
+- extendedWaitUntil:
+    notVisible: ".*겹쳐요.*"
+    timeout: 5000
+- assertNotVisible: "길안내를 시작할게요."

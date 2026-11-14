@@ -63,6 +63,7 @@ object Phrases {
     const val HINT_SAY_YES = "“응”이라고 말해도 돼요"
     const val HINT_SAY_JUST_GO = "“그냥 갈게”라고 말해도 돼요"
     const val HINT_AUTO_FOLD = "출발하면 자동으로 접혀요"
+    const val HINT_SAY_PICK = "“첫 번째”, “두 번째”라고 말해도 돼요"
 
     const val ASK_DESTINATION = "어디로 갈까요?"
 
@@ -72,6 +73,9 @@ object Phrases {
     // 목적지 묻기 후보 타일 머리. 일정 없음은 자주 가는 곳만, 여유 많음은 일정 장소와 자주 가는 곳을 함께 보인다.
     const val FAVORITES_LABEL = "자주 가는 곳"
     const val CANDIDATES_LABEL = "갈 곳"
+
+    /** 일정 겹침 카드의 타일 머리 */
+    const val OVERLAP_LABEL = "겹치는 일정"
 
     /** 장소 있는 종일 일정이 후보로 올 때 후보 줄의 둘째 글 앞머리: "종일 광주 직관" */
     const val ALL_DAY = "종일"
@@ -138,6 +142,11 @@ object Phrases {
     /** "{말}은/는": 받침이 있으면 "은", 없으면 "는". */
     fun eunNeun(word: String): String = word + if (hasBatchim(word)) "은" else "는"
 
+    /** "{말}와/과": 받침이 있으면 "과", 없으면 "와". */
+    fun waGwa(word: String): String = word + waGwaJosa(word)
+
+    private fun waGwaJosa(word: String) = if (hasBatchim(word)) "과" else "와"
+
     private fun iGaJosa(word: String) = if (hasBatchim(word)) "이" else "가"
 
     /** "{장소}로/으로": 받침이 있으면(ㄹ 제외) "으로". */
@@ -167,6 +176,19 @@ object Phrases {
     // ---- 장면별 대사 ----
 
     fun askPlace(title: String) = "'$title' 어디로 가면 될까요?"
+
+    /**
+     * 일정 겹침 큰 문구(정책서 6장 '일정 겹침'): "‘KIA 직관’과 ‘콩물 픽업’이 겹쳐요." 이어서 [ASK_DESTINATION]을 묻는다.
+     * 큰 문구가 두 줄 안에 들게 제목은 [shortTitle]로 줄인다.
+     */
+    fun overlapVoice(first: Schedule, second: Schedule): String {
+        val a = shortTitle(first.title)
+        val b = shortTitle(second.title)
+        return "‘$a’${waGwaJosa(a)} ‘$b’${iGaJosa(b)} 겹쳐요."
+    }
+
+    /** 일정 겹침 버튼 라벨: 말할 수 있는 이름 "{제목}으로". */
+    private fun overlapPick(schedule: Schedule) = ro(shortTitle(schedule.title))
 
     /** 탑승 인사 둘째 문장 "{시각} {일정}까지 {남은 시간}이에요." */
     fun untilStart(target: Schedule, now: Instant, zone: ZoneId): String =
@@ -255,6 +277,15 @@ object Phrases {
      */
     fun candidateNames(question: Question.AskDestination): List<String> = question.options.map(::optionName)
 
+    /**
+     * 말로 고를 수 있는 이름: 목적지 묻기는 [candidateNames], 일정 겹침은 두 일정의 제목(순서가 "첫 번째"·"두 번째"). 고를 것이 없는 질문은 빈 목록이다.
+     */
+    fun choiceNames(question: Question?): List<String> = when (question) {
+        is Question.AskDestination -> candidateNames(question)
+        is Question.Overlap -> listOf(question.first.title, question.second.title)
+        else -> emptyList()
+    }
+
     /** 후보를 부르는 이름: 대상 일정은 장소 이름, 자주 가는 곳은 [favoriteName]. */
     private fun optionName(option: DestinationOption): String = when (option) {
         is DestinationOption.OfSchedule -> option.place.name
@@ -310,8 +341,19 @@ object Phrases {
                 secondary = HOLD,
             )
             is Question.AskDestination -> askDestinationCard(base, q, zone)
+            is Question.Overlap -> base.copy(
+                voice = overlapVoice(q.first, q.second),
+                sub = ASK_DESTINATION,
+                tiles = listOf(TileView.Candidates(OVERLAP_LABEL, listOf(overlapRow(q.first, zone), overlapRow(q.second, zone)))),
+                primary = overlapPick(q.first),
+                secondary = overlapPick(q.second),
+                hints = listOf(HINT_SAY_PICK, HINT_AUTO_FOLD),
+            )
         }
     }
+
+    /** 겹치는 일정 한 줄: 제목, 시각과 장소 이름("13:30 광주 육전집"). */
+    private fun overlapRow(schedule: Schedule, zone: ZoneId) = CandidateRow(schedule.title, "${time(schedule, zone)} ${schedule.place?.name.orEmpty()}".trim())
 
     /**
      * 목적지 묻기 카드. 일정 없음은 자주 가는 곳, 여유 많음은 일정 장소와 자주 가는 곳을 후보로 보인다(1번 후보가 주 버튼, 보조는 "그냥 갈게").
