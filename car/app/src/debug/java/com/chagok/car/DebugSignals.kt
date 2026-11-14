@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import com.chagok.car.domain.Gear
 import com.chagok.car.domain.Ignition
+import com.chagok.car.domain.LatLng
 import com.chagok.car.flow.Event
 import com.chagok.car.runtime.SessionHost
 import java.time.Instant
@@ -19,6 +20,8 @@ import java.time.Instant
  * - `gear`: P·R·N·D
  * - `restricted`: true·false (주행 제한 알림)
  * - `enter`: true면 앱 진입(탑승 규칙 적용), `board`: true면 규칙 없이 탑승
+ * - `loc`: 현재 위치 `위도,경도`(내비가 답한 것처럼). 기어보다 뒤에 넣어 `gear=P&loc=…`가 P단 도착 판단의 답이 되게 한다
+ * - `arrived`: true면 내비 목적지 도착 알림(차곡이 길안내를 시작한 일정이 도착이 된다)
  * - `heard`: 들은 말(STT 결과). 빈 값이면 아무것도 못 들은 것(가장 마지막에 처리). 세션이 처리한 뒤 디버그 줄([DebugRow])에 "들은 말 처리: <말>"을 보인다
  */
 object DebugSignals {
@@ -30,6 +33,8 @@ object DebugSignals {
         value("ignition")?.let { host.post(Event.IgnitionChanged(Ignition.valueOf(it.uppercase()))) }
         value("gear")?.let { host.post(Event.GearChanged(gearOf(it))) }
         value("restricted")?.let { host.post(Event.RestrictionChanged(it.toBoolean())) }
+        value("loc")?.let { host.post(Event.LocationChanged(locOf(it))) }
+        if (value("arrived").toBoolean()) host.post(Event.DestinationArrived)
         if (value("enter").toBoolean()) host.post(Event.AppEntered)
         if (value("board").toBoolean()) host.post(Event.Boarded)
         value("heard")?.let {
@@ -37,6 +42,11 @@ object DebugSignals {
             // 세션 이벤트는 같은 메인 큐에 먼저 들어갔으므로 이 알림은 처리된 뒤에 실행된다.
             Handler(Looper.getMainLooper()).post { DebugInjection.heardProcessed?.invoke(it) }
         }
+    }
+
+    private fun locOf(text: String): LatLng {
+        val (lat, lng) = text.split(',').map { it.trim().toDouble() }.also { require(it.size == 2) { "loc은 위도,경도여야 합니다: $text" } }
+        return LatLng(lat, lng)
     }
 
     private fun gearOf(name: String) = when (name.uppercase()) {

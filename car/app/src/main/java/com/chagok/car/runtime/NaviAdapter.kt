@@ -2,6 +2,8 @@ package com.chagok.car.runtime
 
 import ai.pleos.playground.navi.constants.NaviErrorCode
 import ai.pleos.playground.navi.constants.RouteOption
+import ai.pleos.playground.navi.data.CurrentLocationInfo
+import ai.pleos.playground.navi.data.DestinationArrivedInfo
 import ai.pleos.playground.navi.data.RouteInfo
 import ai.pleos.playground.navi.data.TripInfo
 import ai.pleos.playground.navi.data.TripRequest
@@ -11,6 +13,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.chagok.car.domain.LatLng
 import com.chagok.car.domain.Place
 import com.chagok.car.flow.Event
 import java.time.Duration
@@ -42,6 +45,19 @@ class NaviAdapter(context: Context, private val sink: (Event) -> Unit) : Navigat
             if (naviHelper !== helper) return
             Log.w(TAG, "내비 오류 $errorCode")
             resolveTrip(null)
+        }
+
+        /** [requestLocation]의 답. P단 도착 판단에 쓴다. */
+        override fun onCurrentLocationInfo(info: CurrentLocationInfo) {
+            if (naviHelper !== helper) return
+            sink(Event.LocationChanged(LatLng(info.latitude, info.longitude)))
+        }
+
+        /** 내비 목적지 도착. 세션은 차곡이 길안내를 시작한 일정이 있을 때만 도착으로 본다. */
+        override fun onDestinationArrived(info: DestinationArrivedInfo) {
+            if (naviHelper !== helper) return
+            Log.i(TAG, "onDestinationArrived")
+            sink(Event.DestinationArrived)
         }
     }
 
@@ -125,6 +141,19 @@ class NaviAdapter(context: Context, private val sink: (Event) -> Unit) : Navigat
      * 요청을 내비에 보냈으면 true. 내비에 연결되기 전(시작·재시작 직후)이면 보내지 않고 false를 돌려 실패로 안내한다.
      * 경로가 실제로 시작됐는지는 내비 이벤트로 오며 이 앱은 요청 전달까지만 알린다.
      */
+    override fun requestLocation() {
+        val helper = synchronized(lock) {
+            val current = naviHelper ?: return
+            if (!tracker.ready) return
+            current
+        }
+        try {
+            helper.getCurrentLocationInfo()
+        } catch (e: Exception) {
+            Log.w(TAG, "getCurrentLocationInfo 실패", e)
+        }
+    }
+
     override fun startRoute(place: Place): Boolean {
         val helper = synchronized(lock) {
             val current = naviHelper ?: return false

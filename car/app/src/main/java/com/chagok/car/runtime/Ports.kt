@@ -22,6 +22,9 @@ interface Navigator {
     fun stop()
     fun requestTravelTime(requestId: Int, place: Place)
     fun startRoute(place: Place): Boolean
+
+    /** 현재 위치를 한 번 묻는다(P단 도착 판단). 답은 세션 이벤트(LocationChanged)로 알리고, 내비에 연결 전이면 묻지 않는다. */
+    fun requestLocation()
 }
 
 /**

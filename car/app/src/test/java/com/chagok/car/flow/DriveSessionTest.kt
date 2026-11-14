@@ -409,11 +409,16 @@ class DriveSessionTest {
     }
 
     @Test
-    fun 같은_날_두_번째_탑승은_아무_반응이_없다() {
+    fun 같은_날_두_번째_탑승은_대상_일정_한_줄로_다시_묻는다() {
         val timer = boardWithCard().one<Effect.ScheduleCardTimeout>()
         session.handle(Event.CardTimedOut(timer.timerId))
         clock.now += Duration.ofMinutes(1)
-        assertEquals(emptyList<Effect>(), session.handle(Event.Boarded))
+        val card = boardWithCard().one<Effect.ShowCard>().card
+        // 5장 재탑승: 대상 일정 한 줄. 종일 인사·오늘 일정 타일·캘린더 메모는 첫 탑승에만 쓴다.
+        assertEquals("12시 40분 고객 미팅까지 39분이에요.", card.voice)
+        assertEquals("출발할까요?", card.sub)
+        assertTrue(card.tiles.isEmpty())
+        assertEquals("응, 출발", card.primary)
     }
 
     @Test
@@ -605,7 +610,7 @@ class DriveSessionTest {
     }
 
     @Test
-    fun 주행하고_P단에_넣은_뒤_다시_들어와도_두_번째_탑승은_아무_반응이_없다() {
+    fun 주행하고_P단에_넣은_뒤_다시_들어오면_잠깐_정차는_침묵하고_10분이_지나면_재탑승으로_묻는다() {
         val request = session.handle(Event.AppEntered).one<Effect.RequestTravelTime>()
         val timer = session.handle(Event.TravelTimeResult(request.requestId, null)).one<Effect.ScheduleCardTimeout>()
         session.handle(Event.CardTimedOut(timer.timerId))
@@ -614,8 +619,9 @@ class DriveSessionTest {
         // 10분이 안 지났으면 잠깐 정차
         clock.now += Duration.ofMinutes(3)
         assertEquals(emptyList<Effect>(), session.handle(Event.AppEntered))
+        // 10분이 지나면 재탑승: 대상 일정을 다시 본다(한 줄 카드).
         clock.now += Duration.ofMinutes(10)
-        assertEquals(emptyList<Effect>(), session.handle(Event.AppEntered))
+        assertEquals(gangnam, session.handle(Event.AppEntered).one<Effect.RequestTravelTime>().place)
     }
 
     @Test
@@ -681,10 +687,10 @@ class DriveSessionTest {
     }
 
     @Test
-    fun 같은_날_시동을_다시_켜는_두_번째_탑승은_아무_반응이_없다() {
+    fun 같은_날_시동을_다시_켜는_두_번째_탑승은_대상_일정을_다시_본다() {
         newSession(Snapshot(BoardingLog(lastBoardedOn = day), emptyMap(), day))
         session.handle(Event.IgnitionChanged(Ignition.OFF))
-        assertTrue(session.handle(Event.IgnitionChanged(Ignition.ON)).none { it is Effect.RequestTravelTime || it is Effect.ShowCard })
+        assertEquals(gangnam, session.handle(Event.IgnitionChanged(Ignition.ON)).one<Effect.RequestTravelTime>().place)
     }
 
     // ---- Suspend ----
@@ -844,5 +850,92 @@ class DriveSessionTest {
         assertEquals(listOf("서울시청", "집"), candidateNames(out))
         assertEquals("서울시청으로", out.one<Effect.ShowCard>().card.primary)
         assertEquals(home.place, session.handle(Event.CandidatePressed(1)).one<Effect.StartRoute>().place)
+    }
+
+    // ---- 도착 → 다음 일정 ----
+
+    /** 대상 일정(고객 미팅, 강남역) 300m 안·밖의 위치. 위도 0.001도는 약 111m다. */
+    private val nearGangnam = LatLng(gangnam.position.lat + 0.002, gangnam.position.lng)
+    private val farFromGangnam = LatLng(gangnam.position.lat + 0.003, gangnam.position.lng)
+
+    private fun statusOf(out: List<Effect>, id: String) = out.one<Effect.Save>().snapshot.statuses[id]
+
+    /** 출발 제안을 받아 길안내를 시작하고 출발한다. */
+    private fun departAndDrive() {
+        boardWithCard()
+        assertEquals(gangnam, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place)
+        session.handle(Event.RouteRequestResult(true))
+        session.handle(Event.GearChanged(Gear.DRIVE))
+    }
+
+    @Test
+    fun 길안내한_일정에_내비가_도착을_알리면_도착이고_다시_타면_다음_일정을_한_줄로_묻는다() {
+        departAndDrive()
+        clock.now += Duration.ofMinutes(30)
+        val arrived = session.handle(Event.DestinationArrived)
+        assertEquals(ScheduleStatus.ARRIVED, statusOf(arrived, "a"))
+        // 도착 순간에는 말하지 않는다.
+        assertTrue(arrived.none { it is Effect.Speak || it is Effect.ShowCard })
+        session.handle(Event.GearChanged(Gear.PARK))
+
+        // 잠깐 정차(10분)가 지나 다시 타면 다음 일정(점심 약속)을 한 줄로 묻는다.
+        clock.now += Duration.ofMinutes(20)
+        val request = session.handle(Event.Boarded).one<Effect.RequestTravelTime>()
+        assertEquals(cityHall, request.place)
+        val card = session.handle(Event.TravelTimeResult(request.requestId, null)).one<Effect.ShowCard>().card
+        assertEquals("3시 점심 약속까지 2시간 10분이에요.", card.voice)
+        assertEquals("출발할까요?", card.sub)
+        assertTrue(card.tiles.isEmpty())
+    }
+
+    @Test
+    fun 다시_탔어도_잠깐_정차면_말하지_않는다() {
+        departAndDrive()
+        session.handle(Event.DestinationArrived)
+        session.handle(Event.GearChanged(Gear.PARK))
+        clock.now += Duration.ofMinutes(5)
+        assertEquals(emptyList<Effect>(), session.handle(Event.Boarded))
+    }
+
+    @Test
+    fun 주행_중_받은_위치가_대상_일정_300m_안이면_P단에_넣을_때_도착이다() {
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        session.handle(Event.LocationChanged(nearGangnam))
+        val parked = session.handle(Event.GearChanged(Gear.PARK))
+        assertEquals(ScheduleStatus.ARRIVED, statusOf(parked, "a"))
+        assertTrue(parked.none { it is Effect.RequestLocation })
+    }
+
+    @Test
+    fun P단에_넣으면_위치를_묻고_답이_300m_안이면_도착_밖이면_그대로다() {
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        assertTrue(session.handle(Event.GearChanged(Gear.PARK)).has<Effect.RequestLocation>())
+        assertTrue(session.handle(Event.LocationChanged(farFromGangnam)).none { it is Effect.Save })
+
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        assertTrue(session.handle(Event.GearChanged(Gear.PARK)).has<Effect.RequestLocation>())
+        assertEquals(ScheduleStatus.ARRIVED, statusOf(session.handle(Event.LocationChanged(nearGangnam)), "a"))
+    }
+
+    @Test
+    fun 주행을_시작하면_전에_받은_위치는_도착_판단에_쓰지_않는다() {
+        session.handle(Event.LocationChanged(nearGangnam))
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        val parked = session.handle(Event.GearChanged(Gear.PARK))
+        assertTrue(parked.has<Effect.RequestLocation>())
+        assertTrue(parked.none { it is Effect.Save && it.snapshot.statuses.isNotEmpty() })
+    }
+
+    @Test
+    fun 차곡이_길안내하지_않은_곳의_도착_알림은_무시한다() {
+        boardWithCard()
+        assertTrue(session.handle(Event.DestinationArrived).none { it is Effect.Save })
+        // 자주 가는 곳으로 간 길안내의 도착도 일정 도착이 아니다.
+        schedules = emptyList()
+        favorites = listOf(home)
+        newSession()
+        session.handle(Event.Boarded)
+        assertEquals(home.place, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place)
+        assertTrue(session.handle(Event.DestinationArrived).none { it is Effect.Save })
     }
 }

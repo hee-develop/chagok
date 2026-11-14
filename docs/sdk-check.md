@@ -78,6 +78,8 @@
 | 듣기 중 오디오 포커스 | 말할 때 잡은 포커스(USAGE_ASSISTANT, MAY_DUCK)를 듣는 동안에도 쥐는가(듣기 종료·결과 전달·중단 때 반납). 듣는 중 다른 앱이 가져가면(LOSS·LOSS_TRANSIENT) 듣기가 즉시 멈추고 결과를 알리지 않는가 | 미확인 |
 | 주행 중 Suspend | 시동 OFF 등 Suspend 때 STT가 중단되는가 | 미확인 |
 | `requestRoute` 실패 | 내비에 연결된 뒤 요청이 예외 없이 전달되는가, 연결 전(시작·재시작 직후)에는 앱이 요청하지 않고 실패로 안내하는가 | 미확인 |
+| 도착 알림 | 차곡이 시작한 길안내로 목적지에 닿으면 `onDestinationArrived`가 오는가(안내 취소 `onRouteCancelled`와 구분되는가). 오면 그 일정이 도착이 되어 다시 탈 때 다음 일정을 묻는가(`docs/arrival.md`) | 미확인 |
+| 현재 위치 답 | P단에 넣을 때 `getCurrentLocationInfo()`에 `onCurrentLocationInfo`로 위도·경도가 오는가. 길안내 중이 아닐 때도 오는가 | 미확인 |
 | 듣는 중 표시 | 음성을 받는 중임을 화면에 알리는 표시. 프로토타입에 듣는 중 표시와 문구가 없어 만들지 않았다. 카드 머리 파형(VoiceIndicator)은 말하는 동안만 움직인다 | 미확인 |
 
 debug 빌드는 `chagok-debug://signal?trip=<초>&route=ok|fail&listen=off&heard=<들은 말>`로 소요 시간·경로 요청 결과·들은 말을 주입한다(자동 E2E용). 위 항목을 사람이 확인할 때는 `trip=real&route=real&listen=real`로 주입을 풀고 실제 내비·STT를 쓴다.

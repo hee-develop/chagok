@@ -1,0 +1,57 @@
+# 도착 → 다음 일정 E2E(PT 장면 4). 서버가 떠 있고 debug 앱이 설치된 에뮬레이터에서 돈다(scripts/e2e-car.sh).
+# 도착은 두 길로 본다: 내비 목적지 도착 알림(디버그 [도착] 버튼)과, P단에 넣은 곳이 대상 일정 장소에서 300m 안(loc=위도,경도 주입).
+# 도착 순간에는 말하지 않고, 잠깐 정차(10분)가 지나 다시 타면 다음 일정을 한 줄로 묻는다(5장 재탑승).
+#   now: 데모 시계·일정 기준 시각, trip: 소요 시간(초, none이면 모름), route=ok: 길안내 요청 성공, listen=off: 실제 STT를 열지 않음
+# 시각 사이 공백은 화면에서 NBSP라 '.'로 받는다.
+appId: com.chagok.car
+name: 도착 다음 일정
+env:
+  SHOT_DIR: e2e/output/car
+---
+- launchApp
+
+# 1. 09:20 첫 탑승: 육전집 점심(13:00) 출발 제안 → 수락하면 길안내
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&enter=true
+- extendedWaitUntil:
+    visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
+    timeout: 20000
+- tapOn: "응, 출발"
+- extendedWaitUntil:
+    visible: "길안내를 시작할게요."
+    timeout: 5000
+
+# 2. 출발해 육전집에 도착: 내비 도착 알림([도착] 버튼) 뒤 P단. 도착 순간에는 카드도 말도 없다.
+- openLink: chagok-debug://signal?gear=D
+- tapOn: "도착"
+- openLink: chagok-debug://signal?gear=P
+- assertNotVisible: ".*육전집 점심까지.*"
+- takeScreenshot: ${SHOT_DIR}/01-arrived-silent
+
+# 3. 점심 뒤 다시 탐(20분 지남, 잠깐 정차 아님): 다음 일정 KIA 직관(17:00)을 한 줄로 묻는다. 오늘 일정 타일·종일 인사 없음
+- tapOn: "시간 +10분"
+- tapOn: "시간 +10분"
+- openLink: chagok-debug://signal?trip=none&enter=true
+- extendedWaitUntil:
+    visible: ".*5시 KIA 직관까지 7시간.20분이에요.*"
+    timeout: 20000
+- assertVisible: "출발할까요?"
+- assertVisible: "응, 출발"
+- assertNotVisible: "오늘 일정"
+- assertNotVisible: ".*광주 직관 날이에요.*"
+- takeScreenshot: ${SHOT_DIR}/02-next-one-line
+
+# 4. KIA 직관으로 출발해 경기장(챔피언스필드 35.1681, 126.8888) 약 100m 앞에서 P단 → 위치로 도착
+- tapOn: "응, 출발"
+- extendedWaitUntil:
+    visible: "길안내를 시작할게요."
+    timeout: 5000
+- openLink: chagok-debug://signal?gear=D
+- openLink: chagok-debug://signal?gear=P&loc=35.1690,126.8888
+- tapOn: "시간 +10분"
+- tapOn: "시간 +10분"
+- openLink: chagok-debug://signal?enter=true
+- extendedWaitUntil:
+    visible: ".*9시 콩물 픽업까지.*"
+    timeout: 20000
+- assertNotVisible: ".*KIA 직관까지.*"
+- takeScreenshot: ${SHOT_DIR}/03-next-after-location-arrival

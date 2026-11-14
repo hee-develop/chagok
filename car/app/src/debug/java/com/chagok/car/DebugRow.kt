@@ -15,7 +15,7 @@ import java.time.Duration
  * 디버그 빌드 전용 버튼 줄(탑승·주행·정차·시간·초기화). 릴리스 소스셋에는 null을 돌려주는 같은 이름의 객체가 있다.
  * 창 아래쪽 오른편에 가로로 놓고 글자는 작게 쓴다(카드 아래 빈 자리).
  * [탑승]은 앱 진입 규칙을 건너뛰고 바로 탑승으로 처리한다.
- * [주행]·[정차]는 기어 D·P 이벤트를 넣는다.
+ * [주행]·[정차]는 기어 D·P 이벤트를 넣는다. [도착]은 내비 목적지 도착 알림을 넣는다(차곡이 길안내를 시작한 일정이 도착이 된다).
  */
 object DebugRow {
     fun create(activity: Activity, host: SessionHost): View = LinearLayout(activity).apply {
@@ -24,6 +24,7 @@ object DebugRow {
         addView(button(activity, "탑승") { host.post(Event.Boarded) })
         addView(button(activity, "주행") { host.post(Event.GearChanged(Gear.DRIVE)) })
         addView(button(activity, "정차") { host.post(Event.GearChanged(Gear.PARK)) })
+        addView(button(activity, "도착") { host.post(Event.DestinationArrived) })
         addView(button(activity, "시간 +10분") { host.advanceClock(Duration.ofMinutes(10)) })
         addView(button(activity, "데모 초기화") { host.resetDemo() })
         val heard = TextView(activity).apply { textSize = 12f }

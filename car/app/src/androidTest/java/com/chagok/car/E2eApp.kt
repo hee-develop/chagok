@@ -39,6 +39,13 @@ class FakeNavigator(private val post: (Event) -> Unit) : Navigator {
         routes += place
         return routeOk
     }
+
+    /** P단 도착 판단의 위치 답. null이면 답하지 않는다(내비가 연결되지 않은 것처럼). */
+    @Volatile var location: com.chagok.car.domain.LatLng? = null
+
+    override fun requestLocation() {
+        location?.let { post(Event.LocationChanged(it)) }
+    }
 }
 
 /**
