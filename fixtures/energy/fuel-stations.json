@@ -1,0 +1,15 @@
+{
+  "fictional": true,
+  "note": "시연용 가상 주유소. 가격(원/L)·좌표는 실제와 무관하다. 광주 시내와 광주→서울 직선 근처에 둔다.",
+  "stations": [
+    { "id": "EX-FS-001", "name": "예시 상무 주유소", "brand": "SKE", "lat": 35.16, "lng": 126.86, "prices": { "gasoline": 1689, "diesel": 1559 } },
+    { "id": "EX-FS-002", "name": "예시 서구 알뜰주유소", "brand": "RTE", "lat": 35.165, "lng": 126.87, "prices": { "gasoline": 1639, "diesel": 1519 } },
+    { "id": "EX-FS-003", "name": "예시 북구 주유소", "brand": "GSC", "lat": 35.19, "lng": 126.875, "prices": { "gasoline": 1659, "diesel": 1539 } },
+    { "id": "EX-FS-004", "name": "예시 북구 외곽 알뜰주유소", "brand": "NHO", "lat": 35.196, "lng": 126.875, "prices": { "gasoline": 1599, "diesel": 1489 } },
+    { "id": "EX-FS-005", "name": "예시 정읍 주유소", "brand": "HDO", "lat": 35.57, "lng": 126.87, "prices": { "gasoline": 1679, "diesel": 1549 } },
+    { "id": "EX-FS-006", "name": "예시 익산 주유소", "brand": "SOL", "lat": 35.95, "lng": 126.93, "prices": { "gasoline": 1649, "diesel": 1519 } },
+    { "id": "EX-FS-007", "name": "예시 천안 주유소", "brand": "SKE", "lat": 36.78, "lng": 126.99, "prices": { "gasoline": 1699, "diesel": 1579 } },
+    { "id": "EX-FS-008", "name": "예시 안성 주유소", "brand": "GSC", "lat": 37.0, "lng": 127.01, "prices": { "gasoline": 1719, "diesel": 1599 } },
+    { "id": "EX-FS-009", "name": "예시 수원 알뜰주유소", "brand": "RTE", "lat": 37.27, "lng": 127.04, "prices": { "gasoline": 1629, "diesel": 1499 } }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "fictional": true,
+  "note": "시연용 가상 충전소. 이름·좌표·상태는 실제와 무관하다. speed는 slow(완속)·fast(급속), state는 available·charging·unavailable·unknown.",
+  "stations": [
+    {
+      "stationId": "EX-GJ-001", "name": "예시 챔필 주차장 충전소", "address": "가상시 가상구 예시로 12", "lat": 35.1692, "lng": 126.887,
+      "operator": "예시충전", "parkingFree": true,
+      "chargers": [
+        { "chargerId": "01", "speed": "slow", "state": "available", "powerKw": 7 },
+        { "chargerId": "02", "speed": "slow", "state": "available", "powerKw": 7 },
+        { "chargerId": "03", "speed": "slow", "state": "charging", "powerKw": 7 }
+      ]
+    },
+    {
+      "stationId": "EX-GJ-002", "name": "예시 공영주차장 충전소", "address": "가상시 가상구 예시로 40", "lat": 35.17, "lng": 126.8905,
+      "operator": "예시충전", "parkingFree": false,
+      "chargers": [
+        { "chargerId": "01", "speed": "slow", "state": "charging", "powerKw": 7 },
+        { "chargerId": "02", "speed": "slow", "state": "charging", "powerKw": 7 }
+      ]
+    },
+    {
+      "stationId": "EX-GJ-003", "name": "예시 챔필 건너편 아파트 충전소", "address": "가상시 가상구 예시로 88", "lat": 35.1725, "lng": 126.8955,
+      "operator": "예시충전", "parkingFree": true,
+      "chargers": [{ "chargerId": "01", "speed": "slow", "state": "available", "powerKw": 7 }]
+    },
+    {
+      "stationId": "EX-GJ-004", "name": "예시 챔필 서문 충전소", "address": "가상시 가상구 예시로 3", "lat": 35.1678, "lng": 126.8845,
+      "operator": "예시충전", "parkingFree": null,
+      "chargers": [{ "chargerId": "01", "speed": "slow", "state": "available", "powerKw": 11 }]
+    },
+    {
+      "stationId": "EX-GJ-005", "name": "예시 상무 충전소", "address": "가상시 가상구 샘플로 9", "lat": 35.16, "lng": 126.8531,
+      "operator": "예시충전", "parkingFree": true,
+      "chargers": [{ "chargerId": "01", "speed": "slow", "state": "available", "powerKw": 7 }]
+    },
+    {
+      "stationId": "EX-GJ-006", "name": "예시 체육관 앞 충전소", "address": "가상시 가상구 샘플로 21", "lat": 35.153, "lng": 126.8486,
+      "operator": "예시충전", "parkingFree": true,
+      "chargers": [
+        { "chargerId": "01", "speed": "slow", "state": "charging", "powerKw": 7 },
+        { "chargerId": "02", "speed": "slow", "state": "charging", "powerKw": 7 },
+        { "chargerId": "03", "speed": "slow", "state": "unavailable", "powerKw": 7 }
+      ]
+    },
+    {
+      "stationId": "EX-GJ-007", "name": "예시 광주 급속 충전소", "address": "가상시 가상구 예시대로 1", "lat": 35.15, "lng": 126.85,
+      "operator": "예시충전", "parkingFree": true,
+      "chargers": [{ "chargerId": "01", "speed": "fast", "state": "available", "powerKw": 100 }]
+    },
+    {
+      "stationId": "EX-RS-001", "name": "예시 백양 휴게소 급속 충전소", "address": "가상도 가상군 예시고속도로 가상휴게소 1", "lat": 35.4005, "lng": 126.8665,
+      "operator": "예시충전", "parkingFree": true,
+      "chargers": [
+        { "chargerId": "01", "speed": "fast", "state": "available", "powerKw": 100 },
+        { "chargerId": "02", "speed": "fast", "state": "available", "powerKw": 100 },
+        { "chargerId": "03", "speed": "fast", "state": "charging", "powerKw": 100 }
+      ]
+    },
+    {
+      "stationId": "EX-RS-002", "name": "예시 정읍 휴게소 급속 충전소", "address": "가상도 가상군 예시고속도로 가상휴게소 2", "lat": 35.5705, "lng": 126.8755,
+      "operator": "예시충전", "parkingFree": true,
+      "chargers": [
+        { "chargerId": "01", "speed": "fast", "state": "charging", "powerKw": 200 },
+        { "chargerId": "02", "speed": "fast", "state": "charging", "powerKw": 200 }
+      ]
+    },
+    {
+      "stationId": "EX-RS-003", "name": "예시 익산 휴게소 급속 충전소", "address": "가상도 가상군 예시고속도로 가상휴게소 3", "lat": 35.9505, "lng": 126.9305,
+      "operator": "예시충전", "parkingFree": true,
+      "chargers": [
+        { "chargerId": "01", "speed": "fast", "state": "available", "powerKw": 100 },
+        { "chargerId": "02", "speed": "fast", "state": "unavailable", "powerKw": 100 }
+      ]
+    },
+    {
+      "stationId": "EX-RS-004", "name": "예시 논산 휴게소 급속 충전소", "address": "가상도 가상군 예시고속도로 가상휴게소 4", "lat": 36.2005, "lng": 127.0205,
+      "operator": "예시충전", "parkingFree": true,
+      "chargers": [{ "chargerId": "01", "speed": "fast", "state": "available", "powerKw": 100 }]
+    },
+    {
+      "stationId": "EX-RS-005", "name": "예시 천안 휴게소 급속 충전소", "address": "가상도 가상군 예시고속도로 가상휴게소 5", "lat": 36.7805, "lng": 127.0005,
+      "operator": "예시충전", "parkingFree": true,
+      "chargers": [
+        { "chargerId": "01", "speed": "fast", "state": "unavailable", "powerKw": 100 },
+        { "chargerId": "02", "speed": "fast", "state": "unavailable", "powerKw": 100 },
+        { "chargerId": "03", "speed": "slow", "state": "available", "powerKw": 7 }
+      ]
+    },
+    {
+      "stationId": "EX-RS-006", "name": "예시 안성 휴게소 급속 충전소", "address": "가상도 가상군 예시고속도로 가상휴게소 6", "lat": 37.0005, "lng": 127.0105,
+      "operator": "예시충전", "parkingFree": true,
+      "chargers": [
+        { "chargerId": "01", "speed": "fast", "state": "available", "powerKw": 200 },
+        { "chargerId": "02", "speed": "fast", "state": "available", "powerKw": 200 },
+        { "chargerId": "03", "speed": "fast", "state": "unknown", "powerKw": 200 },
+        { "chargerId": "04", "speed": "fast", "state": "charging", "powerKw": 200 }
+      ]
+    }
+  ]
+}
