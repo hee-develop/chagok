@@ -2,8 +2,13 @@
 # 폰 앱 E2E (Android 기준): 서버와 Metro를 띄우고 Expo Go에서 Maestro flow(calendar-select, places, fill-places)를 차례로 실행한다.
 # 사용법: scripts/e2e-phone.sh
 #
+# 캘린더 출처: 기본 flow는 목 캘린더(EXPO_PUBLIC_CALENDAR_SOURCE=mock)로 돈다. 실제 기기 캘린더 flow(device-calendar)는
+# 기본 목록에 없고 E2E_FLOWS=device-calendar 로 따로 돌린다. 이 flow는 scripts/seed-phone-calendar.sh로 에뮬레이터에
+# 로컬 캘린더·일정을 심은 뒤 Metro를 device 출처로 다시 띄워 실행하고, 끝나면 심은 캘린더를 지운다.
+# device-calendar는 서버가 폰 일정을 받아 /schedules/today를 바꾸므로 같은 서버에서 다른 flow 뒤에 돌도록 항상 마지막에 둔다.
+#
 # 환경 변수
-#   E2E_FLOWS         실행할 flow 이름 (기본 "calendar-select places fill-places")
+#   E2E_FLOWS         실행할 flow 이름 (기본 "calendar-select places fill-places", 선택 항목: device-calendar)
 #   E2E_FIXTURE_PATH  서버가 읽을 일정 파일 (기본 fixtures/schedules/gwangju-day.json)
 #   E2E_SERVER_PORT   서버 포트 (기본 8788)
 #   E2E_METRO_PORT    Metro 포트 (기본 8082)
@@ -33,10 +38,15 @@ EMULATOR="$SDK/emulator/emulator"
 FLOWS="${E2E_FLOWS:-calendar-select places fill-places}"
 for flow in $FLOWS; do
   case "$flow" in
-    calendar-select|places|fill-places) ;;
-    *) echo "알 수 없는 flow입니다: $flow (calendar-select, places, fill-places만 가능)" >&2; exit 2 ;;
+    calendar-select|places|fill-places|device-calendar) ;;
+    *) echo "알 수 없는 flow입니다: $flow (calendar-select, places, fill-places, device-calendar만 가능)" >&2; exit 2 ;;
   esac
 done
+# device-calendar는 마지막에 돌린다(폰 일정이 서버에 남아 다른 flow의 목 일정 기대를 깨므로).
+ORDERED=""
+for flow in $FLOWS; do [ "$flow" = device-calendar ] || ORDERED="$ORDERED $flow"; done
+case " $FLOWS " in *" device-calendar "*) ORDERED="$ORDERED device-calendar" ;; esac
+FLOWS="${ORDERED# }"
 
 if [ "$ANDROID_PORT" = "5554" ]; then
   echo "5554는 Pleos 차량 에뮬레이터 포트입니다. E2E_ANDROID_PORT를 바꿔 주세요." >&2
@@ -66,6 +76,8 @@ EMULATOR_PID=""
 REVERSED_PORTS=""
 HANDWRITING_BEFORE=""
 HANDWRITING_CHANGED=0
+METRO_SOURCE=""
+CALENDAR_SEEDED=0
 
 # 프로세스 그룹 전체에 TERM, 남아 있으면 KILL
 kill_group() {
@@ -80,6 +92,10 @@ kill_group() {
 }
 
 cleanup() {
+  # 심어 둔 에뮬레이터 캘린더를 지운다
+  if [ "$CALENDAR_SEEDED" = 1 ]; then
+    bash "$ROOT/scripts/seed-phone-calendar.sh" "$SERIAL" clean >/dev/null 2>&1 || true
+  fi
   kill_group "$METRO_PID"
   kill_group "$SERVER_PID"
   # 이 스크립트가 만든 reverse 규칙만 지운다(다른 포트의 규칙은 그대로 둔다)
@@ -185,13 +201,23 @@ start_server() {
   wait_for "서버 기동" 30 curl -sf "http://127.0.0.1:$SERVER_PORT/health"
 }
 
+# start_metro <mock|device>: EXPO_PUBLIC_CALENDAR_SOURCE는 번들에 박히므로 출처가 바뀌면 Metro를 다시 띄운다.
 start_metro() {
+  local source="$1"
   port_in_use "$METRO_PORT" && { echo "포트 $METRO_PORT 사용 중. E2E_METRO_PORT로 바꿔 주세요." >&2; return 1; }
   (cd "$ROOT/phone" && CI=1 EXPO_NO_TELEMETRY=1 EXPO_PUBLIC_API_URL="http://127.0.0.1:$SERVER_PORT" \
+    EXPO_PUBLIC_CALENDAR_SOURCE="$source" \
     exec "$ROOT/phone/node_modules/.bin/expo" start --port "$METRO_PORT" --clear) \
     >"$LOG_DIR/metro.log" 2>&1 &
   METRO_PID=$!
+  METRO_SOURCE="$source"
   wait_for "Metro 기동" 120 curl -sf "http://127.0.0.1:$METRO_PORT/status"
+}
+
+ensure_metro() { # ensure_metro <mock|device>
+  [ "$METRO_SOURCE" = "$1" ] && return 0
+  if [ -n "$METRO_PID" ]; then kill_group "$METRO_PID"; METRO_PID=""; fi
+  start_metro "$1"
 }
 
 # 기기의 127.0.0.1:<포트>를 호스트 포트에 잇는다. 같은 포트가 이미 reverse돼 있으면 남의 규칙이므로 쓰지 않는다.
@@ -213,7 +239,6 @@ HANDWRITING_CHANGED=1
 "$ADB" -s "$SERIAL" shell settings put secure stylus_handwriting_enabled 0 || exit 1
 rm -rf "$SHOT_DIR"; mkdir -p "$SHOT_DIR"
 start_server || exit 1
-start_metro || exit 1
 reverse_port "$METRO_PORT" || exit 1
 reverse_port "$SERVER_PORT" || exit 1
 
@@ -224,6 +249,16 @@ expo_url() { # expo_url <경로>
 
 code=0
 for flow in $FLOWS; do
+  if [ "$flow" = device-calendar ]; then
+    ensure_metro device || { code=1; break; }
+    # 앞 flow가 남긴 Expo Go 상태(다른 프로젝트 화면 포함)를 정리하고, 서버의 폰 일정을 비워 픽스처 출처에서 시작한다(같은 기기 요청만 받는다).
+    "$ADB" -s "$SERIAL" shell am force-stop host.exp.exponent >/dev/null 2>&1 || true
+    curl -sf -X DELETE "http://127.0.0.1:$SERVER_PORT/events" >/dev/null 2>&1 || true
+    CALENDAR_SEEDED=1
+    bash "$ROOT/scripts/seed-phone-calendar.sh" "$SERIAL" seed || { code=1; break; }
+  else
+    ensure_metro mock || { code=1; break; }
+  fi
   case "$flow" in
     fill-places) url="$(expo_url /--/setup/fill-places)" ;;
     places) url="$(expo_url /--/setup/places)" ;;

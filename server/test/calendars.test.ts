@@ -21,7 +21,7 @@ describe('GET /calendars/selection', () => {
   it('저장 전에는 null 둘을 돌려준다', async () => {
     const res = await app.request('/calendars/selection');
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ selectedIds: null, savedAt: null, revision: null });
+    expect(await res.json()).toEqual({ selectedIds: null, savedAt: null, revision: null, source: null });
   });
 });
 
@@ -69,7 +69,7 @@ describe('PUT /calendars/selection', () => {
   it('저장 뒤 GET이 같은 값을 돌려준다', async () => {
     const saved = (await (await put({ selectedIds: ['mock-kia'], revision: 1 })).json()) as { savedAt: string };
     const res = await app.request('/calendars/selection');
-    expect(await res.json()).toEqual({ selectedIds: ['mock-kia'], savedAt: saved.savedAt, revision: 1 });
+    expect(await res.json()).toEqual({ selectedIds: ['mock-kia'], savedAt: saved.savedAt, revision: 1, source: 'mock' });
   });
 
   it('빈 선택(0개)도 허용한다', async () => {
@@ -79,7 +79,7 @@ describe('PUT /calendars/selection', () => {
   it('캘린더 이름·출처 같은 다른 필드는 무시한다', async () => {
     const res = await put({ selectedIds: ['mock-my'], revision: 1, calendars: [{ id: 'x' }] });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ selectedIds: ['mock-my'], savedAt: expect.any(String), revision: 1 });
+    expect(await res.json()).toEqual({ selectedIds: ['mock-my'], savedAt: expect.any(String), revision: 1, source: 'mock' });
   });
 
   it.each([
@@ -116,11 +116,21 @@ describe('PUT /calendars/selection', () => {
     const res = await put({ selectedIds: ['mock-my'], revision: 1, pad: 'x'.repeat(MAX_BODY_BYTES) });
     expect(res.status).toBe(413);
     expect(await res.json()).toHaveProperty('error');
-    expect(await (await app.request('/calendars/selection')).json()).toEqual({ selectedIds: null, savedAt: null, revision: null });
+    expect(await (await app.request('/calendars/selection')).json()).toEqual({ selectedIds: null, savedAt: null, revision: null, source: null });
   });
 
   it('검증 실패 시 저장하지 않는다', async () => {
     await put({ selectedIds: ['zzz'], revision: 1 });
-    expect(await (await app.request('/calendars/selection')).json()).toEqual({ selectedIds: null, savedAt: null, revision: null });
+    expect(await (await app.request('/calendars/selection')).json()).toEqual({ selectedIds: null, savedAt: null, revision: null, source: null });
+  });
+});
+
+describe('선택의 출처(source)', () => {
+  it("source 없이 저장하면 mock, 'device'로 저장하면 device로 돌려준다", async () => {
+    const a = newApp();
+    const send = (body: unknown) => a.request('/calendars/selection', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect(((await (await send({ selectedIds: ['mock-my'], revision: 1 })).json()) as { source: string }).source).toBe('mock');
+    expect(((await (await send({ selectedIds: ['3'], revision: 2, source: 'device' })).json()) as { source: string }).source).toBe('device');
+    expect((await (await a.request('/calendars/selection')).json())).toMatchObject({ selectedIds: ['3'], source: 'device' });
   });
 });

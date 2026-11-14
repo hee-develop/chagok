@@ -12,6 +12,7 @@ try {
     fixture: loadDayFixture(resolveFixtureLocation(process.env.FIXTURE_PATH), calendars),
     calendars,
     places: loadPlacesCatalog(),
+    eventsLoopbackOnly: process.env.EVENTS_LOOPBACK_ONLY === '1',
   });
 } catch (e) {
   console.error(`차곡 서버를 시작할 수 없습니다: ${(e as Error).message}`);

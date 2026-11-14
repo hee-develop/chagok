@@ -19,14 +19,21 @@ beforeEach(() => {
 });
 
 describe('saveCalendarSelection', () => {
-  it('selectedIds와 revision만 PUT 본문으로 보내고 signal을 넘긴다', async () => {
+  it('selectedIds·revision·source(기본 mock)를 PUT 본문으로 보내고 signal을 넘긴다', async () => {
     mockPut.mockResolvedValue({ ok: true, json: async () => ({ selectedIds: ['mock-my'], savedAt: 'x' }) });
     const { signal } = new AbortController();
 
     const result = await saveCalendarSelection(['mock-my'], 42, signal);
 
     expect(result).toEqual({ selectedIds: ['mock-my'], savedAt: 'x' });
-    expect(mockPut).toHaveBeenCalledWith({ json: { selectedIds: ['mock-my'], revision: 42 } }, { init: { signal } });
+    expect(mockPut).toHaveBeenCalledWith({ json: { selectedIds: ['mock-my'], revision: 42, source: 'mock' } }, { init: { signal } });
+  });
+
+  it("실제 기기 캘린더(device)면 source: 'device'를 함께 보낸다", async () => {
+    mockPut.mockResolvedValue({ ok: true, json: async () => ({}) });
+    const { signal } = new AbortController();
+    await saveCalendarSelection(['3', '7'], 5, signal, 'device');
+    expect(mockPut).toHaveBeenCalledWith({ json: { selectedIds: ['3', '7'], revision: 5, source: 'device' } }, { init: { signal } });
   });
 
   it('응답이 ok가 아니면 던진다', async () => {

@@ -9,11 +9,13 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { useEventSync } from '../features/calendar-sync/useEventSync';
 import { colors, FontsLoadedContext } from '../ui/theme';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  useEventSync();
   const [loaded, error] = useFonts({
     IBMPlexSansKR_400Regular,
     IBMPlexSansKR_500Medium,
