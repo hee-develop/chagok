@@ -16,10 +16,10 @@ appId: ${APP_ID}
     file: expo-dev-menu.yaml
     env:
       SCREEN_TITLE: '캘린더를 골라 주세요'
-- assertVisible: '1 / 4'
+- assertVisible: '1 / 5'
 - takeScreenshot: 01-first-run-setup
 
-# 2) 1~3단계를 건너뛰어 4단계에 닿는다. 연결하지 않고 [건너뛰기]를 눌러도 첫 설정을 끝낸 것으로 보고 오늘 탭으로 간다.
+# 2) 1~4단계를 건너뛰어 5단계(차 연결)에 닿는다. 연결하지 않고 [건너뛰기]를 눌러도 첫 설정을 끝낸 것으로 보고 오늘 탭으로 간다.
 - tapOn: '나중에 할게요'
 - extendedWaitUntil:
     visible: '자주 가는 곳을 알려주세요'
@@ -29,12 +29,21 @@ appId: ${APP_ID}
     visible: '나중에 할게요'
     timeout: 15000
 - tapOn: '나중에 할게요'
+# 4단계 '말 거는 방법'(정책 10.7): 플러스 모드·늦을 때 연락. 건너뛸 수 있다.
+- extendedWaitUntil:
+    visible: '말 거는 방법을 정해요'
+    timeout: 15000
+- assertVisible: '4 / 5'
+- assertVisible: '플러스 모드'
+- assertVisible: '늦을 때 연락'
+- takeScreenshot: 02a-step-4-talk
+- tapOn: '건너뛰기'
 - extendedWaitUntil:
     visible: '차와 연결해요'
     timeout: 15000
-- assertVisible: '4 / 4'
+- assertVisible: '5 / 5'
 - assertVisible: '건너뛰기'
-- takeScreenshot: 02-reached-step-4
+- takeScreenshot: 02-reached-step-5
 - tapOn: '건너뛰기'
 # 첫 설정 끝에서 알림 권한을 한 번 묻는다(정책 10.4). 여기서는 거부해 '켜면 이게 돼요' 한 줄이 오늘 탭 맨 위에 남는지 본다.
 - runFlow:
@@ -47,7 +56,7 @@ appId: ${APP_ID}
     timeout: 15000
 - assertVisible: '알림 설정 열기'
 - takeScreenshot: 03a-today-notification-denied
-- assertNotVisible: '4 / 4'
+- assertNotVisible: '5 / 5'
 - assertNotVisible: '차와 연결해요'
 - assertVisible: '차와 연결되지 않았어요'
 - takeScreenshot: 03-today-after-skip
@@ -63,7 +72,7 @@ appId: ${APP_ID}
           file: expo-dev-menu.yaml
           env:
             SCREEN_TITLE: '오늘 일정'
-- assertNotVisible: '1 / 4'
+- assertNotVisible: '1 / 5'
 - takeScreenshot: 03-today
 
 # 4) 오늘 탭: 차 연결 상태(연결 안 됨), 받은 가족 요청 빈 상태, 오늘 일정
@@ -108,7 +117,7 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: '육전집 점심 채비'
     timeout: 15000
-- assertNotVisible: '3 / 4'
+- assertNotVisible: '3 / 5'
 - inputText: '도시락'
 - hideKeyboard
 - tapOn: '저장'
@@ -130,7 +139,7 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: '일정 장소 찾기'
     timeout: 15000
-- assertNotVisible: '3 / 4'
+- assertNotVisible: '3 / 5'
 # 검색 입력에 키보드가 떠 있으면 시스템 뒤로가기는 키보드만 닫으므로 화면의 [취소]로 돌아간다.
 - tapOn: '취소'
 # 다시 읽는 동안에도 읽어 둔 목록을 그대로 두므로 스크롤 위치와 펼친 줄이 남는다(제목 '오늘 일정'은 위로 지나가 있을 수 있다).
@@ -158,7 +167,7 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: '자주 가는 곳을 알려주세요'
     timeout: 15000
-- assertNotVisible: '2 / 4'
+- assertNotVisible: '2 / 5'
 - scrollUntilVisible:
     element: '기억한 장소'
     direction: DOWN
@@ -198,22 +207,135 @@ appId: ${APP_ID}
       EXPECT: '스타벅스'
       ABSENT: '헬스장'
 
-# 9) 설정 탭: 고정 안내와 입구
+# 9) 설정 탭(정책 10.8): 고정 안내, 스위치 셋(꺼짐), 문자 창 안내, 입구. 연결 전이라 [차 연결 끊기]는 없다.
 - tapOn:
     id: 'tabbar-settings'
 - extendedWaitUntil:
     visible: '주행 중에는 차곡이 먼저 말하지 않아요.'
     timeout: 15000
-- assertVisible: '캘린더 고르기'
-- assertVisible: '차 연결하기'
+- assertVisible: '기본 말 걸기 · 항상 켜져 있어요'
+- extendedWaitUntil:
+    visible: '플러스 모드'
+    timeout: 15000
+- assertVisible: '늦을 때 연락'
+- assertVisible: '화면 없이 음성만'
+- assertVisible:
+    id: 'switch-plusMode'
+    checked: false
+- assertVisible:
+    id: 'switch-lateContact'
+    checked: false
+- assertVisible:
+    id: 'switch-voiceOnly'
+    checked: false
+- assertVisible: '문자는 내용을 채운 문자 창으로 열어 드려요.'
 - takeScreenshot: 08-settings
+- scrollUntilVisible:
+    element: '차 연결하기'
+    direction: DOWN
+    timeout: 20000
+- assertVisible: '캘린더 고르기'
+- assertNotVisible: '차 연결 끊기'
+- takeScreenshot: 08a-settings-bottom
+- scrollUntilVisible:
+    element: '플러스 모드'
+    direction: UP
+    timeout: 20000
 
-# 10) 차 연결 입구는 기존 연결 화면을 단계 표시('4 / 4') 없이 연다. 연결하지 않고 뒤로 가면 설정 탭이다.
+# 9a) 스위치를 켜면 서버에 저장되고, 탭을 오가도(다시 읽어도) 켜진 채다. 다시 누르면 꺼진다.
+- tapOn:
+    id: 'switch-voiceOnly'
+- extendedWaitUntil:
+    visible: '카드를 띄우지 않고 말로만 알려요.'
+    timeout: 15000
+- assertVisible:
+    id: 'switch-voiceOnly'
+    checked: true
+- runScript:
+    file: assert-settings.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT: 'plusMode=false,lateContact=false,voiceOnly=true'
+- takeScreenshot: 08b-voice-only-on
+- tapOn:
+    id: 'tabbar-today'
+- extendedWaitUntil:
+    visible: '오늘 일정'
+    timeout: 15000
+- tapOn:
+    id: 'tabbar-settings'
+- extendedWaitUntil:
+    visible: '카드를 띄우지 않고 말로만 알려요.'
+    timeout: 15000
+- assertVisible:
+    id: 'switch-voiceOnly'
+    checked: true
+- tapOn:
+    id: 'switch-voiceOnly'
+- extendedWaitUntil:
+    visible: '켜면 카드를 띄우지 않고 말로만 알려요.'
+    timeout: 15000
+- runScript:
+    file: assert-settings.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT: 'plusMode=false,lateContact=false,voiceOnly=false'
+
+# 9b) 늦을 때 연락을 켜면 연락처 권한을 묻는다(E2E는 목 연락처라 창 없이 허용). 허용했으니 '미리 찾지 않아요' 안내는 없다.
+- tapOn:
+    id: 'switch-lateContact'
+- extendedWaitUntil:
+    visible: '늦을 것 같으면 연락할지 차가 물어봐요.*'
+    timeout: 15000
+- assertVisible:
+    id: 'switch-lateContact'
+    checked: true
+- assertNotVisible: '상대를 미리 찾지 않아요.*'
+- runScript:
+    file: assert-settings.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT: 'plusMode=false,lateContact=true,voiceOnly=false'
+- takeScreenshot: 08c-late-contact-on
+- tapOn:
+    id: 'switch-lateContact'
+- extendedWaitUntil:
+    visible: '켜면 늦을 것 같을 때 연락할지 차가 물어봐요.*'
+    timeout: 15000
+- runScript:
+    file: assert-settings.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT: 'plusMode=false,lateContact=false,voiceOnly=false'
+
+# 9c) 자주 가는 곳·기억한 장소·이동 없음 목록 입구는 장소 탭으로 이어진다.
+- scrollUntilVisible:
+    element: '자주 가는 곳 열기'
+    direction: DOWN
+    timeout: 20000
+- takeScreenshot: 08d-settings-places-entrances
+- tapOn: '자주 가는 곳 열기'
+- extendedWaitUntil:
+    visible: '자주 가는 곳을 알려주세요'
+    timeout: 15000
+- assertNotVisible: '2 / 5'
+# 설정 탭으로 돌아오면 스크롤 위치가 아래에 남아 있어 맨 위 안내가 안 보인다. 아래쪽 [차 연결하기]로 돌아온 것을 확인한다.
+- tapOn:
+    id: 'tabbar-settings'
+- extendedWaitUntil:
+    visible: '차 연결하기'
+    timeout: 15000
+
+# 10) 차 연결 입구는 기존 연결 화면을 단계 표시('5 / 5') 없이 연다. 연결하지 않고 뒤로 가면 설정 탭이다.
+- scrollUntilVisible:
+    element: '차 연결하기'
+    direction: DOWN
+    timeout: 20000
 - tapOn: '차 연결하기'
 - extendedWaitUntil:
     visible: '차와 연결해요'
     timeout: 15000
-- assertNotVisible: '4 / 4'
+- assertNotVisible: '5 / 5'
 - assertNotVisible: '건너뛰기'
 - takeScreenshot: 09-pair-from-tab
 - back
@@ -221,12 +343,16 @@ appId: ${APP_ID}
     visible: '주행 중에는 차곡이 먼저 말하지 않아요.'
     timeout: 15000
 
-# 11) 캘린더 고르기 입구도 단계 표시('1 / 4') 없이 열리고 [닫기]로 설정 탭에 돌아온다.
+# 11) 캘린더 고르기 입구도 단계 표시('1 / 5') 없이 열리고 [닫기]로 설정 탭에 돌아온다.
+- scrollUntilVisible:
+    element: '캘린더 고르기'
+    direction: DOWN
+    timeout: 20000
 - tapOn: '캘린더 고르기'
 - extendedWaitUntil:
     visible: '캘린더를 골라 주세요'
     timeout: 15000
-- assertNotVisible: '1 / 4'
+- assertNotVisible: '1 / 5'
 - assertVisible: '닫기'
 - assertNotVisible: '나중에 할게요'
 - takeScreenshot: 10-calendar-from-tab
@@ -234,3 +360,70 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: '주행 중에는 차곡이 먼저 말하지 않아요.'
     timeout: 15000
+
+# 12) 차 연결 끊기(정책 10.9): 차와 연결하면 설정 탭에 [차 연결 끊기]가 생기고, 확인을 거쳐 끊으면 연결 전 상태로 돌아온다.
+# 에뮬레이터 카메라로는 QR을 못 찍어 차 대신 서버에서 코드를 받아(issue-pairing-code.js) 번호로 넣는다.
+- runScript:
+    file: issue-pairing-code.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      CAR_ID: e2e-phone-tabs-car
+- scrollUntilVisible:
+    element: '차 연결하기'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '차 연결하기'
+- extendedWaitUntil:
+    visible: '차와 연결해요'
+    timeout: 15000
+- tapOn:
+    id: 'pair-code-input'
+- inputText: ${output.code}
+- hideKeyboard
+- tapOn: '연결하기'
+- extendedWaitUntil:
+    visible: '✓ 차와 연결됐어요'
+    timeout: 15000
+- tapOn: '완료'
+- extendedWaitUntil:
+    visible: '✓ 차와 연결돼 있어요'
+    timeout: 20000
+- scrollUntilVisible:
+    element: '차 연결 끊기'
+    direction: DOWN
+    timeout: 20000
+- takeScreenshot: 11-settings-connected
+- tapOn: '차 연결 끊기'
+- extendedWaitUntil:
+    visible: '차 연결을 끊을까요\?'
+    timeout: 10000
+- assertVisible: '이 폰의 자리를 지워요. 서버에 있는 연결, 일정, 기억한 장소가 바로 삭제되고.*'
+- takeScreenshot: 12-disconnect-confirm
+# 취소하면 아무것도 하지 않는다.
+- tapOn: '취소'
+- assertNotVisible: '차 연결을 끊을까요\?'
+- assertVisible: '✓ 차와 연결돼 있어요'
+- tapOn: '차 연결 끊기'
+- extendedWaitUntil:
+    visible: '차 연결을 끊을까요\?'
+    timeout: 10000
+- tapOn: '차 연결 끊기 확인'
+- extendedWaitUntil:
+    visible: '차와 연결되지 않았어요'
+    timeout: 20000
+- assertNotVisible: '차 연결을 끊을까요\?'
+- assertNotVisible: '차 연결 끊기'
+- takeScreenshot: 13-disconnected
+- runScript:
+    file: assert-unpaired.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      CAR_ID: e2e-phone-tabs-car
+# 끊은 뒤에도 설정 스위치는 그대로 보이고(연결 전 상태로 다시 읽음) 연결 입구가 다시 [차 연결하기]다.
+- scrollUntilVisible:
+    element: '플러스 모드'
+    direction: UP
+    timeout: 20000
+- assertVisible:
+    id: 'switch-plusMode'
+    checked: false

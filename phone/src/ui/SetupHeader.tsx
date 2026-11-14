@@ -4,7 +4,8 @@ import { strings } from '../i18n/ko';
 import { Logo } from './Logo';
 import { colors, useFont } from './theme';
 
-export const SETUP_TOTAL_STEPS = 4;
+/** 캘린더 → 자주 가는 곳 → 장소 빈 일정 → 말 거는 방법 → 차 연결(정책서 10.7). */
+export const SETUP_TOTAL_STEPS = 5;
 
 /** step을 주지 않으면 첫 설정 밖(탭에서 연 화면)이라 로고만 보인다. */
 export function SetupHeader({ step }: { step?: number }) {

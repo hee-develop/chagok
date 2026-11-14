@@ -63,7 +63,7 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: '자주 가는 곳을 알려주세요'
     timeout: 15000
-- assertVisible: '2 / 4'
+- assertVisible: '2 / 5'
 - takeScreenshot: 02-places
 
 # 선택 저장 뒤 폰이 오늘·내일 일정을 보냈는지 서버에서 확인한다.

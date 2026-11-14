@@ -14,7 +14,7 @@ appId: ${APP_ID}
     file: expo-dev-menu.yaml
     env:
       SCREEN_TITLE: '자주 가는 곳을 알려주세요'
-- assertVisible: '2 / 4'
+- assertVisible: '2 / 5'
 - assertVisible: '\[집 주소\]'
 - assertVisible: '\[회사 주소\]'
 - assertVisible: '캘린더에서 자주 나온 곳'
@@ -108,5 +108,5 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: '장소가 빈 일정이 2개 있어요'
     timeout: 15000
-- assertVisible: '3 / 4'
+- assertVisible: '3 / 5'
 - takeScreenshot: 07-fill-places

@@ -238,6 +238,8 @@ export const createSchedulesRoute = (
         }),
         // 도착 횟수는 명시 식별(폰 토큰·차 토큰 + driver)로 정해진 자리에서만 반영한다. 옛 호환 읽기(식별 없음·차 토큰만)와 기본 자리(데모·E2E)는 등록한 곳만 준다.
         favorites: sc.explicit ? favoritesWithArrivals(favoritePlaces(d), d.arrivals.list()) : favoritePlaces(d),
+        // 차가 말할 방식을 정하는 자리별 설정(`routes/settings.ts`). 기존 필드는 그대로 두고 필드만 더했다. 설정을 받은 적 없으면 모두 꺼짐이다.
+        settings: d.settings.get(),
       }, 200);
     })
     .get('/places', guard.read, anchorValidator, (c) => {

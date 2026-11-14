@@ -10,7 +10,7 @@ appId: ${APP_ID}
     file: expo-dev-menu.yaml
     env:
       SCREEN_TITLE: '장소가 빈 일정이 2개 있어요'
-- assertVisible: '3 / 4'
+- assertVisible: '3 / 5'
 - assertVisible: '육전집 점심'
 - assertVisible: '✓ 광주 육전집'
 - takeScreenshot: 01-missing
@@ -80,11 +80,63 @@ appId: ${APP_ID}
       SERVER_URL: ${SERVER_URL}
       STAGE: changed
 - tapOn: '다음'
+# 3단계 다음은 4단계 '말 거는 방법'이다(5단계 중 4단계). 연결 전이라 이 기기의 연결 전 버킷(E2E는 기본 자리)에 저장된다.
+- extendedWaitUntil:
+    visible: '말 거는 방법을 정해요'
+    timeout: 15000
+- assertVisible: '4 / 5'
+- assertVisible: '플러스 모드'
+- assertVisible: '늦을 때 연락'
+- assertNotVisible: '화면 없이 음성만'
+- extendedWaitUntil:
+    visible: '문자는 내용을 채운 문자 창으로 열어 드려요.'
+    timeout: 15000
+- takeScreenshot: 07-talk
+- tapOn:
+    id: 'switch-plusMode'
+- extendedWaitUntil:
+    visible: '주행 중 늦어질 때 일정당 한 번 먼저 말해요.'
+    timeout: 15000
+- assertVisible:
+    id: 'switch-plusMode'
+    checked: true
+- tapOn:
+    id: 'switch-lateContact'
+- extendedWaitUntil:
+    visible: '늦을 것 같으면 연락할지 차가 물어봐요.*'
+    timeout: 15000
+- assertVisible:
+    id: 'switch-lateContact'
+    checked: true
+- takeScreenshot: 07a-talk-on
+- runScript:
+    file: assert-settings.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT: 'plusMode=true,lateContact=true,voiceOnly=false'
+# 한 번 더 누르면 꺼진다(원래대로 돌려 다음 flow에 남기지 않는다).
+- tapOn:
+    id: 'switch-plusMode'
+- tapOn:
+    id: 'switch-lateContact'
+- extendedWaitUntil:
+    visible: '켜면 주행 중 늦어질 때 일정당 한 번 먼저 말해요.'
+    timeout: 15000
+- runScript:
+    file: assert-settings.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT: 'plusMode=false,lateContact=false,voiceOnly=false'
+- tapOn: '다음'
 - extendedWaitUntil:
     visible: '차와 연결해요'
     timeout: 15000
-- assertVisible: '4 / 4'
-- takeScreenshot: 07-next
+- assertVisible: '5 / 5'
+- takeScreenshot: 07b-next
+- back
+- extendedWaitUntil:
+    visible: '말 거는 방법을 정해요'
+    timeout: 15000
 - back
 - extendedWaitUntil:
     visible: '나중에 할게요'
@@ -96,5 +148,6 @@ appId: ${APP_ID}
 - takeScreenshot: 08-restored
 - tapOn: '나중에 할게요'
 - extendedWaitUntil:
-    visible: '차와 연결해요'
+    visible: '말 거는 방법을 정해요'
     timeout: 15000
+- assertVisible: '4 / 5'

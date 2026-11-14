@@ -30,7 +30,7 @@ describe('PlacesScreen 장소 탭 모드', () => {
     await renderWith(<PlacesScreen mode="tab" skipList={{ memory: skipMemory([]), onChanged: jest.fn() }} api={makeApi({}, { ...EMPTY, home: APT })} memoryApi={{ fetchMemories: jest.fn().mockResolvedValue([]), deleteMemory: jest.fn() }} />);
     expect(await screen.findByText('자주 가는 곳을 알려주세요')).toBeOnTheScreen();
     expect(screen.getByText(`${APT.name} · ${APT.address}`)).toBeOnTheScreen();
-    expect(screen.queryByText('2 / 4')).toBeNull();
+    expect(screen.queryByText('2 / 5')).toBeNull();
     expect(screen.queryByTestId('progress-bar-filled')).toBeNull();
     expect(screen.queryByText('다음')).toBeNull();
     expect(screen.queryByText('건너뛰기')).toBeNull();
@@ -62,7 +62,7 @@ describe('PlacesScreen 장소 탭 모드', () => {
 
   it('첫 설정 모드(기본)에는 자리 구역이 없다', async () => {
     await renderWith(<PlacesScreen api={makeApi()} />);
-    await screen.findByText('2 / 4');
+    await screen.findByText('2 / 5');
     expect(screen.queryByText('기억한 장소')).toBeNull();
   });
 });

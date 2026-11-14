@@ -1,0 +1,9 @@
+{
+  "contacts": [
+    { "id": "mock-minsu", "name": "김민수", "emails": ["minsu.kim@example.com"], "phones": ["010-1234-5678"] },
+    { "id": "mock-seoyeon", "name": "박서연", "emails": ["seoyeon@example.com"], "phones": ["010-5555-6666"] },
+    { "id": "mock-mom", "name": "엄마", "emails": [], "phones": ["010-9876-5432"] },
+    { "id": "mock-manager", "name": "김 과장님", "emails": [], "phones": ["010-7777-8888"] },
+    { "id": "mock-no-number", "name": "이영희", "emails": ["younghee@example.com"], "phones": [] }
+  ]
+}

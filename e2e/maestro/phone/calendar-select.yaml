@@ -13,7 +13,7 @@ appId: ${APP_ID}
     file: expo-dev-menu.yaml
     env:
       SCREEN_TITLE: '캘린더를 골라 주세요'
-- assertVisible: '1 / 4'
+- assertVisible: '1 / 5'
 - assertVisible: '캘린더 3개 연결하기'
 - takeScreenshot: 01-initial
 - runScript:
@@ -30,7 +30,7 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: '자주 가는 곳을 알려주세요'
     timeout: 15000
-- assertVisible: '2 / 4'
+- assertVisible: '2 / 5'
 - takeScreenshot: 03-places
 
 - runScript:

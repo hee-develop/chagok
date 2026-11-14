@@ -5,7 +5,7 @@ import { askNotificationPermissionOnce } from '../../features/notifications/perm
 import { PairCarScreen } from '../../features/pair-car/PairCarScreen';
 
 /**
- * 첫 설정의 4단계이면서 오늘·설정 탭의 [차 연결하기]가 여는 화면이다.
+ * 첫 설정의 5단계(마지막)이면서 오늘·설정 탭의 [차 연결하기]가 여는 화면이다.
  * - 탭에서 열면(`from=tab`) 단계 표시 없이 열리고 [완료]로 왔던 탭에 돌아간다. 연결에 성공하면 알림 권한을 한 번 묻는다(이미 물었으면 묻지 않는다).
  * - 첫 설정이면 [건너뛰기](연결 전)와 [완료](연결 뒤) 둘 다 '끝냈거나 건너뜀' 표시를 남기고, 알림 권한을 한 번 묻고(정책 10.4 '첫 설정 끝'), 설정 화면을 모두 닫아 오늘 탭으로 간다.
  */

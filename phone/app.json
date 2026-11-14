@@ -39,6 +39,12 @@
           "recordAudioAndroid": false
         }
       ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "‘늦을 때 연락’을 켠 경우, 일정에 나온 사람을 연락처에서 미리 찾아 두기 위해 연락처 접근이 필요해요."
+        }
+      ],
       "expo-secure-store",
       [
         "expo-notifications",

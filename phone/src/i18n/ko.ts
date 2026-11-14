@@ -84,7 +84,7 @@ export const ko = {
     pairedDescription: '이제 차에 타면 차곡이 오늘 일정을 알려 드려요.',
     done: '완료',
   },
-  // 아래 탭 네 개(정책서 10.7). 설정 탭의 스위치류(플러스 모드·늦을 때 연락·음성만)는 다음 묶음이다.
+  // 아래 탭 네 개(정책서 10.7).
   tabs: {
     today: '오늘',
     family: '가족',
@@ -193,12 +193,64 @@ export const ko = {
   settings: {
     title: '설정',
     drivingNotice: '주행 중에는 차곡이 먼저 말하지 않아요.',
+    drivingHeading: '기본 말 걸기',
+    drivingOn: '항상 켜져 있어요',
+    talkHeading: '차곡이 말하는 방법',
+    loading: '설정을 불러오는 중',
+    loadFailed: '설정을 불러오지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.',
+    saveFailed: '저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.',
+    retry: RETRY,
+    // 정책서 10.8 '플러스 모드': 켜면 주행 중 늦어질 때 일정당 한 번 먼저 말한다
+    plus: {
+      label: '플러스 모드',
+      hintOff: '켜면 주행 중 늦어질 때 일정당 한 번 먼저 말해요.',
+      hintOn: '주행 중 늦어질 때 일정당 한 번 먼저 말해요.',
+    },
+    // 정책서 10.8 '늦을 때 연락', 10.4 연락처(거부하면 상대를 미리 찾지 않고 차가 번호를 묻는다), 문자는 내용을 채운 문자 창(J9)
+    late: {
+      label: '늦을 때 연락',
+      hintOff: '켜면 늦을 것 같을 때 연락할지 차가 물어봐요. 연락처를 읽어 상대를 미리 찾아 둬요.',
+      hintOn: '늦을 것 같으면 연락할지 차가 물어봐요. 연락처를 읽어 상대를 미리 찾아 둬요.',
+      smsNote: '문자는 내용을 채운 문자 창으로 열어 드려요.',
+      contactsOff: '상대를 미리 찾지 않아요. 차가 연락할 때 번호를 물어요.',
+      turnOnContacts: '연락처 켜기',
+      openSettings: '연락처 설정 열기',
+    },
+    voiceOnly: {
+      label: '화면 없이 음성만',
+      hintOff: '켜면 카드를 띄우지 않고 말로만 알려요.',
+      hintOn: '카드를 띄우지 않고 말로만 알려요.',
+    },
     carHeading: '차',
     calendarHeading: '캘린더',
     calendarHint: '차에 보낼 캘린더를 골라요.',
     pickCalendar: '캘린더 고르기',
+    placesHeading: '장소',
+    openPlacesTab: '장소 탭 열기',
+    frequent: { label: '자주 가는 곳', hint: '집·회사를 바꾸거나 단골을 더하고 빼요.', open: '자주 가는 곳 열기' },
+    remembered: { label: '기억한 장소', hint: '차가 기억한 장소를 보고 지워요.', open: '기억한 장소 열기' },
+    noTravel: { label: '이동 없음 목록', hint: '이동 없음으로 둔 일정 이름을 보고 지워요.', open: '이동 없음 목록 열기' },
     permissionHeading: '권한',
     permissionLoading: '권한을 확인하는 중',
+    // 정책서 10.9 '차 연결 끊기': 그 자리를 지운다. 서버의 연결, 일정, 기억을 바로 삭제하고 차 화면 목록에서도 빠진다
+    disconnect: {
+      button: '차 연결 끊기',
+      question: '차 연결을 끊을까요?',
+      explain: '이 폰의 자리를 지워요. 서버에 있는 연결, 일정, 기억한 장소가 바로 삭제되고 차 화면 목록에서도 빠져요. 다시 쓰려면 차와 새로 연결해야 해요.',
+      confirm: '끊기',
+      confirmLabel: '차 연결 끊기 확인',
+      cancel: '취소',
+      retry: RETRY,
+      disconnecting: '끊는 중',
+      failed: '연결을 끊지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.',
+    },
+  },
+  // 첫 설정 4단계 '말 거는 방법'(정책서 10.7): 플러스 모드와 늦을 때 연락. 건너뛸 수 있다
+  talk: {
+    title: '말 거는 방법을 정해요',
+    description: '차곡은 차에 탈 때 먼저 말해요. 주행 중에는 먼저 말하지 않아요. 아래는 나중에 설정 탭에서 바꿀 수 있어요.',
+    next: '다음',
+    skip: '건너뛰기',
   },
   familySend: {
     title: '가족에게 보내기',

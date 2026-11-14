@@ -15,7 +15,7 @@ env:
     file: expo-dev-menu.yaml
     env:
       SCREEN_TITLE: '차와 연결해요'
-- assertVisible: '4 / 4'
+- assertVisible: '5 / 5'
 - assertVisible: 'QR 찍기'
 - takeScreenshot: 01-pair-car
 
@@ -61,7 +61,7 @@ env:
 - extendedWaitUntil:
     visible: '오늘 일정'
     timeout: 20000
-- assertNotVisible: '4 / 4'
+- assertNotVisible: '5 / 5'
 - extendedWaitUntil:
     visible: '✓ 차와 연결돼 있어요'
     timeout: 20000

@@ -15,6 +15,7 @@ import { createCarRoute, createDriversRoute, createPairRoute, createPresenceRout
 import { createNotificationsRoute } from './routes/notifications.js';
 import { createPairingRoute } from './routes/pairing.js';
 import { createSchedulesRoute } from './routes/schedules.js';
+import { createSettingsRoute } from './routes/settings.js';
 import { createPlaceResolveRoute } from './routes/placeResolve.js';
 import { createSkipsRoute } from './routes/skips.js';
 import { createPlacesRoute, type FavoritesStore } from './routes/places.js';
@@ -175,6 +176,7 @@ export const createApp = ({
     .route('/places', createFrequentRoute(places, guard, seats))
     .route('/arrivals', createArrivalsRoute(guard, seats, { now }))
     .route('/events', createEventsRoute(guard, { now, isLoopback, loopbackOnly: eventsLoopbackOnly, onReceived: onEventsReceived }))
+    .route('/settings', createSettingsRoute(guard, seats))
     .route('/family', createFamilyRoute(familyMembers, guard))
     .route('/family', createFamilyGroupRoute(familyGuard, familyRequests, { now, clientAddress }))
     .route('/requests', createRequestsRoute(familyGuard, familyRequests, now))
