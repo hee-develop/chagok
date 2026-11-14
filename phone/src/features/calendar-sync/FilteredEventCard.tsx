@@ -2,10 +2,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { strings } from '../../i18n/ko';
 import { colors, useFont } from '../../ui/theme';
+import { formatScheduleDate } from '../fill-places/scheduleFormat';
 import type { FilteredEvent } from './filteredEvents';
-
-// 서버의 일정 표시는 한국 시각으로 통일한다. 기기의 시간대가 달라도 같은 일정을 가리킨다.
-const dateFormat = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 
 type Props = {
   event: FilteredEvent;
@@ -31,7 +29,7 @@ export function FilteredEventCard({ event, confirming, disabled, onAsk, onConfir
       <Pressable accessibilityRole="button" accessibilityLabel={`${event.title} ${t.markTravel}`}
         accessibilityState={{ disabled }} disabled={disabled} onPress={onAsk} style={styles.header}>
         <View style={styles.cardTitle}>
-          <Text style={[styles.date, font(400)]}>{dateFormat.format(new Date(event.start))}</Text>
+          <Text style={[styles.date, font(400)]}>{formatScheduleDate(event.start)}</Text>
           <Text style={[styles.scheduleTitle, font(600)]}>{event.title}</Text>
         </View>
         <View style={styles.actions}>
@@ -40,23 +38,34 @@ export function FilteredEventCard({ event, confirming, disabled, onAsk, onConfir
         </View>
       </Pressable>
       {confirming ? (
-        <View accessibilityLiveRegion="polite" style={styles.confirmBox}>
-          <Text style={[styles.question, font(600)]}>{t.confirmQuestion(event.title)}</Text>
-          <Text style={[styles.hint, font(400)]}>{t.confirmHint}</Text>
-          <View style={styles.confirmActions}>
-            <Pressable accessibilityRole="button" accessibilityLabel={t.cancel} accessibilityState={{ disabled }} disabled={disabled}
-              onPress={onCancel} style={styles.cancel}>
-              <Text style={[styles.cancelText, font(400)]}>{t.cancel}</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel={t.confirm} accessibilityState={{ disabled }} disabled={disabled}
-              onPress={onConfirm} style={styles.confirm}>
-              <Text style={[styles.confirmText, font(600)]}>{t.confirm}</Text>
-            </Pressable>
-          </View>
-        </View>
+        <TravelConfirmBox title={event.title} disabled={disabled} onConfirm={onConfirm} onCancel={onCancel} />
       ) : (
         <Text style={[styles.hint, font(400)]}>{t.markTravelHint}</Text>
       )}
+    </View>
+  );
+}
+
+type ConfirmProps = { title: string; disabled: boolean; onConfirm: () => void; onCancel: () => void };
+
+/** "‘제목’ 일정을 이동 일정으로 바꿀까요?" 확인. [바꾸기]를 눌러야 바뀐다. 3단계 카드와 오늘 탭의 거른 줄이 같이 쓴다. */
+export function TravelConfirmBox({ title, disabled, onConfirm, onCancel }: ConfirmProps) {
+  const font = useFont();
+  const t = strings.travelFilter;
+  return (
+    <View accessibilityLiveRegion="polite" style={styles.confirmBox}>
+      <Text style={[styles.question, font(600)]}>{t.confirmQuestion(title)}</Text>
+      <Text style={[styles.hint, font(400)]}>{t.confirmHint}</Text>
+      <View style={styles.confirmActions}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t.cancel} accessibilityState={{ disabled }} disabled={disabled}
+          onPress={onCancel} style={styles.cancel}>
+          <Text style={[styles.cancelText, font(400)]}>{t.cancel}</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={t.confirm} accessibilityState={{ disabled }} disabled={disabled}
+          onPress={onConfirm} style={styles.confirm}>
+          <Text style={[styles.confirmText, font(600)]}>{t.confirm}</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }

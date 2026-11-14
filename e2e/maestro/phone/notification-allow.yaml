@@ -1,0 +1,26 @@
+# 첫 설정 끝에 뜨는 알림 권한 창에 [허용]으로 답하는 공통 하위 flow.
+# 창은 첫 설정 끝(건너뛰기·완료)이나 탭에서 차 연결에 성공한 뒤 한 번만 뜬다. 두 겹일 수 있다: Expo Go의 '다른 Expo 앱에 이미 허용했다' 확인 창(대문자 ALLOW/DENY)과
+# Android 13+ 시스템 알림 창(Allow·허용). 창이 없으면(이미 정해짐) 아무것도 하지 않는다. 영어·한국어 에뮬레이터 모두 받는다.
+appId: ${APP_ID}
+---
+- extendedWaitUntil:
+    visible: '(ALLOW|Allow|허용)'
+    timeout: 15000
+    optional: true
+- runFlow:
+    when:
+      visible: 'ALLOW'
+    commands:
+      - tapOn: 'ALLOW'
+- runFlow:
+    when:
+      visible: 'Allow'
+    commands:
+      - tapOn: 'Allow'
+- runFlow:
+    when:
+      visible: '허용'
+    commands:
+      - tapOn: '허용'
+- waitForAnimationToEnd:
+    timeout: 3000

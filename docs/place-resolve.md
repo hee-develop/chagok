@@ -149,7 +149,7 @@
 
 - `GET` 응답: `{ memories: [{ name, place, ambiguous, updatedAt }] }`(최근에 쓴 것부터).
 - `DELETE`: 이름은 **쿼리 `name`**으로 보냅니다(`/`·`#`·`?`·`%`가 든 이름도 안전합니다). 정규화해서 찾고, 지웠으면 200 `{ name }`, 없으면 404, `name`이 없거나 비었거나 300자를 넘으면 400. 버킷을 만들지 않습니다.
-- 폰 클라이언트 함수·타입은 `phone/src/features/places/memoryApi.ts`(`placeMemoryApi`)까지만 있고 목록·지우기 화면은 장소 탭 묶음이 붙입니다.
+- 폰 클라이언트는 `phone/src/features/places/memoryApi.ts`(`placeMemoryApi`)이고, 목록·지우기 화면은 장소 탭의 '기억한 장소'(`features/places/RememberedPlaces.tsx`, 지우기는 확인을 거침, 이미 없으면(404) 지운 것과 같음)입니다.
 
 ### `GET /places/search` (기존, 호환)
 
@@ -204,7 +204,7 @@
 | 4. 장소 칸이 빈 일정: 60분 전부터 묻기, 들은 이름으로 3번, "안 가요"면 이동 없음 | `resolve`가 들은 이름을 `query`, 일정 제목을 `key`로 받아 처리(제목은 외부로 안 나감) | 질문·60분 조건·음성 인식. "안 가요"의 이동 없음 기억은 J2b |
 | 5. "다음부터 '{일정}'은 여기로 기억할게요." + 서버 저장 | `PUT /places/memory`(이름 → 장소, 애매 여부), 일정 응답 반영 | 말하기와 저장 호출(이름은 장소 칸 글자, 비면 제목) |
 | 5'. '캘린더에 장소 적기' | **만들지 않음**(사용자가 뺌). `GET /places/memory`는 폰의 기억 목록 화면용 | — |
-| 10.8 기억한 장소 지우기 | `GET /places/memory`·`DELETE /places/memory?name=` | — (폰 화면은 장소 탭 묶음) |
+| 10.8 기억한 장소 지우기 | `GET /places/memory`·`DELETE /places/memory?name=` | — (폰 화면은 장소 탭의 '기억한 장소') |
 
 ## 차 쪽 묶음이 알아야 할 점
 

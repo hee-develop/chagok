@@ -7,6 +7,7 @@
 # - adb shell 인자는 한글이 깨질 수 있어 캘린더 이름·제목·장소를 모두 ASCII로 둔다. flow와 assert-device-calendar.js가 같은 글자를 쓴다.
 # 심는 것(서울 기준): 캘린더 'ChagokE2E'(소유자 권한, 기본 선택)에
 #   오늘 13:00-14:00 'E2E Today Meeting' (장소 'E2E Place', 메모 'E2E notes'),
+#   오늘 11:00-11:30 'E2E Online Standup' (장소 'Zoom' = 온라인이라 폰이 거르고 서버로 보내지 않는다),
 #   내일 09:00-10:00 'E2E Tomorrow Visit',
 #   3일 뒤 09:00-10:00 'E2E Far Away' (오늘·내일이 아니라 서버로 가면 안 된다).
 set -euo pipefail
@@ -67,9 +68,11 @@ seed() {
       --bind eventTimezone:s:Asia/Seoul --bind allDay:i:0 $extra"
   }
   insert_event "E2E Today Meeting" $((today_ms + 13 * h)) $((today_ms + 14 * h)) "E2E Place" "E2E notes"
+  # 폰이 읽을 때 거르는 온라인 일정(장소 칸이 Zoom): 서버로 가지 않고 3단계·오늘 탭에 흐리게 보인다.
+  insert_event "E2E Online Standup" $((today_ms + 11 * h)) $((today_ms + 11 * h + h / 2)) "Zoom" "E2E online notes"
   insert_event "E2E Tomorrow Visit" $((today_ms + d + 9 * h)) $((today_ms + d + 10 * h))
   insert_event "E2E Far Away" $((today_ms + 3 * d + 9 * h)) $((today_ms + 3 * d + 10 * h))
-  echo "캘린더 ChagokE2E(id=$id)와 일정 3개를 심었습니다"
+  echo "캘린더 ChagokE2E(id=$id)와 일정 4개를 심었습니다"
 }
 
 "$ACTION"

@@ -6,15 +6,16 @@ import { colors, useFont } from './theme';
 
 export const SETUP_TOTAL_STEPS = 4;
 
-export function SetupHeader({ step }: { step: number }) {
+/** step을 주지 않으면 첫 설정 밖(탭에서 연 화면)이라 로고만 보인다. */
+export function SetupHeader({ step }: { step?: number }) {
   const font = useFont();
   return (
     <View style={styles.wrap}>
       <View style={styles.top}>
         <Logo label={strings.setup.logoLabel} />
-        <Text style={[styles.count, font(400)]}>{strings.setup.stepOf(step, SETUP_TOTAL_STEPS)}</Text>
+        {step === undefined ? null : <Text style={[styles.count, font(400)]}>{strings.setup.stepOf(step, SETUP_TOTAL_STEPS)}</Text>}
       </View>
-      <View style={styles.bars}>
+      {step === undefined ? null : <View style={styles.bars}>
         {Array.from({ length: SETUP_TOTAL_STEPS }, (_, i) => (
           <View
             key={i}
@@ -22,7 +23,7 @@ export function SetupHeader({ step }: { step: number }) {
             style={[styles.bar, { backgroundColor: i < step ? colors.text : colors.border }]}
           />
         ))}
-      </View>
+      </View>}
     </View>
   );
 }

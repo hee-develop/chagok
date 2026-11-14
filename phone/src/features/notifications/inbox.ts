@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
-import { asyncKeyValueStorage, type KeyValueStorage } from './keyValue';
+import { deviceStore, type KeyValueStore } from '../../storage/keyValueStore';
 import type { InboxItem, ServerNotification } from './types';
 
 export const INBOX_KEY = 'chagok.notifications.inbox';
@@ -66,11 +66,11 @@ function parseStored(raw: string | null): { items: InboxItem[]; lastId: string |
 }
 
 export function createInbox({
-  storage = asyncKeyValueStorage,
+  storage = deviceStore,
   now = () => new Date(),
   maxItems = MAX_INBOX_ITEMS,
   ttlMs = INBOX_TTL_MS,
-}: { storage?: KeyValueStorage; now?: () => Date; maxItems?: number; ttlMs?: number } = {}): Inbox {
+}: { storage?: KeyValueStore; now?: () => Date; maxItems?: number; ttlMs?: number } = {}): Inbox {
   let state: InboxState = { loaded: false, items: [], lastId: null };
   const listeners = new Set<() => void>();
   let loading: Promise<void> | null = null;

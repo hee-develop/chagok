@@ -1,0 +1,26 @@
+# 첫 설정 끝에 뜨는 알림 권한 창에 거부로 답하는 공통 하위 flow(거부해도 앱은 홈에 알림을 쌓고 '켜면 이게 돼요' 한 줄을 남긴다).
+# 창은 두 겹일 수 있다: Expo Go의 '다른 Expo 앱에 이미 허용했다' 확인 창(DENY)과 Android 13+ 시스템 알림 창(Don't allow·허용 안 함).
+# 창이 없으면(이미 정해짐) 아무것도 하지 않는다. 영어("Don't allow", 따옴표가 곧은 것·굽은 것 모두)·한국어 에뮬레이터 모두 받는다.
+appId: ${APP_ID}
+---
+- extendedWaitUntil:
+    visible: "(DENY|Don.t allow|허용 안 함)"
+    timeout: 15000
+    optional: true
+- runFlow:
+    when:
+      visible: 'DENY'
+    commands:
+      - tapOn: 'DENY'
+- runFlow:
+    when:
+      visible: "Don.t allow"
+    commands:
+      - tapOn: "Don.t allow"
+- runFlow:
+    when:
+      visible: '허용 안 함'
+    commands:
+      - tapOn: '허용 안 함'
+- waitForAnimationToEnd:
+    timeout: 3000

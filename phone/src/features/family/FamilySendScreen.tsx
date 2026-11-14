@@ -13,6 +13,8 @@ type Props = {
   scheduleId: string;
   /** 설명에 쓰는 일정 제목 */
   title: string;
+  /** 첫 설정 밖(오늘 탭)에서 열었으면 true. 단계 표시를 빼고 닫으면 열었던 화면으로 돌아간다. */
+  standalone?: boolean;
   api?: FamilyApi;
   timeoutMs?: number;
 };
@@ -23,7 +25,7 @@ type LoadState = { status: 'loading' } | { status: 'error' } | { status: 'ready'
  * 일정 하나를 미리 묶어 둔 가족에게 보낸다. 서버가 보낼 때의 일정 내용(주소·채비 포함)을 담아 저장하면 '전달됨'이다.
  * 받는 쪽(가족의 차 브리핑·수락·완료)은 PT에서 프로토타입이다. 같은 가족에게 다시 보내면 내용을 새로 한다.
  */
-export function FamilySendScreen({ scheduleId, title, api = familyApi, timeoutMs = REQUEST_TIMEOUT_MS }: Props) {
+export function FamilySendScreen({ scheduleId, title, standalone = false, api = familyApi, timeoutMs = REQUEST_TIMEOUT_MS }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
@@ -68,8 +70,8 @@ export function FamilySendScreen({ scheduleId, title, api = familyApi, timeoutMs
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
-    else router.replace('/setup/fill-places');
-  }, [router]);
+    else router.replace(standalone ? '/' : '/setup/fill-places');
+  }, [router, standalone]);
 
   const send = async (member: FamilyMember) => {
     if (request.current) return;
@@ -97,7 +99,7 @@ export function FamilySendScreen({ scheduleId, title, api = familyApi, timeoutMs
   return (
     <View style={[styles.screen, { paddingTop: insets.top + 6 }]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <SetupHeader step={3} />
+        <SetupHeader step={standalone ? undefined : 3} />
         <View style={styles.titles}>
           <Text accessibilityRole="header" style={[styles.title, font(600)]}>{t.title}</Text>
           <Text style={[styles.description, font(400)]}>{t.description(title)}</Text>

@@ -1,0 +1,236 @@
+# 아래 탭 네 개와 오늘(홈) 화면. scripts/e2e-phone.sh 가 아래 env를 넣어 실행한다.
+#   APP_ID      Expo Go 번들 ID (Android host.exp.exponent)
+#   EXPO_URL    Metro 접속 주소 (exp://...), 경로 없이 앱 첫 화면으로 들어간다
+#   SERVER_URL  호스트에서 본 서버 주소
+# 오늘 일정이 시각에 흔들리지 않도록 기준 시각이 고정된 fixtures/schedules/pt-day.json(2026-12-03 08:50 서울)으로 돈다.
+# 이 flow만 따로 돌린다: E2E_FLOWS=today-tabs pnpm e2e:phone (스크립트가 pt-day 픽스처를 기본으로 쓴다).
+# 탭 막대는 글자가 화면 제목과 겹치므로 testID(tabbar-today/family/places/settings)로 누른다.
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+- openLink: ${EXPO_URL}
+
+# 1) 처음 여는 기기는 기존 첫 설정 흐름으로 간다(탭이 아니라 1단계 캘린더).
+- runFlow:
+    file: expo-dev-menu.yaml
+    env:
+      SCREEN_TITLE: '캘린더를 골라 주세요'
+- assertVisible: '1 / 4'
+- takeScreenshot: 01-first-run-setup
+
+# 2) 1~3단계를 건너뛰어 4단계에 닿는다. 연결하지 않고 [건너뛰기]를 눌러도 첫 설정을 끝낸 것으로 보고 오늘 탭으로 간다.
+- tapOn: '나중에 할게요'
+- extendedWaitUntil:
+    visible: '자주 가는 곳을 알려주세요'
+    timeout: 15000
+- tapOn: '건너뛰기'
+- extendedWaitUntil:
+    visible: '나중에 할게요'
+    timeout: 15000
+- tapOn: '나중에 할게요'
+- extendedWaitUntil:
+    visible: '차와 연결해요'
+    timeout: 15000
+- assertVisible: '4 / 4'
+- assertVisible: '건너뛰기'
+- takeScreenshot: 02-reached-step-4
+- tapOn: '건너뛰기'
+# 첫 설정 끝에서 알림 권한을 한 번 묻는다(정책 10.4). 여기서는 거부해 '켜면 이게 돼요' 한 줄이 오늘 탭 맨 위에 남는지 본다.
+- runFlow:
+    file: notification-deny.yaml
+- extendedWaitUntil:
+    visible: '오늘 일정'
+    timeout: 20000
+- extendedWaitUntil:
+    visible: '알림을 켜면 차곡 소식을 바로 알려 드려요.*'
+    timeout: 15000
+- assertVisible: '알림 설정 열기'
+- takeScreenshot: 03a-today-notification-denied
+- assertNotVisible: '4 / 4'
+- assertNotVisible: '차와 연결해요'
+- assertVisible: '차와 연결되지 않았어요'
+- takeScreenshot: 03-today-after-skip
+
+# 3) 앱을 껐다 다시 열어도 탭(오늘)으로 들어간다.
+# 껐다 켠 직후 Expo Go가 우리 주소를 열지 못하고 홈 화면에 머무는 일이 있어(에뮬레이터), device-calendar flow처럼 다시 연다.
+- retry:
+    maxRetries: 3
+    commands:
+      - stopApp
+      - openLink: ${EXPO_URL}
+      - runFlow:
+          file: expo-dev-menu.yaml
+          env:
+            SCREEN_TITLE: '오늘 일정'
+- assertNotVisible: '1 / 4'
+- takeScreenshot: 03-today
+
+# 4) 오늘 탭: 차 연결 상태(연결 안 됨), 받은 가족 요청 빈 상태, 오늘 일정
+- assertVisible: '차와 연결되지 않았어요'
+- assertVisible: '차 연결하기'
+- extendedWaitUntil:
+    visible: '육전집 점심'
+    timeout: 20000
+- assertVisible: '주간 회의'
+- assertVisible: '이동 없음 · 온라인 회의'
+- assertVisible: '장소가 빈 일정이 .*개 있어요'
+# 캘린더는 목 출처라 권한 안내가 없다.
+- assertNotVisible: '캘린더를 켜면 오늘 일정을 차에 보내 드려요.'
+# 받은 가족 요청은 화면 아래에 있어 스크롤해서 본다(빈 상태만).
+- scrollUntilVisible:
+    element: '아직 받은 요청이 없어요.'
+    direction: DOWN
+    timeout: 20000
+- takeScreenshot: 03b-today-bottom
+- scrollUntilVisible:
+    element: '주간 회의'
+    direction: UP
+    timeout: 20000
+
+# 5) 일정을 누르면 그 자리에서 장소·채비를 적는다(첫 설정 단계 표시 없이 열린다).
+- scrollUntilVisible:
+    element: '육전집 점심 .*'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '육전집 점심 .*'
+- extendedWaitUntil:
+    visible: '육전집 점심 장소 넣기'
+    timeout: 10000
+- assertVisible: '육전집 점심 이동 없음'
+- assertVisible: '육전집 점심 채비 넣기'
+- takeScreenshot: 04-expanded
+- scrollUntilVisible:
+    element: '육전집 점심 채비 넣기'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '육전집 점심 채비 넣기'
+- extendedWaitUntil:
+    visible: '육전집 점심 채비'
+    timeout: 15000
+- assertNotVisible: '3 / 4'
+- inputText: '도시락'
+- hideKeyboard
+- tapOn: '저장'
+- extendedWaitUntil:
+    visible: '오늘 일정'
+    timeout: 15000
+- scrollUntilVisible:
+    element: '채비 · 도시락'
+    direction: DOWN
+    timeout: 20000
+- takeScreenshot: 05-care-saved
+
+# 6) 장소 넣기 화면도 단계 표시 없이 열린다. 돌아온 오늘 탭은 일정이 펼쳐진 채로 남아 있다.
+- scrollUntilVisible:
+    element: '육전집 점심 장소 넣기'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '육전집 점심 장소 넣기'
+- extendedWaitUntil:
+    visible: '일정 장소 찾기'
+    timeout: 15000
+- assertNotVisible: '3 / 4'
+# 검색 입력에 키보드가 떠 있으면 시스템 뒤로가기는 키보드만 닫으므로 화면의 [취소]로 돌아간다.
+- tapOn: '취소'
+# 다시 읽는 동안에도 읽어 둔 목록을 그대로 두므로 스크롤 위치와 펼친 줄이 남는다(제목 '오늘 일정'은 위로 지나가 있을 수 있다).
+- extendedWaitUntil:
+    visible: '육전집 점심 장소 넣기'
+    timeout: 15000
+- assertNotVisible: '일정 장소 찾기'
+
+# 7) 가족 탭: 보내기 입구와 묶기 자리
+- tapOn:
+    id: 'tabbar-family'
+- extendedWaitUntil:
+    visible: '일정 고르러 가기'
+    timeout: 15000
+- assertVisible: '가족을 묶고 요청을 받는 기능은 곧 만나요.'
+- takeScreenshot: 06-family
+
+# 8) 장소 탭: 자주 가는 곳(단계 표시·다음 없음), 기억한 장소(서버에 심은 둘을 보이고 하나는 확인을 거쳐 지운다), 이동 없음 자리
+- runScript:
+    file: seed-place-memory.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+- tapOn:
+    id: 'tabbar-places'
+- extendedWaitUntil:
+    visible: '자주 가는 곳을 알려주세요'
+    timeout: 15000
+- assertNotVisible: '2 / 4'
+- scrollUntilVisible:
+    element: '기억한 장소'
+    direction: DOWN
+    timeout: 20000
+- extendedWaitUntil:
+    visible: '상무 피트니스.*'
+    timeout: 15000
+- takeScreenshot: 07-places
+- scrollUntilVisible:
+    element: '이름이 겹쳐서 갈 때마다 한 번 더 물어봐요.'
+    direction: DOWN
+    timeout: 20000
+- assertVisible: '스타벅스 상무점.*'
+- takeScreenshot: 07a-memory-list-bottom
+- scrollUntilVisible:
+    element: '헬스장 기억 지우기'
+    direction: UP
+    timeout: 20000
+- tapOn: '헬스장 기억 지우기'
+- extendedWaitUntil:
+    visible: '‘헬스장’ 기억을 지울까요\?'
+    timeout: 10000
+- takeScreenshot: 07b-memory-confirm
+- tapOn: '취소'
+- assertNotVisible: '‘헬스장’ 기억을 지울까요\?'
+- tapOn: '헬스장 기억 지우기'
+- tapOn: '헬스장 기억 지우기 확인'
+- extendedWaitUntil:
+    notVisible: '상무 피트니스.*'
+    timeout: 15000
+- assertVisible: '스타벅스 상무점.*'
+- takeScreenshot: 07c-memory-deleted
+- runScript:
+    file: assert-place-memory.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT: '스타벅스'
+      ABSENT: '헬스장'
+
+# 9) 설정 탭: 고정 안내와 입구
+- tapOn:
+    id: 'tabbar-settings'
+- extendedWaitUntil:
+    visible: '주행 중에는 차곡이 먼저 말하지 않아요.'
+    timeout: 15000
+- assertVisible: '캘린더 고르기'
+- assertVisible: '차 연결하기'
+- takeScreenshot: 08-settings
+
+# 10) 차 연결 입구는 기존 연결 화면을 단계 표시('4 / 4') 없이 연다. 연결하지 않고 뒤로 가면 설정 탭이다.
+- tapOn: '차 연결하기'
+- extendedWaitUntil:
+    visible: '차와 연결해요'
+    timeout: 15000
+- assertNotVisible: '4 / 4'
+- assertNotVisible: '건너뛰기'
+- takeScreenshot: 09-pair-from-tab
+- back
+- extendedWaitUntil:
+    visible: '주행 중에는 차곡이 먼저 말하지 않아요.'
+    timeout: 15000
+
+# 11) 캘린더 고르기 입구도 단계 표시('1 / 4') 없이 열리고 [닫기]로 설정 탭에 돌아온다.
+- tapOn: '캘린더 고르기'
+- extendedWaitUntil:
+    visible: '캘린더를 골라 주세요'
+    timeout: 15000
+- assertNotVisible: '1 / 4'
+- assertVisible: '닫기'
+- assertNotVisible: '나중에 할게요'
+- takeScreenshot: 10-calendar-from-tab
+- tapOn: '닫기'
+- extendedWaitUntil:
+    visible: '주행 중에는 차곡이 먼저 말하지 않아요.'
+    timeout: 15000

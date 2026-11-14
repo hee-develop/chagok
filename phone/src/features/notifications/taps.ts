@@ -26,13 +26,13 @@ export async function handleNotificationTap(tap: NotificationTap, inbox: Inbox =
   }
 }
 
-/** 캘린더 권한·선택 화면 경로. 일정을 보낼 수 없는 폰에서 `events-stale`을 누르면 여기로 간다(J5a 병합 뒤 탭 구조에 맞춰 바꾼다). */
-export const CALENDAR_SETTINGS_PATH = '/setup/calendar';
+/** 캘린더 권한·선택 화면 경로. 일정을 보낼 수 없는 폰에서 `events-stale`을 누르면 여기로 간다. 설정 탭의 [캘린더 고르기]와 같은 화면(`from=tab`: 단계 표시 없이 열리고 끝나면 이전 화면으로 돌아온다). */
+export const CALENDAR_SETTINGS_PATH = '/setup/calendar?from=tab';
 
 /** 화면 이동. 기본은 expo-router의 명령형 `router.push`(불러오는 시점을 늦춰 테스트가 라우터 없이 이 파일을 가져올 수 있게 한다). */
 const pushRoute = async (path: string) => {
   const { router } = await import('expo-router');
-  router.push(path as never);
+  router.push(path);
 };
 
 /**
