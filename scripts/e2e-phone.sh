@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 폰 앱 E2E (Android 기준): 서버와 Metro를 띄우고 Expo Go에서 Maestro flow(calendar-select, places, fill-places)를 차례로 실행한다.
+# 폰 앱 E2E (Android 기준): 서버와 Metro를 띄우고 Expo Go에서 Maestro flow(calendar-select, places, fill-places, pair-car)를 차례로 실행한다.
 # 사용법: scripts/e2e-phone.sh
 #
 # 캘린더 출처: 기본 flow는 목 캘린더(EXPO_PUBLIC_CALENDAR_SOURCE=mock)로 돈다. 실제 기기 캘린더 flow(device-calendar)는
@@ -8,7 +8,7 @@
 # device-calendar는 서버가 폰 일정을 받아 /schedules/today를 바꾸므로 같은 서버에서 다른 flow 뒤에 돌도록 항상 마지막에 둔다.
 #
 # 환경 변수
-#   E2E_FLOWS         실행할 flow 이름 (기본 "calendar-select places fill-places", 선택 항목: device-calendar)
+#   E2E_FLOWS         실행할 flow 이름 (기본 "calendar-select places fill-places pair-car", 선택 항목: device-calendar)
 #   E2E_FIXTURE_PATH  서버가 읽을 일정 파일 (기본 fixtures/schedules/gwangju-day.json)
 #   E2E_SERVER_PORT   서버 포트 (기본 8788)
 #   E2E_METRO_PORT    Metro 포트 (기본 8082)
@@ -36,11 +36,11 @@ SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 ADB="$SDK/platform-tools/adb"
 EMULATOR="$SDK/emulator/emulator"
 
-FLOWS="${E2E_FLOWS:-calendar-select places fill-places}"
+FLOWS="${E2E_FLOWS:-calendar-select places fill-places pair-car}"
 for flow in $FLOWS; do
   case "$flow" in
-    calendar-select|places|fill-places|device-calendar) ;;
-    *) echo "알 수 없는 flow입니다: $flow (calendar-select, places, fill-places, device-calendar만 가능)" >&2; exit 2 ;;
+    calendar-select|places|fill-places|pair-car|device-calendar) ;;
+    *) echo "알 수 없는 flow입니다: $flow (calendar-select, places, fill-places, pair-car, device-calendar만 가능)" >&2; exit 2 ;;
   esac
 done
 # device-calendar는 마지막에 돌린다(폰 일정이 서버에 남아 다른 flow의 목 일정 기대를 깨므로).
@@ -263,6 +263,7 @@ for flow in $FLOWS; do
   case "$flow" in
     fill-places) url="$(expo_url /--/setup/fill-places)" ;;
     places) url="$(expo_url /--/setup/places)" ;;
+    pair-car) url="$(expo_url /--/setup/pair-car)" ;;
     *) url="$(expo_url "")" ;;
   esac
   echo "== Maestro 실행: $flow (기기 $SERIAL)"

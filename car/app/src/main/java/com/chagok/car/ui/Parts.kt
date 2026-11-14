@@ -2,7 +2,9 @@ package com.chagok.car.ui
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.StateListDrawable
@@ -18,6 +20,9 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.chagok.car.R
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 import java.time.Duration
 
 /** 곡 심볼과 워드마크를 ink 색 VectorDrawable로 그린 이미지 */
@@ -265,6 +270,54 @@ fun contextTile(context: Context, d: DesignScale, tile: TileView, onPick: (Int) 
             },
         )
     }
+    is TileView.Pairing -> pairingTile(context, d, tile)
+}
+
+/**
+ * 휴대폰 연결 타일: 흰 바탕 QR(검은 점, 카메라가 읽기 쉽게) + 오른쪽에 '연결 번호' 라벨과 숫자(t-voice).
+ * 숫자 뷰는 [R.id.pairing_code]라 E2E가 읽어 폰 대신 서버에 보낸다.
+ */
+private fun pairingTile(context: Context, d: DesignScale, tile: TileView.Pairing): View =
+    LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = d.shape(d.color(R.color.surface_200), d.dimen(R.dimen.radius_l))
+        val pad = d.dimenInt(R.dimen.space_xl)
+        setPadding(pad, pad, pad, pad)
+        val side = d.dimenInt(R.dimen.pairing_qr)
+        val qrPad = d.dimenInt(R.dimen.pairing_qr_pad)
+        addView(
+            ImageView(context).apply {
+                setImageBitmap(qrBitmap(tile.qr, side - qrPad * 2))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                background = d.shape(Color.WHITE, d.dimen(R.dimen.radius_m))
+                setPadding(qrPad, qrPad, qrPad, qrPad)
+                contentDescription = "연결 QR"
+            },
+            LinearLayout.LayoutParams(side, side),
+        )
+        addView(
+            LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(d.text(R.style.t_label, d.color(R.color.ink_3)).apply { text = "연결 번호" })
+                addView(
+                    d.text(R.style.t_voice, d.color(R.color.ink)).apply {
+                        id = R.id.pairing_code
+                        text = tile.code
+                        isSingleLine = true
+                    },
+                )
+                addView(d.text(R.style.t_body, d.color(R.color.ink_3)).apply { text = "휴대폰 차곡 앱 › 차 연결" })
+            },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = d.dimenInt(R.dimen.space_3xl) },
+        )
+    }
+
+/** [text]를 담은 QR 그림(검은 점·흰 바탕, 여백 없음). 한 변 [size]px */
+private fun qrBitmap(text: String, size: Int): Bitmap {
+    val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size, mapOf(EncodeHintType.MARGIN to 0))
+    val pixels = IntArray(size * size) { i -> if (matrix.get(i % size, i / size)) Color.BLACK else Color.WHITE }
+    return Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888)
 }
 
 /**

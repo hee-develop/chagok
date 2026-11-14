@@ -12,7 +12,9 @@ import java.time.Instant
 /**
  * E2E용 가짜 차량 신호·내비 결과·들은 말을 세션에 넣는다. 값은 이름으로 찾는다.
  *
- * - `now`: ISO8601 시각. 데모 시계와 일정 기준 시각을 그 시각으로 맞추고 상태를 비운다(가장 먼저 처리)
+ * - `paired`: true면 휴대폰과 연결된 것으로 두고(말하지 않음), false면 연결을 풀어(서버도) 연결 카드를 띄운다. 가장 먼저 처리한다.
+ *   연결 상태는 차에 저장돼 남는다. 연결 카드가 없는 기존 흐름의 E2E는 시작할 때 `paired=true`를 넣는다
+ * - `now`: ISO8601 시각. 데모 시계와 일정 기준 시각을 그 시각으로 맞추고 상태를 비운다(연결 다음에 처리)
  * - `trip`: 소요 시간 조회 결과를 초 단위로(`2400`). `none`이면 "모름", `real`이면 실제 내비([DebugInjection])
  * - `route`: 길안내 요청 결과 `ok`·`fail`. `real`이면 실제 내비([DebugInjection])
  * - `listen`: `off`면 말이 끝나도 실제 STT를 열지 않는다. `real`이면 연다
@@ -26,6 +28,7 @@ import java.time.Instant
  */
 object DebugSignals {
     fun apply(host: SessionHost, value: (String) -> String?) {
+        value("paired")?.let { host.setPaired(it.toBoolean()) }
         value("now")?.let { host.resetDemo(Instant.parse(it)) }
         value("trip")?.let { DebugInjection.tripSeconds = tripOf(it) }
         value("route")?.let { DebugInjection.routeOk = routeOf(it) }

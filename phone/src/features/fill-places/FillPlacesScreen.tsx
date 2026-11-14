@@ -194,11 +194,11 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
           </Pressable> : null}
         </View> : null}
         <Pressable accessibilityRole="button" accessibilityState={{ disabled: !ready || saving }} disabled={!ready || saving}
-          onPress={() => router.push('/setup/talk')} style={[styles.primary, (!ready || saving) && styles.disabled]}>
+          onPress={() => router.push('/setup/pair-car')} style={[styles.primary, (!ready || saving) && styles.disabled]}>
           <Text style={[styles.primaryText, font(600)]}>{t.next}</Text>
         </Pressable>
         <Pressable accessibilityRole="button" accessibilityState={{ disabled: saving }} disabled={saving}
-          onPress={() => router.push('/setup/talk')} style={styles.later}>
+          onPress={() => router.push('/setup/pair-car')} style={styles.later}>
           <Text style={[styles.secondaryText, font(400)]}>{t.later}</Text>
         </Pressable>
       </View>

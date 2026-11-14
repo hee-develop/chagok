@@ -12,7 +12,9 @@ import com.chagok.car.DebugHooks
 import com.chagok.car.flow.DriveSession
 import com.chagok.car.flow.Effect
 import com.chagok.car.flow.Event
+import com.chagok.car.flow.HttpPairingClient
 import com.chagok.car.flow.HttpScheduleFetcher
+import com.chagok.car.flow.PairingClient
 import com.chagok.car.flow.ScheduleFetcher
 import com.chagok.car.flow.ScheduleOrigin
 import com.chagok.car.flow.ScheduleRefresher
@@ -58,6 +60,7 @@ class SessionHost(
     private val context: Context,
     val clock: DemoClock = DemoClock(),
     fetcher: ScheduleFetcher = HttpScheduleFetcher(BuildConfig.SERVER_URL),
+    pairingClient: PairingClient = HttpPairingClient(BuildConfig.SERVER_URL),
     adapters: (
         post: (Event) -> Unit,
         onSpeaking: (Boolean) -> Unit,
@@ -84,7 +87,8 @@ class SessionHost(
         zone = { clock.zone },
         logger = AndroidLogger,
     )
-    private val session = DriveSession(clock, source, store.load())
+    private val session = DriveSession(clock, source, store.load(), paired = store.paired)
+    private val pairing = PairingController(pairingClient, store, ::post)
     private val refresher = ScheduleRefresher(source, ::post, ::dispatch)
 
     /** 이번 이벤트를 처리하는 중 세션이 일정 다시 받기를 요청했는가. 처리가 끝난 뒤 한 번만 받는다. */
@@ -106,6 +110,12 @@ class SessionHost(
     // 시동 신호가 없을 때만 앱 진입(onResume)을 탑승으로 쓴다. 지원 여부는 Car 연결 뒤에 안다.
     private var ignitionSupported: Boolean? = null
     private var resumed = false
+
+    /** Suspend 중인가(어댑터를 멈춘 동안). 연결 확인도 멈춘다. */
+    private var suspended = false
+
+    /** 연결 확인을 마지막으로 켰나 껐나. 연결 카드가 보일 수 있을 때(앱이 앞, 정차, Suspend 아님)만 켠다. */
+    private var pairingActive = false
 
     // 시스템 종료 알림. Suspend로 가는 신호 중 서드파티 앱이 받을 수 있는 것(시동 OFF·LOCK과 함께 쓴다).
     private val shutdownReceiver = object : BroadcastReceiver() {
@@ -137,6 +147,7 @@ class SessionHost(
     fun onActivityResumed() {
         main.post {
             resumed = true
+            updatePairing()
             // Suspend 중이었다면 어댑터를 다시 켠다. 포커스·재생은 되찾지 않는다.
             post(Event.Resumed)
             if (ignitionSupported == false) post(Event.AppEntered)
@@ -146,7 +157,10 @@ class SessionHost(
     }
 
     fun onActivityPaused() {
-        main.post { resumed = false }
+        main.post {
+            resumed = false
+            updatePairing()
+        }
     }
 
     private fun onIgnitionSupport(supported: Boolean) {
@@ -171,6 +185,9 @@ class SessionHost(
         }
     }
 
+    /** 디버그·데모용: 휴대폰 연결 상태를 바꾼다. 같은 스레드에서 이어 넣는 이벤트보다 먼저 세션에 들어간다. */
+    fun setPaired(paired: Boolean) = pairing.setPaired(paired)
+
     fun advanceClock(by: Duration) {
         clock.offset += by
     }
@@ -185,6 +202,14 @@ class SessionHost(
             refreshSchedules()
         }
         if (ui.driving != session.isDriving) publish(ui.copy(driving = session.isDriving))
+        updatePairing()
+    }
+
+    private fun updatePairing() {
+        val active = resumed && !suspended && !session.isDriving
+        if (active == pairingActive) return
+        pairingActive = active
+        pairing.setActive(active)
     }
 
     private fun execute(effect: Effect) {
@@ -199,10 +224,12 @@ class SessionHost(
             Effect.EnterSuspend -> {
                 navi.stop()
                 voice.stop()
+                suspended = true
             }
             Effect.ExitSuspend -> {
                 navi.start()
                 voice.start()
+                suspended = false
             }
             is Effect.RequestTravelTime -> navi.requestTravelTime(effect.requestId, effect.place)
             is Effect.StartRoute -> post(Event.RouteRequestResult(navi.startRoute(effect.place)))

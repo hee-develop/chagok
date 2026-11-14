@@ -3,6 +3,7 @@ import type { DayFixture, FamilyMember, MockCalendar, PlacesCatalog } from './fi
 import { createCalendarsRoute, createSelectionStore, type SelectionStore } from './routes/calendars.js';
 import { createEventsRoute, createEventsStore, type EventsStore } from './routes/events.js';
 import { createFamilyRoute, createFamilyStore, type FamilyStore } from './routes/family.js';
+import { createPairingRoute, createPairingStore, type PairingStore } from './routes/pairing.js';
 import { createSchedulesRoute } from './routes/schedules.js';
 import { createFavoritesStore, createPlacesRoute, type FavoritesStore } from './routes/places.js';
 
@@ -27,6 +28,8 @@ export type AppOptions = {
   familyMembers: FamilyMember[];
   /** 가족에게 보낸 요청 저장소. 없으면 인스턴스마다 새로 만든다. */
   familyStore?: FamilyStore;
+  /** 차–폰 연결 저장소. 없으면 인스턴스마다 새로 만든다. */
+  pairing?: PairingStore;
 };
 
 export const createApp = ({
@@ -41,6 +44,7 @@ export const createApp = ({
   isLoopback,
   familyMembers,
   familyStore = createFamilyStore(now),
+  pairing = createPairingStore(now),
 }: AppOptions) =>
   new Hono()
     .get('/health', (c) => c.json({ ok: true as const }))
@@ -48,6 +52,7 @@ export const createApp = ({
     .route('/places', createPlacesRoute(places, favorites))
     .route('/events', createEventsRoute(events, { now, isLoopback, loopbackOnly: eventsLoopbackOnly }))
     .route('/family', createFamilyRoute(familyMembers, familyStore))
+    .route('/pairing', createPairingRoute(pairing))
     .route('/schedules', createSchedulesRoute(fixture, calendars, store, places, events, favorites, { members: familyMembers, store: familyStore }, now));
 
 export type AppType = ReturnType<typeof createApp>;

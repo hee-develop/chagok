@@ -28,6 +28,8 @@ class BoardingBriefingTest {
     @Before
     fun setUp() {
         device.pressHome()
+        // 연결 카드 없이 바로 브리핑하는 흐름이다(연결은 PairingTest).
+        host.setPaired(true)
         host.post(Event.RestrictionChanged(false))
         host.resetDemo()
         host.post(Event.GearChanged(Gear.PARK))

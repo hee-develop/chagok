@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 차량 앱 E2E(Maestro): debug 앱을 설치하고 서버를 띄운 뒤 flow를 돌리고 서버를 내린다.
-# flow는 e2e/maestro/car/ 아래 boarding-briefing.yaml, depart-route.yaml, arrival-next.yaml 순서로 돈다.
+# flow는 e2e/maestro/car/ 아래 pairing.yaml, boarding-briefing.yaml, depart-route.yaml, arrival-next.yaml 순서로 돈다.
 # 사용: pnpm e2e:car   (에뮬레이터 하나가 떠 있어야 한다. 여러 기기가 붙어 있으면 ANDROID_SERIAL=emulator-5554)
 # 환경 변수: E2E_FRESH_INSTALL=1 이면 앱을 지우고 설치한다(처음 설치 상태). E2E_OUT은 산출물 루트(기본 e2e/output/car).
 # 실행마다 $E2E_OUT/<시각>/ 폴더를 새로 만들고 스크린샷(shots/)과 로그는 그 안에만 둔다.
@@ -91,10 +91,11 @@ curl -fs "http://127.0.0.1:$PORT/health" >/dev/null || { echo "서버가 뜨지 
 
 echo "== Maestro 실행 (스크린샷: $SHOTS)"
 cd "$ROOT"
-for flow in boarding-briefing depart-route arrival-next; do
+for flow in pairing boarding-briefing depart-route arrival-next; do
   echo "-- $flow"
   "$MAESTRO" test "e2e/maestro/car/$flow.yaml" \
     --device "$ANDROID_SERIAL" \
     -e SHOT_DIR="$SHOTS" \
+    -e SERVER_URL="http://127.0.0.1:$PORT" \
     --test-output-dir "$RUN_DIR/maestro/$flow"
 done

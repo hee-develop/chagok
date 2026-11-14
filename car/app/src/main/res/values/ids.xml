@@ -6,4 +6,6 @@
     <item name="briefing_card" type="id" />
     <!-- 목적지 후보 줄 표식(BriefingCardView가 넘칠 때 줄 높이를 줄인다) -->
     <item name="candidate_row" type="id" />
+    <!-- 휴대폰 연결 카드의 번호(E2E가 읽는다) -->
+    <item name="pairing_code" type="id" />
 </resources>

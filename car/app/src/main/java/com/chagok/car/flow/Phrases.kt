@@ -35,6 +35,9 @@ object Phrases {
 
     // 카드 머리 상태 칩(StatusChip). 다른 문구를 만들지 않는다.
     const val STATUS_BEFORE_DEPARTURE = "정차 중 · 출발 전"
+    const val STATUS_PAIRING = "휴대폰 연결 전"
+    const val PAIRING_VOICE = "휴대폰과 연결해 주세요."
+    const val PAIRING_SUB = "휴대폰 차곡 앱에서 QR을 찍거나 번호를 넣어 주세요."
 
     // 버튼 라벨은 운전자가 소리 내 말할 문장 그대로
     const val ACCEPT_DEPART = "응, 출발"
@@ -318,6 +321,17 @@ object Phrases {
     }
 
     /** 일정을 불러오지 못했을 때 보이는 카드. 닫기 하나. */
+    /**
+     * 휴대폰과 연결하기 전 카드. QR과 숫자 6자리를 보이고 말하지 않는다. 버튼은 없다(연결되면 접힌다).
+     * 숫자는 세 자리씩 띄워 읽기 쉽게 한다.
+     */
+    fun pairingCard(code: String, qr: String) = CardContent(
+        status = STATUS_PAIRING,
+        voice = PAIRING_VOICE,
+        sub = PAIRING_SUB,
+        tiles = listOf(TileView.Pairing(qr = qr, code = if (code.length == 6) "${code.take(3)} ${code.drop(3)}" else code)),
+    )
+
     fun scheduleUnavailableCard() = CardContent(
         status = STATUS_BEFORE_DEPARTURE,
         voice = SCHEDULE_UNAVAILABLE,

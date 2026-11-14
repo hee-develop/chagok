@@ -18,6 +18,9 @@ sealed interface TileView {
 
     /** 목적지 묻기의 후보 목록 타일(한 줄 가득). 줄 순서가 후보 번호이고 줄을 누르면 그 후보로 길안내한다. */
     data class Candidates(val label: String, val rows: List<CandidateRow>) : TileView
+
+    /** 휴대폰 연결 타일(한 줄 가득): QR 그림 + 연결 번호. [qr]은 QR에 담을 글, [code]는 화면에 보일 번호("123 456"). */
+    data class Pairing(val qr: String, val code: String) : TileView
 }
 
 /** 후보 한 줄. [name]은 부르는 이름("집", "광주송정역"), [detail]은 장소 이름·주소나 "13:00 육전집 점심". */

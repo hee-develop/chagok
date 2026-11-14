@@ -83,6 +83,18 @@ sealed interface Event {
 
     /** [generation]세대의 일정 받기가 끝났다(성공·실패 모두). 마지막으로 시작한 세대일 때만 보류한 탑승 판단을 이어 간다. */
     data class ScheduleLoaded(val generation: Int) : Event
+
+    /** 휴대폰과 연결하기 전에 서버가 낸 연결 코드. 연결 카드에 [qr]과 숫자 [code]를 보인다. 새 코드가 오면 카드를 바꾼다. */
+    data class PairingCodeIssued(val code: String, val qr: String) : Event
+
+    /**
+     * 휴대폰과 연결됐다. [brief]가 true(폰이 QR·번호를 보내 연결됨)면 연결 카드를 접고 일정을 새로 받아 탑승으로 브리핑한다.
+     * 디버그로 미리 연결해 둘 때는 false라 아무것도 말하지 않는다.
+     */
+    data class Paired(val brief: Boolean) : Event
+
+    /** 연결이 풀렸다(데모 초기화). 새 코드가 오면 다시 연결 카드를 보인다. */
+    data object Unpaired : Event
 }
 
 /** 저장할 상태. 어댑터가 SharedPreferences에 둔다. */
@@ -145,6 +157,8 @@ class DriveSession(
     private val clock: Clock,
     private val source: ScheduleSource,
     restored: Snapshot? = null,
+    /** 휴대폰과 연결돼 있는가. 연결 전에는 탑승해도 브리핑하지 않고 연결 카드(QR·숫자)만 보인다. */
+    paired: Boolean = true,
 ) {
     private val zone get() = clock.zone
 
@@ -199,6 +213,11 @@ class DriveSession(
 
     /** P단에 넣으며 위치를 물었고 아직 답을 받지 않았다. 답이 오면 도착을 판단한다. */
     private var awaitingParkLocation = false
+
+    private var paired = paired
+
+    /** 연결 전 마지막으로 받은 연결 코드. 연결되면 버린다. */
+    private var pairingCode: Event.PairingCodeIssued? = null
     private var seq = 0
 
     /** 결과 한 줄을 보이고 있으면 그 타이머 ID, 아니면 null */
@@ -218,6 +237,8 @@ class DriveSession(
         var notice: String? = null,
         /** 일정을 불러오지 못했다는 안내 카드인가 */
         val isScheduleNotice: Boolean = false,
+        /** 휴대폰 연결 카드인가. 시간이 지나도 접지 않고 연결되면 접는다. */
+        val isPairing: Boolean = false,
     )
 
     init {
@@ -288,7 +309,12 @@ class DriveSession(
             is Event.LocationChanged -> onLocation(event.position)
             Event.DestinationArrived -> onDestinationArrived()
             is Event.ScheduleLoading, is Event.ScheduleLoaded -> if (loadedNow) onSchedulesLoaded(out)
+            is Event.PairingCodeIssued -> onPairingCode(event, out)
+            is Event.Paired -> onPaired(event.brief, out)
+            Event.Unpaired -> onUnpaired(out)
         }
+        // 연결 전에는 정차 중이면 늘 연결 카드를 둔다(초기화·주행 뒤 정차에도 다시 보인다).
+        if (!paired) showPairingCard(out)
         flush(out)
         if (enterSuspend) {
             enterSuspend = false
@@ -361,6 +387,11 @@ class DriveSession(
      */
     private fun onBoarded(out: MutableList<Effect>, allowRefresh: Boolean = true) {
         if (suspended || motion() != Motion.STOPPED || pending != null) return
+        // 연결 전에는 탑승을 소진하지 않고 연결 카드만 보인다. 연결되면 [onPaired]가 탑승으로 이어 간다.
+        if (!paired) {
+            showPairingCard(out)
+            return
+        }
         if (loadingSchedules) {
             heldBoarding = true
             return
@@ -396,6 +427,50 @@ class DriveSession(
         val id = ++seq
         pending = PendingBoarding(id, kind, checkNotNull(target).id)
         out += Effect.RequestTravelTime(id, place)
+    }
+
+    /** 연결 카드를 보이거나 새 코드로 바꾼다. 정차 중에만, 코드를 받은 뒤에만 보인다. 말하지 않고 시간이 지나도 접지 않는다. */
+    private fun showPairingCard(out: MutableList<Effect>) {
+        val code = pairingCode ?: return
+        if (suspended || motion() != Motion.STOPPED) return
+        val current = card
+        if (current != null && !current.isPairing) return
+        val view = Phrases.pairingCard(code.code, code.qr)
+        if (current?.view == view) return
+        card = CardState(view, null, ++seq, isPairing = true)
+        out += Effect.ShowCard(view)
+    }
+
+    private fun onPairingCode(event: Event.PairingCodeIssued, out: MutableList<Effect>) {
+        if (paired) return
+        pairingCode = event
+        showPairingCard(out)
+    }
+
+    /**
+     * 연결됐다. 연결 카드를 접고, 폰이 방금 넣은 일정·장소·채비를 반영하도록 일정을 다시 받은 뒤 탑승으로 판단한다.
+     * 정차 중이 아니면(주행 중·Suspend) 다음 탑승을 기다린다.
+     */
+    private fun onPaired(brief: Boolean, out: MutableList<Effect>) {
+        if (paired) return
+        paired = true
+        pairingCode = null
+        if (card?.isPairing == true) closeCard(out)
+        if (!brief || suspended || motion() != Motion.STOPPED) return
+        loadingSchedules = true
+        loadGeneration = AWAITING_GENERATION
+        heldBoarding = true
+        out += Effect.RefreshSchedules
+    }
+
+    private fun onUnpaired(out: MutableList<Effect>) {
+        if (!paired) return
+        paired = false
+        pending = null
+        acceptedRoute = false
+        heldBoarding = false
+        clearResult(out)
+        if (card != null) closeCard(out, instant = true)
     }
 
     private fun onSchedulesLoaded(out: MutableList<Effect>) {
