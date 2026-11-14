@@ -4,19 +4,12 @@ appId: ${APP_ID}
 - launchApp:
     clearState: true
 - openLink: ${EXPO_URL}
+
+# Expo Go 개발자 메뉴 안내를 닫고 우리 화면을 기다린다(expo-dev-menu.yaml 설명 참고).
 - runFlow:
-    when:
-      visible: 'Continue'
-    commands:
-      - tapOn: 'Continue'
-- runFlow:
-    when:
-      visible: 'Go home'
-    commands:
-      - back
-- extendedWaitUntil:
-    visible: '장소가 빈 일정이 2개 있어요'
-    timeout: 120000
+    file: expo-dev-menu.yaml
+    env:
+      SCREEN_TITLE: '장소가 빈 일정이 2개 있어요'
 - assertVisible: '3 / 4'
 - assertVisible: '육전집 점심'
 - assertVisible: '✓ 광주 육전집'

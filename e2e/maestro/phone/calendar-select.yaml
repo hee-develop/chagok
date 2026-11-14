@@ -8,21 +8,11 @@ appId: ${APP_ID}
     clearState: true
 - openLink: ${EXPO_URL}
 
-# Expo Go 첫 실행 안내와 개발자 메뉴가 뜨면 닫는다.
+# Expo Go 개발자 메뉴 안내를 닫고 우리 화면을 기다린다(expo-dev-menu.yaml 설명 참고).
 - runFlow:
-    when:
-      visible: 'Continue'
-    commands:
-      - tapOn: 'Continue'
-- runFlow:
-    when:
-      visible: 'Go home'
-    commands:
-      - back
-
-- extendedWaitUntil:
-    visible: '캘린더를 골라 주세요'
-    timeout: 120000
+    file: expo-dev-menu.yaml
+    env:
+      SCREEN_TITLE: '캘린더를 골라 주세요'
 - assertVisible: '1 / 4'
 - assertVisible: '캘린더 3개 연결하기'
 - takeScreenshot: 01-initial
