@@ -10,6 +10,7 @@ PT 대본의 "폰에서 일정·주소·채비를 넣고 → 마지막에 차 �
 - `Seat { seatId, carId, name, phoneId, phoneToken, pleosProfileId, btDeviceId, pairedAt, lastEventsAt, lastPresenceAt, presence }`: 자리 이름은 폰 기기 이름이고 같은 차에 겹치면 ` 2`를 붙입니다(빈 이름은 '내 폰', 40자 상한). `lastEventsAt`은 마지막으로 일정을 받은 시각, `lastPresenceAt`·`presence`는 폰이 차 블루투스에 붙었다·떨어졌다고 알린 마지막 시각과 상태입니다. **한 폰은 한 자리만** 가집니다: 다른 자리(다른 차 포함)의 토큰을 든 폰이 새 차에 연결하거나 다른 자리를 이어받으면 예전 자리는 끊깁니다(그 자리 삭제).
 - 지난번 고른 자리: 차가 `PUT /drivers/selected`로 정하고, 고른 적이 없으면 '가장 최근에 연결한 자리'로 내려 줍니다(정책서 10.1 ④).
 - 자리 데이터(`SeatData`): 일정(`EventsStore`)·캘린더 선택·자주 가는 곳·가족 요청·일정별 장소 보정과 채비·장소 기억(`memory`, `docs/place-resolve.md`. 연결된 자리 200개·연결 전 버킷 20개, 넘으면 오래된 것부터 버림). 앞으로 생길 도착 횟수·이동 없음 기억 저장소도 여기에 붙입니다(자리를 지우면 함께 지워짐).
+  - **등록 방식**: 자리 데이터는 `SeatData` 한 묶음이고, 자리를 지우면(연결 끊기·차 초기화·무소식 정리) 묶음째 버려지므로 **새 항목은 `SeatData`에 붙이기만 하면 삭제에 자동으로 포함됩니다**(지우는 코드를 따로 짜지 않음). 폰 바꾸기 때의 처리는 `seatData.ts`의 `SEAT_DATA_POLICY`(`keep` 기억은 남김 / `reset` 옛 폰 캘린더에서 온 것이라 비움)에 항목마다 적어야 하고, `Record<keyof SeatData, …>`라 빠뜨리면 타입 오류입니다. `reset` 항목은 `apply('replaced')`가 직접 비웁니다. 자리 밖에 자리 id로 붙는 것(알림함·중복 억제 키·푸시 토큰)은 `removed`·`replaced` 이벤트를 받는 `Notifier.forget`이 지웁니다.
 - **연결 전 버킷**: 아직 토큰이 없는 폰(첫 설정 1~3단계)의 데이터는 그 폰의 **기기 id별 버킷**(`SeatData`와 같은 모양)에 쌓이고, `POST /pair/claim`(옛 `/pairing/claim` 포함) 때 **그 요청의 기기 id 버킷만** 새 자리로 옮겨집니다. 버킷은 **본문 검증을 통과한 쓰기에서만** 만들어집니다(잘못된 본문·없는 일정·너무 큰 본문은 버킷을 만들지 않고, 읽기와 `DELETE /events`도 만들지 않음). 한 요청 주소가 10분에 10개까지만 새로 만들 수 있고(`MAX_BUCKET_CREATES_PER_SOURCE`, 넘으면 429 `rate-limited`, 이미 가진 버킷에 쓰는 것은 세지 않음), 500개(`MAX_BUCKETS`)가 차면 새 기기를 거절하지 않고 **가장 오래 쓰지 않은 버킷(비어 있는 버킷 먼저)을 밀어낸 뒤** 만듭니다. 7일(`BUCKET_TTL_MS`) 동안 **쓰지 않으면** 버려지며 TTL은 쓰기만 새로 시작합니다(읽기는 갱신하지 않음).
 - 용량(모두 메모리, 서버를 다시 켜면 사라짐): 한 차에 폰 8대(`MAX_SEATS_PER_CAR`), 서버가 아는 차 200대(`MAX_CARS`). 일정 저장 예산은 **연결된 자리(기본 자리 포함) 32MB(`MAX_SEAT_EVENT_BYTES`)와 연결 전 버킷 32MB(`MAX_BUCKET_EVENT_BYTES`)로 따로** 세므로 버킷이 가득 차도 연결된 자리의 저장은 영향받지 않습니다. 버킷 하나는 일정 512KB(`MAX_EVENT_BYTES_PER_BUCKET`)까지입니다. 연결된 자리의 예산을 넘기는 `PUT /events`와, 버킷 하나의 상한을 넘기는 `PUT /events`는 429 `capacity`이고, 버킷 예산이 모자라면 다른 버킷을 오래 쓰지 않은 순으로 밀어내 자리를 냅니다(연결된 자리는 밀어내지 않음).
 
@@ -72,7 +73,7 @@ PT 대본의 "폰에서 일정·주소·채비를 넣고 → 마지막에 차 �
   - 폰 바꾸기(`mode: "replace"`): 같은 자리를 이어받습니다. **옛 폰의 토큰은 바로 무효(401)**, 옛 폰의 일정·캘린더 선택·보정·채비는 버려 '받았고 0건' 상태가 되고(픽스처로 떨어지지 않음), 자주 가는 곳·가족 요청 같은 **기억은 그대로** 둡니다. 새 폰의 버킷이 있으면 그 일정·캘린더 선택·보정·채비만 반영합니다(버킷의 자주 가는 곳은 안 씀). 자리 이름은 새 폰 이름으로 바뀌고, 그 폰이 다른 자리를 가지고 있었다면 그 자리는 끊깁니다.
   - 오류: 400(본문·기기 id), 404(없거나 만료된 코드), 409 `seat-limit`, 429 `locked`(아래).
 - `GET /pair` → 200 `{ paired: true, seatId, name, pairedAt, lastEventsAt, presence, lastPresenceAt }`(연결됨: 자리 이름·연결 시각) / 401(연결 안 됨: 토큰이 없거나 끊기거나 바뀜). `carId`는 주지 않습니다. 폰은 `pairingApi.status`로 부릅니다.
-- `DELETE /pair` → `{ disconnected: true, seatId }`. 차 연결 끊기: 그 자리의 연결·일정·기억을 바로 지우고 차 목록에서 뺍니다. 그 자리가 '지난번 고른 자리'였으면 최근 연결 자리로 돌아갑니다. 다른 자리는 그대로입니다.
+- `DELETE /pair` → `{ disconnected: true, seatId }`. 차 연결 끊기: 그 자리의 연결·일정·기억을 바로 지우고 차 목록에서 뺍니다. 그 자리가 '지난번 고른 자리'였으면 최근 연결 자리로 돌아갑니다. 다른 자리는 그대로입니다. 지워지는 것(정책서 10.9): 자리·폰 토큰·접속 상태, 일정, 캘린더 선택, 일정별 보정(장소·이동 없음)과 채비, 자주 가는 곳, 가족 요청, (아래 항목이 추가되면) 장소 기억·도착 횟수·이동 없음 기억 등 `SeatData` 전부, 알림함·중복 억제 키·푸시 토큰. `server/test/seat-cleanup.test.ts`가 항목별로 확인합니다.
 - `POST /presence` `{ connected: boolean }` → `{ seatId, connected, at }`. 차 블루투스에 붙었다·떨어졌다 알림(갤럭시 폰 앱 몫. 아직 폰에서 부르는 곳은 없고 서버만 있습니다).
 
 ### 코드 시도 제한
@@ -83,6 +84,22 @@ PT 대본의 "폰에서 일정·주소·채비를 넣고 → 마지막에 차 �
 - **서버 전체**에서 60초 안에 틀린 코드가 120번(`MAX_GLOBAL_FAILURES`) 쌓이면 모든 주소의 claim을 그 창이 지날 때까지 막습니다(주소를 바꿔 가며 찍는 공격).
 - 어떤 잠금도 `Retry-After` 60초(`MAX_LOCK_MS`)를 넘지 않습니다(표가 차 있거나 전체 상한에 걸린 동안 정상 사용자도 최대 60초 429를 볼 수 있음).
 - 요청 주소는 node 서버의 연결 주소입니다(`createApp({ clientAddress })`로 바꿈). 프록시 뒤에서는 모든 요청이 한 주소로 보이므로 배포할 때 바꿔야 하며 `X-Forwarded-For`는 속일 수 있어 기본으로 믿지 않습니다. 알 수 없으면 `unknown` 하나로 묶습니다.
+
+## 정리와 정기 작업 (`server/src/jobs.ts`)
+
+정책서 11장 '서버 정기 작업'과 10.9 '앱만 지운 경우'입니다. 스케줄러(`scheduler.ts`, 작업 목록은 [알림 문서](notifications.md))에 `registerMaintenanceJobs`가 등록하고(`index.ts`가 한 번 부름), 판정은 모두 주입 시계로 합니다. `createApp({ seatData })`로 넘긴 자리 데이터 저장소를 정리 작업이 같이 봅니다(서버 시작 코드가 밖에서 만들어 넘김).
+
+| 작업 | 언제 | 하는 일 |
+| --- | --- | --- |
+| `purge-expired` | 서울 새벽 04:00 이후 그날 첫 판정에서 하루 한 번(`DAWN_HOUR`, 가안) | 모든 자리(기본 자리 포함)·연결 전 버킷의 **날짜가 지난 일정**과 그 일정에 딸린 보정·채비를 지우고(서울 날짜 기준: 오늘 0시 전에 끝난 일정, 자정을 넘긴 일정은 남음), TTL이 지난 연결 전 버킷·만료된 코드·시도 기록·자리 없이 오래된 차를 비운다. 날짜 지난 일정은 읽을 때·교체할 때도 지워지므로 이 작업은 아무도 읽지 않는 자리의 메모리를 비우는 것이다 |
+| `prune-silent-seats` | 같은 새벽 판정 | **30일 동안 일정이 안 온 자리 삭제**(`SILENT_SEAT_AFTER_MS`, 정책서 12장 가안) |
+
+- 새벽 판정(`dailyAtDawn`): 서울 날짜마다 04:00 이후 처음 불릴 때 한 번 돌고, 04:00에 서버가 꺼져 있었으면 켜진 뒤 첫 판정에서 따라잡고, 작업이 던지면 다음 판정(5분 뒤)에 다시 시도합니다. UTC가 아니라 서울 날짜 기준입니다.
+- 무소식 판정: 기준 시각은 `max(연결 시각, 마지막 일정 수신)`이고(한 번도 못 받은 자리는 연결 시각, 폰 바꾸기·재연결은 연결 시각이 새로 시작) `지금 - 기준 >= 30일`이면 지웁니다(30일에서 1ms 모자라면 남고 정확히 30일이면 지움. `일정을 못 받고 있어요` 알림과 같은 기준). 일정 수신 외의 신호(접속 상태 등)는 세지 않습니다.
+- 지우는 경로는 연결 끊기와 같습니다(`SeatStore.removeSeat` → `removed` 이벤트): 그 자리의 연결·폰 토큰·일정·기억·알림·푸시 토큰이 함께 지워지고 다른 자리는 그대로입니다.
+- **차 토큰과의 관계**: 마지막 자리가 정리된 차는 그 시점부터 '자리 없는 차'라 차 토큰이 **코드 5분 + 1시간(`SEATLESS_CAR_TTL_MS`) 동안만** 유효합니다(그 사이 코드를 받거나 초기화하면 활동으로 쳐서 TTL이 새로 시작). 이 시간이 지나면 차가 지워져 차 토큰이 401이 되고, 차는 새 `carId`로 다시 등록해야 합니다(연결 끊기·`DELETE /car` 뒤와 같은 기존 규칙). 새벽에 정리되면 차가 꺼져 있는 동안 토큰이 만료될 수 있으므로 차 쪽이 401을 받으면 다시 등록하는 처리를 가져야 합니다.
+- 가족 요청의 '날짜가 지나면 삭제'는 가족 요청 묶음이 같은 스케줄러에 더합니다(이 묶음에 없음).
+- 서버를 다시 켜면 자리가 메모리라 모두 사라집니다. 영속화하면 `lastEventsAt` 기준이 그대로 이어집니다.
 
 ## 옛 경로(호환, 현재 차 앱이 씀) (`routes/pairing.ts`)
 
@@ -112,7 +129,7 @@ PT 대본의 "폰에서 일정·주소·채비를 넣고 → 마지막에 차 �
 - 연결할 때 기기 이름(`expo-device`의 기기 이름 → 모델 이름 → '내 폰', 40자)을 자리 이름으로 보내고, 응답의 폰 토큰은 `expo-secure-store`(`phone/src/api/session.ts`)에 저장합니다. 저장소를 읽지 못해도 그 실행 동안은 메모리 값으로 동작합니다.
 - **기기 id**: 첫 실행 때 암호학적 난수(`expo-crypto`, 16바이트 = 16진수 32자)를 만들어 `expo-secure-store`에 저장하고(토큰과 같은 곳), Hono RPC 클라이언트(`phone/src/api/client.ts`)가 **모든 요청에** `X-Chagok-Device`로 붙입니다. 토큰이 있으면 `Authorization: Bearer`도 붙입니다. 서버는 토큰이 없을 때 이 id로 이 폰만의 연결 전 버킷을 읽고 씁니다(서버 규칙은 위 표).
 - **401 재전송**: 서버가 토큰을 401로 거절하면(다른 폰으로 바뀜·끊김·차곡 초기화) 토큰을 버리고 **같은 요청을 토큰 없이(기기 id만으로) 한 번 다시 보냅니다**(그 사이 새 토큰이 생겼으면 그 토큰으로. 다시 보낸 요청이 또 401이면 그대로 돌려줌. 본문이 문자열이 아니면 안 다시 보냄). 그래서 방금 요청이 연결 전 상태로 이어지고 이후 요청은 처음부터 토큰이 없습니다. `withSessionReset`과 `hc`를 서버 앱에 실제로 묶은 테스트가 `phone/src/api/__tests__/clientWiring.test.ts`입니다.
-- `pairingApi.status`(`GET /pair`): 200이면 자리 이름·연결 시각, 401이면 `null`(연결 안 됨), 그 밖의 오류는 던집니다. 연결 상태를 보이는 화면(J5a 폰 탭)이 이것을 씁니다. `pairingApi.disconnect`(`DELETE /pair`)는 API만 있고 화면은 없습니다(설정 화면 묶음이 붙임). 성공하거나 401이면 토큰을 버립니다.
+- `pairingApi.status`(`GET /pair`): 200이면 자리 이름·연결 시각, 401이면 `null`(연결 안 됨), 그 밖의 오류는 던집니다. 연결 상태를 보이는 화면(J5a 폰 탭)이 이것을 씁니다. `pairingApi.disconnect`(`DELETE /pair`)는 API만 있고 확인 화면은 없습니다(설정 화면 묶음이 이 함수만 부르면 됩니다). 서버가 지웠거나(200) 이미 모르는 토큰(401)이면 토큰을 버리고 `clearLocalCarState()`(`phone/src/features/pair-car/localState.ts`)로 그 자리에 딸린 로컬 상태를 한 번에 비웁니다: 알림 폴링 중지, 폰 알림함·마지막 알림 id, 일정 보내기 기억(직전에 보낸 내용·기억한 캘린더 선택, `appEventSync.reset()`), 거른 일정 목록. 서버 오류(5xx 등)로 던지면 아무것도 비우지 않습니다(다시 시도). **지우지 않는 것**: 기기 id(이 앱 설치를 가리키는 난수), 알림 권한 기록, '이동 일정이에요' 이름 목록, 캘린더 권한. 401로 토큰이 버려지는 경로(바뀜·초기화)는 `session.onTokenCleared`가 알림함·폴링만 비웁니다.
 - `PairCarScreen` 선택 속성: `onSkip`을 주면 연결하기 전에 누를 수 있는 [건너뛰기]를 보이고 누르면 부릅니다. `onDone`을 주면 연결된 뒤 [완료]가 기본 이동(3단계 목록) 대신 이것을 부릅니다. 둘 다 없으면 지금 동작 그대로입니다(글자·testID 그대로).
 - 안내 문구: 404는 '번호가 맞지 않거나 시간이 지났어요…'(새 번호를 넣게 함), 409 `seat-limit`은 '이 차에는 더 연결할 수 없어요…', 429 `locked`는 '지금은 연결할 수 없어요. 잠시 뒤 다시 해 주세요.'(번호를 너무 많이 틀렸거나 서버가 막은 경우를 뭉뚱그린 중립 문구, 둘 다 [다시 시도] 없음), 네트워크 실패는 [다시 시도]로 같은 번호를 다시 보냅니다. 요청은 기존 10초 제한(`requestWithTimeout`).
 - 기본 서버 주소 `http://localhost:8787`(`EXPO_PUBLIC_API_URL`)은 **개발용**입니다. 폰 토큰·기기 id·일정이 오가므로 **배포할 때는 HTTPS 서버 주소가 필요**합니다(평문 HTTP는 같은 망의 다른 기기가 토큰·일정을 볼 수 있음).
@@ -126,14 +143,14 @@ PT 대본의 "폰에서 일정·주소·채비를 넣고 → 마지막에 차 �
 
 ## 검증
 
-- `pnpm server:test`(서버 테스트 파일까지 `pnpm typecheck`가 검사합니다(`server/tsconfig.test.json`). `server/test/seats.test.ts`: 자리 둘의 격리·폰 바꾸기·끊기·`DELETE /car`·코드 5분 만료(`createApp({ now })`)·시도 제한·기본 자리 호환, `server/test/pairing-isolation.test.ts`: 연결 전 버킷·기본 자리·옛 차 앱 호환 읽기·옛 경로 권한·남용 방지·토큰 재발급 없음·한 폰 한 자리, `server/test/pairing.test.ts`: 옛 경로), 차량 단위 `DriveSessionPairingTest`, 계측 `PairingTest`, Maestro `e2e/maestro/car/pairing.yaml`(화면의 번호를 읽어 `claim-pairing.js`가 서버에 보냄. `SERVER_URL`은 `-e`로만 넣는다 — flow env에 기본값을 두면 runScript가 그 값을 받는다), 폰 Maestro `e2e/maestro/phone/pair-car.yaml`(서버에서 코드를 받아 번호로 넣음), `pnpm phone:test`(`PairCarScreen.test.tsx`, `pairCode.test.ts`, `pairingApi.test.ts`, `deviceName.test.ts`, `session.test.ts`, `clientWiring.test.ts`)
+- `pnpm server:test`(서버 테스트 파일까지 `pnpm typecheck`가 검사합니다(`server/tsconfig.test.json`). `server/test/seats.test.ts`: 자리 둘의 격리·폰 바꾸기·끊기·`DELETE /car`·코드 5분 만료(`createApp({ now })`)·시도 제한·기본 자리 호환, `server/test/pairing-isolation.test.ts`: 연결 전 버킷·기본 자리·옛 차 앱 호환 읽기·옛 경로 권한·남용 방지·토큰 재발급 없음·한 폰 한 자리, `server/test/pairing.test.ts`: 옛 경로, `server/test/seat-cleanup.test.ts`: 연결 끊기·차 초기화가 자리 데이터를 항목별로 모두 지우는지와 `SEAT_DATA_POLICY`, `server/test/maintenance.test.ts`: 새벽 지난 일정 삭제(서울 날짜 경계·보정·채비)와 30일 무소식 자리 정리), 차량 단위 `DriveSessionPairingTest`, 계측 `PairingTest`, Maestro `e2e/maestro/car/pairing.yaml`(화면의 번호를 읽어 `claim-pairing.js`가 서버에 보냄. `SERVER_URL`은 `-e`로만 넣는다 — flow env에 기본값을 두면 runScript가 그 값을 받는다), 폰 Maestro `e2e/maestro/phone/pair-car.yaml`(서버에서 코드를 받아 번호로 넣음), `pnpm phone:test`(`PairCarScreen.test.tsx`, `pairCode.test.ts`, `pairingApi.test.ts`, `localState.test.ts`, `deviceName.test.ts`, `session.test.ts`, `clientWiring.test.ts`)
 - 실제 폰 카메라로 차 화면 QR을 찍는 것은 수동 확인입니다(에뮬레이터 카메라는 가상 장면).
 
 ## 정책서와 다른 점·이번에 하지 않은 것
 
 정책서 10.1·10.9·11장과 다르거나 아직 없는 부분입니다.
 
-- **푸시 토큰 등록·30일 미사용 자리 정리는 다른 묶음**입니다(이 묶음에는 없음). 자리는 연결을 끊거나 `DELETE /car`·옛 초기화로만 지워집니다. 예외로 자리 없는 차와 쓰지 않은 연결 전 버킷은 TTL로 정리됩니다.
+- 푸시 토큰 등록은 다른 묶음입니다. 자리는 연결을 끊거나 `DELETE /car`·옛 초기화로 지워지고, **30일 동안 일정이 안 온 자리는 새벽 정기 작업이 지웁니다**(위 '정리와 정기 작업'). 자리 없는 차와 쓰지 않은 연결 전 버킷도 TTL로 정리됩니다.
 - **정책서에 없는 경로를 추가했습니다**: `GET /pair`(폰의 연결 상태), `GET /pair/status`(차가 마지막 코드의 상태를 봄), 옛 `/pairing/*`(현재 차 앱 호환), `GET /drivers`·`PUT /drivers/selected`·`POST /presence`·`DELETE /car`.
 - **옛 차 앱 호환 규칙의 범위**: 서버에 자리 있는 차가 없으면 기본 자리, 정확히 하나일 때만 그 차의 지난번 고른 자리(없으면 최근 자리), 둘 이상이면 빈 범위입니다. 차 토큰만 있고 `driver`가 없는 읽기는 그 차 안에서만 같은 규칙이고 자리 없는 차는 빈 범위입니다(표 참고). 차 앱이 `driver`·차 토큰을 보내면 `legacyDriverFallback: false`로 닫습니다.
 - **폰 바꾸기 뒤에는 0건**: 옛 폰의 일정·캘린더 선택을 '받았고 0건'으로 비우고(픽스처로 떨어지지 않음), 새 폰이 일정을 보내기 전까지 차는 일정 없음으로 판단합니다. 새 폰의 연결 전 버킷이 있으면 그 일정을 반영합니다.

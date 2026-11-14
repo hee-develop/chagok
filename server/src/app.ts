@@ -15,7 +15,7 @@ import { createPlacesRoute, type FavoritesStore } from './routes/places.js';
 import { createNotifications, type Notifications } from './notify/notifier.js';
 import { MEMORY_WRITE_MAX, MEMORY_WRITE_WINDOW_MS } from './placeSearch/limits.js';
 import { createMockPlaceSearch, createRateLimiter, type PlaceSearch, type RateLimiterOptions } from './placeSearch/index.js';
-import { createSeatDataRegistry } from './seatData.js';
+import { createSeatDataRegistry, type SeatDataRegistry } from './seatData.js';
 import { connectionAddress, createSeatGuard } from './seatScope.js';
 import { createSeatStore, type SeatStore } from './seats.js';
 
@@ -69,6 +69,11 @@ export type AppOptions = {
   placeSearchRateLimit?: Omit<RateLimiterOptions, 'now'>;
   /** `PUT /places/memory`의 요청 주소별 속도 제한. 기본값은 placeSearch/limits.ts(분당 30회). 테스트에서 바꾼다. */
   placeMemoryRateLimit?: Omit<RateLimiterOptions, 'now'>;
+  /**
+   * 자리 데이터 저장소. 없으면 인스턴스마다 새로 만든다(그때는 `events`·`store`·`favorites`·`familyStore`·`capacity`가 쓰인다).
+   * 서버 시작 코드(`index.ts`)는 정기 정리 작업(`jobs.ts`)이 같은 저장소를 비우도록 밖에서 만들어 넘긴다.
+   */
+  seatData?: SeatDataRegistry;
   /** 연결 전 버킷 수·TTL·생성 속도 제한과 일정 저장 용량 예산(연결된 자리/버킷 따로, 버킷 하나의 상한). 기본값은 seatData.ts. 테스트에서 바꾼다. */
   capacity?: Omit<NonNullable<Parameters<typeof createSeatDataRegistry>[0]>, 'now' | 'fixtureIds' | 'defaults'>;
   /**
@@ -97,6 +102,7 @@ export const createApp = ({
   familyMembers,
   familyStore,
   seats = createSeatStore(now),
+  seatData,
   notifications = createNotifications({ now }),
   clientAddress = connectionAddress,
   legacyDriverFallback = true,
@@ -112,12 +118,14 @@ export const createApp = ({
 }: AppOptions) => {
   // 일정·선택·자주 가는 곳·가족 요청·보정·채비는 운전자 자리마다 따로 쌓인다. 토큰 없이 기기 id만 있는 폰은 그 기기의 연결 전 버킷을,
   // 식별이 전혀 없는 요청은 기본 자리를 쓴다(픽스처·데모·차량 E2E 경로).
-  const registry = createSeatDataRegistry({
-    now,
-    fixtureIds: new Set(fixture.schedules.map((s) => s.id)),
-    defaults: { events, selection: store, favorites, family: familyStore },
-    ...capacity,
-  });
+  const registry =
+    seatData ??
+    createSeatDataRegistry({
+      now,
+      fixtureIds: new Set(fixture.schedules.map((s) => s.id)),
+      defaults: { events, selection: store, favorites, family: familyStore },
+      ...capacity,
+    });
   seats.subscribe((event) => registry.apply(event));
   // 자리가 지워지거나(끊기·차 초기화·정리) 폰이 바뀌면 옛 폰이 읽지 않은 알림은 새 폰에 넘기지 않고 버린다.
   seats.subscribe((event) => {

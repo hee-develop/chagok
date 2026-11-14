@@ -51,6 +51,7 @@ export type EventSync = {
   run(): Promise<SyncResult>;
   /** 진행 중인 요청을 취소하고 대기 중인 재실행을 버린다. */
   stop(): void;
+
   /** 선택을 서버에 저장한 직후 알린다. 서버가 선택을 잃으면 이 값으로 다시 저장한다(앱이 떠 있는 동안만 기억). */
   rememberSelection(selectedIds: string[]): void;
   /** 가장 최근 실행의 결과(화면에서 상태를 보여 주거나 디버깅할 때). */
@@ -59,6 +60,15 @@ export type EventSync = {
   inFlight(): Promise<SyncResult> | null;
   /** 한 번 읽어 보내는 일이 끝날 때마다(성공·실패·취소 모두) 결과를 알린다. 해제 함수를 돌려준다. 알림·홈 안내가 결과를 따라가는 데 쓴다. */
   subscribe(listener: (result: SyncResult) => void): () => void;
+};
+
+/** 앱이 쓰는 일정 보내기: `EventSync`에 '기억 지우기'가 더해졌다(화면·훅이 쓰는 `EventSync` 모양은 그대로다). */
+export type ResettableEventSync = EventSync & {
+  /**
+   * `stop()`에 더해 이 폰이 기억하던 것을 잊는다: 직전에 보낸 내용(같은 내용 생략 기준), 기억해 둔 캘린더 선택, 마지막 결과.
+   * 차 연결을 끊은 뒤 다른 자리(다른 차)로 이어 붙을 때 옛 자리에서 하던 대로 선택·일정을 다시 보내지 않게 한다.
+   */
+  reset(): void;
 };
 
 const devLog = (message: string) => {
@@ -91,7 +101,7 @@ export function createEventSync({
   timeoutMs = REQUEST_TIMEOUT_MS,
   now = () => new Date(),
   log = devLog,
-}: EventSyncOptions = {}): EventSync {
+}: EventSyncOptions = {}): ResettableEventSync {
   let running: Promise<SyncResult> | null = null;
   let again = false;
   let current: AbortController | null = null;
@@ -213,6 +223,14 @@ export function createEventSync({
       again = false;
       current?.abort();
       current = null;
+    },
+    reset() {
+      again = false;
+      current?.abort();
+      current = null;
+      lastSent = null;
+      remembered = null;
+      last = null;
     },
     rememberSelection(selectedIds) {
       remembered = [...selectedIds];

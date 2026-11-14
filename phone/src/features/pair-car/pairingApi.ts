@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import { HttpError } from '../../api/request';
 import { session } from '../../api/session';
 import { getDeviceName } from './deviceName';
+import { clearLocalCarState } from './localState';
 
 /** 연결 결과. 서버가 준 폰 토큰은 여기서 저장하고 화면에는 넘기지 않는다. */
 export type PairingResult = Omit<InferResponseType<typeof api.pair.claim.$post, 200>, 'phoneToken'>;
@@ -14,7 +15,10 @@ export type PairStatus = InferResponseType<typeof api.pair.$get, 200>;
 /** 차–폰 연결. 차 화면의 QR·숫자 6자리를 서버에 보내면 이 폰이 그 차의 운전자 자리가 된다(계약: docs/pairing.md). */
 export type PairingApi = {
   claim: (code: string, signal: AbortSignal) => Promise<PairingResult>;
-  /** 차 연결 끊기: 서버가 이 폰의 자리와 일정·기억을 지우고 폰은 토큰을 버린다. 설정 화면이 붙을 자리다. */
+  /**
+   * 차 연결 끊기: 서버가 이 폰의 자리와 일정·기억을 지우고(`DELETE /pair`, 정책서 10.9), 폰은 토큰과 그 자리에 딸린 로컬 상태(알림함·폴링·일정 보내기 기억·거른 일정 목록)를
+   * 비운다(`clearLocalCarState`). 확인 화면은 설정 화면 묶음이 붙인다(이 함수만 부르면 된다). 서버 오류로 던지면 아무것도 비우지 않는다(다시 시도할 수 있게).
+   */
   disconnect: (signal: AbortSignal) => Promise<void>;
   /** 지금 연결 상태. 연결 안 됨(토큰 없음·끊김·다른 폰으로 바뀜: 서버 401)이면 null. 그 밖의 오류는 던진다. */
   status: (signal: AbortSignal) => Promise<PairStatus | null>;
@@ -34,6 +38,7 @@ export const pairingApi: PairingApi = {
     const status: number = res.status;
     if (status !== 200 && status !== 401) throw new HttpError(status, `DELETE /pair ${status}`);
     await session.clearToken();
+    clearLocalCarState();
   },
   status: async (signal) => {
     const res = await api.pair.$get(undefined, { init: { signal } });

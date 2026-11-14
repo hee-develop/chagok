@@ -19,6 +19,8 @@ jest.mock('../../../api/session', () => ({
   session: { setToken: (...args: unknown[]) => mockSetToken(...args), clearToken: (...args: unknown[]) => mockClearToken(...args) },
 }));
 jest.mock('../deviceName', () => ({ getDeviceName: () => 'Pixel 9' }));
+const mockClearLocal = jest.fn();
+jest.mock('../localState', () => ({ clearLocalCarState: (...args: unknown[]) => mockClearLocal(...args) }));
 
 beforeEach(() => {
   mockClaim.mockReset();
@@ -26,6 +28,7 @@ beforeEach(() => {
   mockGet.mockReset();
   mockSetToken.mockReset();
   mockClearToken.mockReset();
+  mockClearLocal.mockReset();
 });
 
 describe('pairingApi.claim', () => {
@@ -50,22 +53,29 @@ describe('pairingApi.claim', () => {
 });
 
 describe('pairingApi.disconnect', () => {
-  it('서버가 지우면 토큰을 버린다', async () => {
-    mockDelete.mockResolvedValue({ status: 200 });
+  it('서버가 지우면 토큰을 버리고, 그 자리에 딸린 로컬 상태(알림함·폴링·일정 보내기 기억·거른 일정)를 비운다', async () => {
+    const order: string[] = [];
+    mockDelete.mockImplementation(async () => (order.push('delete'), { status: 200 }));
+    mockClearToken.mockImplementation(async () => void order.push('token'));
+    mockClearLocal.mockImplementation(() => void order.push('local'));
     await pairingApi.disconnect(new AbortController().signal);
+    expect(order).toEqual(['delete', 'token', 'local']);
     expect(mockClearToken).toHaveBeenCalledTimes(1);
+    expect(mockClearLocal).toHaveBeenCalledTimes(1);
   });
 
   it('이미 모르는 토큰(401)이어도 끊긴 것이라 토큰을 버린다', async () => {
     mockDelete.mockResolvedValue({ status: 401 });
     await pairingApi.disconnect(new AbortController().signal);
     expect(mockClearToken).toHaveBeenCalledTimes(1);
+    expect(mockClearLocal).toHaveBeenCalledTimes(1);
   });
 
   it('서버 오류면 던지고 토큰은 남긴다(다시 시도할 수 있게)', async () => {
     mockDelete.mockResolvedValue({ status: 500 });
     await expect(pairingApi.disconnect(new AbortController().signal)).rejects.toMatchObject({ status: 500 });
     expect(mockClearToken).not.toHaveBeenCalled();
+    expect(mockClearLocal).not.toHaveBeenCalled();
   });
 });
 

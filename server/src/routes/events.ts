@@ -46,6 +46,8 @@ export const eventsBytes = (events: PhoneEvent[]) => JSON.stringify(events).leng
 export type EventsStore = {
   /** 받은 적이 없으면 null. 오늘(서울) 이전에 끝난 일정은 지우고 돌려준다. */
   get(): SavedEvents | null;
+  /** 날짜가 지난 일정을 지금 버린다(읽을 때마다 하던 정리를 정기 작업이 부른다). 버린 일정 수. */
+  purgeExpired(): number;
   /** 일정 전체를 바꾼다(오늘 0시 전에 끝난 일정은 이때도 버린다). */
   replace(events: PhoneEvent[]): SavedEvents;
   /** 개발·데모용 초기화: 받은 적 없는 상태로 되돌린다(기본 자리는 일정 출처가 픽스처로 복귀하고, 실제 자리는 '0건'이다). */
@@ -79,17 +81,24 @@ export function createEventsStore(now: () => Date = () => new Date()): EventsSto
     const ids = new Set((saved?.events ?? []).map((e) => e.id));
     for (const listener of listeners) listener(ids);
   };
+  /** 날짜가 지난 일정을 버리고 버린 수를 돌려준다(바뀌었을 때만 구독자에게 알린다). */
+  const prune = () => {
+    if (saved === null) return 0;
+    const kept = alive(saved.events);
+    const removed = saved.events.length - kept.length;
+    if (removed !== 0) {
+      saved = { ...saved, events: kept };
+      size = eventsBytes(kept);
+      notify();
+    }
+    return removed;
+  };
   const store: EventsStore = {
     get: () => {
-      if (saved === null) return null;
-      const kept = alive(saved.events);
-      if (kept.length !== saved.events.length) {
-        saved = { ...saved, events: kept };
-        size = eventsBytes(kept);
-        notify();
-      }
+      prune();
       return saved;
     },
+    purgeExpired: prune,
     replace: (events) => {
       saved = { receivedAt: now().toISOString(), events: alive(events) };
       size = eventsBytes(saved.events);
