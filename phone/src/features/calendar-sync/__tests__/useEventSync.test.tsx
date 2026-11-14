@@ -9,10 +9,16 @@ function Probe({ sync, interval }: { sync: EventSync; interval?: number }) {
   return null;
 }
 
+// jest 환경의 AppState.currentState는 비어 있어(undefined) 테스트가 앱 상태를 직접 정한다.
+const setAppState = (state: string) => {
+  (AppState as unknown as { currentState: string }).currentState = state;
+};
+
 describe('useEventSync', () => {
   let handler: ((state: string) => void) | undefined;
   const remove = jest.fn();
   beforeEach(() => {
+    setAppState('active');
     handler = undefined;
     remove.mockReset();
     jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, h: (s: string) => void) => {
@@ -80,6 +86,27 @@ describe('useEventSync', () => {
       expect(sync.run).toHaveBeenCalledTimes(3);
       jest.advanceTimersByTime(1000);
       expect(sync.run).toHaveBeenCalledTimes(4);
+    });
+
+    it('앱이 앞에 있지 않을 때 마운트되면 처음 한 번만 읽고 주기는 앞으로 올 때 시작한다', async () => {
+      setAppState('background');
+      const sync = makeSync();
+      await render(<Probe sync={sync} interval={1000} />);
+      expect(sync.run).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(5000);
+      expect(sync.run).toHaveBeenCalledTimes(1);
+      handler?.('active');
+      expect(sync.run).toHaveBeenCalledTimes(2);
+      jest.advanceTimersByTime(1000);
+      expect(sync.run).toHaveBeenCalledTimes(3);
+    });
+
+    it('앞(active)에서 마운트되면 주기를 바로 시작한다', async () => {
+      setAppState('active');
+      const sync = makeSync();
+      await render(<Probe sync={sync} interval={1000} />);
+      jest.advanceTimersByTime(1000);
+      expect(sync.run).toHaveBeenCalledTimes(2);
     });
 
     it('내려가면 주기도 멈춘다', async () => {

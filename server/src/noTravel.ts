@@ -6,6 +6,7 @@
  *   차량 응답에서 빠지고, 사용자가 장소를 넣으면 다시 차로 간다.
  * 잘못 거르면 사용자가 그 일정을 차에서 잃으므로 확실한 표시만 본다.
  * 예를 들어 '화상' 한 단어는 '화상전문병원'과 헷갈리므로 장소 칸 전체가 '화상'일 때나 '화상회의'처럼 붙은 말만 본다.
+ * 건물 안은 정책서 12장의 "실내 표시만 있다"를 그대로 따른다: 실내 표시 말고 고유한 장소 이름이 하나라도 남으면 찾아가는 곳이다.
  * 이 파일은 다른 모듈을 가져오지 않는다(폰의 Metro가 소스 그대로 읽는다).
  */
 export type NoTravelReason = 'online' | 'meetingRoom';
@@ -25,32 +26,35 @@ const MEETING_HOSTS = [
   'meet.jit.si',
 ];
 
-/** 장소 칸에 들어 있으면 온라인 회의인 말(소문자, 공백 하나로 정리한 뒤 포함 여부). */
-const ONLINE_PLACE_PHRASES = [
-  '온라인',
-  '화상회의',
-  '화상 회의',
-  '화상미팅',
-  '화상 미팅',
-  '비대면회의',
-  '비대면 회의',
-  '비대면미팅',
-  '비대면 미팅',
-  'zoom',
-  'google meet',
-  '구글 미트',
-  '구글미트',
-  'microsoft teams',
-  'ms teams',
-  'webex',
-  '웹엑스',
-  '팀즈',
-];
+/** 한글·영문·숫자가 아닌 곳에서 낱말이 끊긴다고 본다(한국어는 띄어쓰기가 없어 앞뒤 글자를 보고 경계를 정한다). */
+const NOT_WORD_BEFORE = '(?<![a-z0-9가-힣])';
+const NOT_WORD_AFTER = '(?![a-z0-9가-힣])';
 
-/** 장소 칸 전체가 이 말 하나뿐이면 온라인 회의다. 짧아서 다른 말 안에 섞일 수 있는 것('줌바')만 여기에 둔다. */
+/**
+ * 장소 칸에 낱말로 들어 있으면 온라인 회의인 말(소문자, 공백 하나로 정리한 뒤 본다).
+ * 앞뒤가 글자로 이어지면 다른 말이다: '온라인마케팅협회 강남사무소'·'zoomcafe 강남'은 해당하지 않는다.
+ * 뒤에 '으로'·'로'·'에서'가 붙는 것('온라인으로')은 같은 말로 본다.
+ */
+const ONLINE_PLACE = new RegExp(
+  `${NOT_WORD_BEFORE}(?:${[
+    '온라인(?:\\s?(?:회의|미팅|강의|면접))?',
+    '화상\\s?(?:회의|미팅|강의|면접)',
+    '비대면\\s?(?:회의|미팅|강의|면접)',
+    'zoom',
+    'google meet',
+    '구글\\s?미트',
+    'microsoft teams',
+    'ms teams',
+    'webex',
+    '웹엑스',
+    '팀즈',
+  ].join('|')})(?:으로|로|에서)?${NOT_WORD_AFTER}`,
+);
+
+/** 장소 칸 전체가 이 말 하나뿐이면 온라인 회의다. 짧아서 다른 말 안에 섞일 수 있는 것('줌바', '화상 병원')만 여기에 둔다. */
 const ONLINE_PLACE_WORDS = ['줌', 'teams', 'meet', '화상', '비대면'];
 
-/** 제목에 들어 있으면 온라인 회의인 말. */
+/** 제목에 들어 있으면 온라인 회의인 말. 장소 칸이 비었을 때만 본다('온라인 회의 준비' 일정이 스타벅스에서 열릴 수 있다). */
 const ONLINE_TITLE_PHRASES = [
   '화상회의',
   '화상 회의',
@@ -65,50 +69,6 @@ const ONLINE_TITLE_PHRASES = [
   '비대면미팅',
 ];
 
-/**
- * 건물 안 표시 중 '그 자체로 방'인 말. 주소 표시가 없으면 이것만으로 건물 안이다(소문자·공백 정리 뒤에 본다).
- * '쇼룸'·'베드룸'처럼 실제로 찾아가는 곳은 보지 않으므로 ○룸은 앞말이 정해진 것만 본다.
- */
-const INDOOR_ROOM_MARKERS: RegExp[] = [
-  /회의실/,
-  /미팅룸/,
-  /세미나실/,
-  /강당/,
-  /meeting room/,
-  /conference room/,
-  /seminar room/,
-  /[a-z0-9]\s*룸/, // 3A룸
-  /(?:스터디|회의|세미나|워크|화상|프로젝트)룸/,
-  /(?:^|\s)룸(?:\s|$)/,
-];
-
-/**
- * 층·호·라운지는 '롯데월드몰 8층'·'챔피언스필드 2층'·'공항 라운지'처럼 건물 이름 뒤에도 붙어 찾아가는 곳을 가리킬 수 있다.
- * 그래서 장소 칸에 이 표시(와 아래 일반 말)만 있을 때(예: '5층', '301호', '본사 2층 라운지')만 건물 안으로 본다.
- */
-const INDOOR_WEAK_MARKERS: RegExp[] = [
-  /라운지/,
-  /lounge/,
-  // ○층(지하 포함). '층간'·'층계'는 다른 말이다.
-  /\d\s*층(?!간|계)/,
-  // ○호·○호실. '3호선'·'1호점'·'2호기'처럼 다른 말이 붙으면 실내 표시가 아니다.
-  /\d\s*호(?:실)?(?![가-힣])/,
-];
-
-/** 약한 표시만 있다고 볼 때 건물 이름으로 치지 않는 말(회사 안을 가리키는 말, 동·관 기호). */
-const GENERIC_INDOOR_WORDS = /본사|사옥|본관|신관|별관|사무실|사내|지하|옥상|[a-z0-9]+\s*(?:동|관)|[a-z0-9]+/g;
-
-/**
- * 주소 표시. 실내 표시와 같이 있으면 찾아갈 곳이므로 거르지 않는다(정책서 12장).
- * 말이 길게 겹쳐도 거르지 않는 쪽으로만 틀리므로 넓게 본다: ○○로·○○길·○○대로·○○동·번지·○○구·○○시·○○읍·○○면.
- */
-const ADDRESS_MARKERS: RegExp[] = [
-  /[가-힣0-9]+(?:대로|로|길)(?![가-힣])/,
-  /[가-힣]+동(?![가-힣])/,
-  /\d+(?:-\d+)?\s*번지/,
-  /[가-힣]{2,}(?:구|군|읍|면|시)(?![가-힣])/,
-];
-
 const normalize = (text: string | null) => (text ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 
 const URL_HOSTS = /https?:\/\/([^/\s?#:]+)/gi;
@@ -118,40 +78,128 @@ const isMeetingHost = (host: string) => MEETING_HOSTS.some((h) => host === h || 
 /** 주소를 붙여 쓰지 않고 호스트만 적은 것('zoom.us/j/1'). 이메일(@)·다른 주소의 일부('/zoom.us', '=zoom.us')·'zoom.us.example.com'은 제외한다. */
 const BARE_HOSTS = new RegExp(
   `(?<![\\w.@/=%-])(?:[\\w-]+\\.)*(?:${MEETING_HOSTS.map((h) => h.replace(/\./g, '\\.')).join('|')})(?![\\w-]|\\.[a-z0-9])`,
-  'i',
+  'gi',
 );
 
-function hasMeetingLink(text: string | null): boolean {
-  for (const m of (text ?? '').matchAll(URL_HOSTS)) {
-    if (isMeetingHost(m[1].toLowerCase())) return true;
+/**
+ * 글에 회의 주소가 있는가. 'link'는 들어가 볼 수 있는 주소(스킴이 있거나 호스트 뒤에 경로가 붙음), 'host'는 호스트 이름만 스쳐 언급된 것.
+ * 'zoom.us 녹화본 참고'처럼 호스트만 언급된 메모는 그 일정이 온라인이라는 뜻이 아닐 수 있다.
+ */
+function meetingMention(text: string | null): 'link' | 'host' | null {
+  if (!text) return null;
+  for (const m of text.matchAll(URL_HOSTS)) {
+    if (isMeetingHost(m[1].toLowerCase())) return 'link';
   }
-  return BARE_HOSTS.test(text ?? '');
+  let found: 'host' | null = null;
+  for (const m of text.matchAll(BARE_HOSTS)) {
+    if (text[m.index + m[0].length] === '/') return 'link';
+    found = 'host';
+  }
+  return found;
 }
 
-/** 장소 칸에 실내 표시만 있는가(주소 표시가 같이 있으면 아니다). */
+/**
+ * 건물 안 표시(정책서 12장): 회의실·미팅룸·룸·라운지·세미나실·강당·○층·○호, 영문 7F·Room 301·meeting/conference/seminar/board room.
+ * 강한 표시·약한 표시를 나누지 않는다. 장소 칸에 이 표시와 '일반 말'만 남을 때만 건물 안이고,
+ * 고유한 장소 이름(한글이든 영문이든)이 함께 있으면 찾아가는 곳으로 본다: 'Starbucks 2층'·'COEX 3층'·'서울시청 강당'은 거르지 않고
+ * '7층 대회의실'·'본사 2층 라운지'·'강당'·'Room 301'·'7F'는 거른다.
+ */
+const INDOOR_MARKERS: RegExp[] = [
+  /회의실|세미나실|강당|라운지/g,
+  /meeting\s*room|conference\s*room|seminar\s*room|board\s*room|\broom\b|\blounge\b/g,
+  // ○층(지하 포함). '층간'·'층계'는 다른 말이다.
+  /\d+\s*층(?!간|계)/g,
+  // ○호·○호실. '3호선'·'1호점'·'2호기'처럼 다른 말이 붙으면 실내 표시가 아니다.
+  /\d+\s*호(?:실)?(?![가-힣])/g,
+  // 7F, 3rd floor
+  /\b\d+\s*f\b/g,
+  /\b\d+(?:st|nd|rd|th)\s*floor\b/g,
+  /\bfloor\b/g,
+];
+
+/** ○룸 앞에 붙어도 방 이름인 말. '쇼룸'·'베드룸'·'VIP룸'·'파티룸'은 찾아가는 곳이라 방 표시가 아니다(그 낱말이 그대로 남는다). */
+const ROOM_PREFIXES = new Set(['미팅', '스터디', '회의', '세미나', '워크', '화상', '프로젝트']);
+
+/** 방·층 번호표 같은 짧은 기호: 한 글자(A, B)이거나 숫자가 들어간 4자 이하(3A, B1, 4F, 301). */
+const isLabel = (token: string) => /^[a-z]$/.test(token) || (/\d/.test(token) && /^[a-z0-9]{1,4}$/.test(token));
+
+/** 건물 안 표시를 걷어낸 나머지에 남아도 건물 이름이 아닌 말(회사 안을 가리키는 말, 크기·위치·안내 말). */
+const GENERIC_WORDS = new Set([
+  '본사', '사옥', '본관', '신관', '별관', '구관', '사무실', '사내', '회사', '우리', '지하', '지상', '옥상',
+  '합동', '공동', '큰', '작은', '별도', '임시', '전용', '내부', '외부',
+  '출입구', '입구', '비상구', '로비', '복도', '엘리베이터',
+  '옆', '앞', '뒤', '위', '아래', '안', '밖', '근처', '쪽', '오른쪽', '왼쪽', '맞은편', '건너편',
+  '이동', '가능', '불가', '예정', '변경', '확인', '필요', '오전', '오후', '또는', '혹은', '및',
+  '층', '호', '동', '관', '실', '방',
+  'or', 'and', 'the', 'at', 'in', 'of', 'on', 'office', 'hq', 'main', 'building', 'bldg',
+]);
+
+const TRAILING_PARTICLES = /(?:으로|에서|에게|까지|부터|로|에|의|은|는|이|가|을|를|과|와|도|만)$/;
+
+function isGenericToken(token: string): boolean {
+  if (/^\d+$/.test(token) || token.length === 1 || isLabel(token)) return true;
+  // 수량·시간 말('5분', '4명')은 이름이 아니다.
+  if (/^\d+(?:분|시간|초|명|개|시|번째)$/.test(token)) return true;
+  // A동·B관: 알파벳·숫자 기호 뒤의 동·관. 아파트 동·호 주소('102동 1203호')는 ADDRESS_FORMS가 먼저 거른다.
+  if (/^[a-z0-9]+(?:동|관|층|호|실)$/.test(token)) return true;
+  if (GENERIC_WORDS.has(token)) return true;
+  const stem = token.replace(TRAILING_PARTICLES, '');
+  return stem !== token && (stem === '' || stem.length === 1 || GENERIC_WORDS.has(stem));
+}
+
+/**
+ * 주소 꼴. 건물 안 표시와 같이 있으면 찾아갈 곳이다(정책서 12장). 좁게 본다: 오른쪽으로·합동 세미나실·세미나실로 같은 말은 주소가 아니다.
+ * - 도로명: ○○로·○○길·○○대로 뒤에 건물번호가 붙은 꼴('테헤란로 152'). 뒤가 '분·층·호·명'이면 번호가 아니다('세미나실로 5분').
+ * - 번지 꼴: 숫자-숫자, ○번지.
+ * - 아파트: ○동 ○호('102동 1203호').
+ * - 행정구역: ○시·○군·○구 뒤에 공백을 두고 동·로·길·읍·면·리로 이어지는 지명 꼴. 광역·시군구 이름 자체는 고유한 장소 이름이라 위 낱말 규칙이 이미 거르지 않는다.
+ */
+const ADDRESS_FORMS: RegExp[] = [
+  /[가-힣]{2,}\d*(?:대로|로|길)\s*\d+(?![\d]|\s*[층분호명시개])/,
+  /\d+-\d+/,
+  /\d+\s*번지/,
+  /\d+\s*동\s*\d+\s*호/,
+  /[가-힣]+(?:시|군|구)\s+[가-힣0-9]+(?:동|로|길|읍|면|리)(?![가-힣])/,
+];
+
+/** 장소 칸에 건물 안 표시와 일반 말만 있는가. */
 function isIndoorOnly(location: string): boolean {
-  const room = INDOOR_ROOM_MARKERS.some((re) => re.test(location));
-  const weak = INDOOR_WEAK_MARKERS.some((re) => re.test(location));
-  if (!room && !weak) return false;
-  if (ADDRESS_MARKERS.some((re) => re.test(location))) return false;
-  if (room) return true;
-  // 약한 표시는 표시를 걷어낸 나머지에 건물 이름이 남지 않을 때만.
-  let rest = location;
-  for (const re of INDOOR_WEAK_MARKERS) rest = rest.replace(new RegExp(re.source, 'g'), ' ');
-  rest = rest.replace(GENERIC_INDOOR_WORDS, ' ').replace(/[\s\d\-·.,()[\]/]+/g, '');
-  return rest === '';
+  let matched = false;
+  // ○룸: 앞이 비었거나 방 이름 앞말·번호표일 때만 방 표시다.
+  let rest = location.replace(/(?<![a-z0-9가-힣])[a-z0-9가-힣]*룸/g, (word) => {
+    const prefix = word.slice(0, -1);
+    if (prefix !== '' && !ROOM_PREFIXES.has(prefix) && !isLabel(prefix)) return word;
+    matched = true;
+    return ' ';
+  });
+  for (const re of INDOOR_MARKERS) {
+    rest = rest.replace(re, () => {
+      matched = true;
+      return ' ';
+    });
+  }
+  if (!matched) return false;
+  if (ADDRESS_FORMS.some((re) => re.test(location))) return false;
+  return rest.split(/[^a-z0-9가-힣]+/).filter(Boolean).every(isGenericToken);
 }
 
-/** 일정 하나가 이동이 필요 없는지와 그 이유. 해당하지 않으면 null. 온라인 회의를 건물 안보다 먼저 본다. */
+/**
+ * 일정 하나가 이동이 필요 없는지와 그 이유. 해당하지 않으면 null. 온라인 회의를 건물 안보다 먼저 본다.
+ * - 장소·메모의 회의 주소(링크)는 온라인이다. 메모에 호스트 이름만 스쳐 언급된 것은 장소 칸이 비었을 때만 온라인으로 본다.
+ * - 제목만으로 보는 규칙('온라인 회의')도 장소 칸이 비었을 때만 쓴다. 장소 칸에 실제 장소가 있으면 그곳으로 간다.
+ */
 export function detectNoTravel(schedule: { title: string; locationText: string | null; notes: string | null }): NoTravelReason | null {
   const location = normalize(schedule.locationText);
-  const title = normalize(schedule.title);
+  const blank = location === '';
+  const inLocation = meetingMention(schedule.locationText);
+  const inNotes = meetingMention(schedule.notes);
   if (
-    hasMeetingLink(schedule.locationText) ||
-    hasMeetingLink(schedule.notes) ||
-    ONLINE_PLACE_PHRASES.some((w) => location.includes(w)) ||
+    inLocation !== null ||
+    inNotes === 'link' ||
+    (blank && inNotes === 'host') ||
+    ONLINE_PLACE.test(location) ||
     ONLINE_PLACE_WORDS.includes(location) ||
-    ONLINE_TITLE_PHRASES.some((w) => title.includes(w))
+    (blank && ONLINE_TITLE_PHRASES.some((w) => normalize(schedule.title).includes(w)))
   ) {
     return 'online';
   }

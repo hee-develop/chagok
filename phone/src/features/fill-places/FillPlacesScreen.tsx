@@ -7,22 +7,15 @@ import { isClientError, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api
 import { strings } from '../../i18n/ko';
 import { SetupHeader } from '../../ui/SetupHeader';
 import { colors, useFont } from '../../ui/theme';
-import { appEventSync } from '../calendar-sync/eventSync';
-import { appFilteredEvents, useFilteredEvents, type FilteredEvent } from '../calendar-sync/filteredEvents';
-import { normalizeTitle, appTravelExceptions } from '../calendar-sync/travelExceptions';
+import { FilteredEventCard } from '../calendar-sync/FilteredEventCard';
+import { useFilteredEvents, type FilteredEvent } from '../calendar-sync/filteredEvents';
+import { TravelMarkNotice } from '../calendar-sync/TravelMarkNotice';
+import { useTravelMark, type TravelMarkOptions } from '../calendar-sync/useTravelMark';
 import { schedulePlacesApi, type SchedulePlaceChange, type SchedulePlacesApi, type SetupSchedule } from './schedulePlacesApi';
 
 type LoadState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; schedules: SetupSchedule[] };
 
 // 서버의 일정 표시는 한국 시각으로 통일한다. 기기의 시간대가 달라도 같은 일정을 가리킨다.
-/** "이동 일정이에요": 같은 이름을 예외로 기억하고(폰 저장소), 거른 목록에서 빼고, 곧바로 다시 읽어 서버로 보낸다. */
-export async function markTravelByTitle(title: string): Promise<void> {
-  const name = normalizeTitle(title);
-  await appTravelExceptions.add(title);
-  appFilteredEvents.removeWhere((e) => normalizeTitle(e.title) === name);
-  await appEventSync.run();
-}
-
 const dateFormat = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 
 type Props = {
@@ -30,16 +23,15 @@ type Props = {
   timeoutMs?: number;
   /** 폰이 거른 일정(서버로 보내지 않은 것). 기본은 앱 전체가 공유하는 목록. */
   filteredEvents?: readonly FilteredEvent[];
-  /** 거른 일정을 "이동 일정이에요"로 바꾼다. 끝나면 서버 목록을 다시 조회한다. */
-  onMarkTravel?: (title: string) => Promise<void>;
+  /** 거른 일정을 "이동 일정이에요"로 바꾸고 되돌리는 동작(기본은 `calendar-sync/travelMark.ts`). 바뀌면 서버 목록을 다시 조회한다. */
+  travelMark?: Pick<TravelMarkOptions, 'mark' | 'undo' | 'undoVisibleMs'>;
 };
 
 type Item = { kind: 'server'; start: number; schedule: SetupSchedule } | { kind: 'filtered'; start: number; event: FilteredEvent };
 
-export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_TIMEOUT_MS, filteredEvents, onMarkTravel = markTravelByTitle }: Props) {
+export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_TIMEOUT_MS, filteredEvents, travelMark }: Props) {
   const sharedFiltered = useFilteredEvents();
   const filtered = filteredEvents ?? sharedFiltered;
-  const [marking, setMarking] = useState(false);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
@@ -48,6 +40,8 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
   const [savingId, setSavingId] = useState<string | null>(null);
   const [saveIssue, setSaveIssue] = useState<'retry' | 'reload' | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // 거른 줄을 이동 일정으로 바꾸거나 되돌리면 서버가 아는 일정이 달라지므로 서버 목록을 다시 조회한다.
+  const travel = useTravelMark({ ...travelMark, onChanged: () => setAttempt((n) => n + 1) });
   const loadRequest = useRef<AbortController | null>(null);
   const saveRequest = useRef<AbortController | null>(null);
   const retryLast = useRef<(() => void) | null>(null);
@@ -109,7 +103,7 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
   const ready = load.status === 'ready';
   const schedules = load.status === 'ready' ? load.schedules : [];
   const missing = schedules.filter((s) => !s.place && !s.noTravel).length;
-  const saving = savingId !== null || marking;
+  const saving = savingId !== null || travel.busy;
   const items: Item[] = [
     ...schedules.map((schedule): Item => ({ kind: 'server', start: Date.parse(schedule.start), schedule })),
     // 서버가 아직 모르는(보내지 않은) 일정만. 서버 목록에 같은 id가 있으면 서버 쪽을 쓴다.
@@ -216,29 +210,16 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
         ) : items.length === 0 ? (
           <Text style={[styles.description, font(400)]}>{t.noSchedules}</Text>
         ) : items.map((item) => item.kind === 'filtered' ? (
-          // 폰이 읽을 때 거른 일정(온라인·건물 안). 서버로 보내지 않아 이 줄은 폰 안에만 있다. 눌러서 이동 일정으로 바꿀 수 있다.
-          <Pressable key={`filtered-${item.event.id}`} testID={`schedule-${item.event.id}`} accessibilityRole="button"
-            accessibilityLabel={`${item.event.title} ${t.markTravel}`} accessibilityState={{ disabled: saving }} disabled={saving}
-            style={[styles.card, styles.filtered]}
-            onPress={() => {
-              setSaveIssue(null);
-              setMarking(true);
-              void onMarkTravel(item.event.title).catch(() => undefined).finally(() => { setMarking(false); setAttempt((n) => n + 1); });
-            }}>
-            <View style={styles.cardTitle}>
-              <Text style={[styles.date, font(400)]}>{dateFormat.format(new Date(item.event.start))}</Text>
-              <Text style={[styles.scheduleTitle, font(600)]}>{item.event.title}</Text>
-            </View>
-            <View style={styles.actions}>
-              <Text style={[styles.place, font(500)]}>{`✓ ${t.noTravel} · ${t.noTravelReason[item.event.reason]}`}</Text>
-              <Text style={[styles.secondaryText, font(600)]}>{t.markTravel}</Text>
-            </View>
-            <Text style={[styles.care, font(400)]}>{t.markTravelHint}</Text>
-          </Pressable>
+          // 폰이 읽을 때 거른 일정(온라인·건물 안). 서버로 보내지 않아 이 줄은 폰 안에만 있다. 누르면 확인을 거쳐 이동 일정으로 바꾼다.
+          <FilteredEventCard key={`filtered-${item.event.id}`} event={item.event} disabled={saving}
+            confirming={travel.confirming?.id === item.event.id}
+            onAsk={() => { setSaveIssue(null); travel.ask(item.event.id, item.event.title); }}
+            onConfirm={() => void travel.confirm()} onCancel={travel.cancel} />
         ) : renderSchedule(item.schedule))}
       </ScrollView>
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 32) }]}>
         {saving ? <View accessible accessibilityRole="progressbar" accessibilityLabel={t.saving}><ActivityIndicator color={colors.text} /></View> : null}
+        <TravelMarkNotice undoable={travel.undoable} issue={travel.issue} disabled={saving} onUndo={() => void travel.undoNow()} />
         {saveIssue ? <View accessibilityLiveRegion="polite" style={styles.status}>
           <Text style={[styles.error, font(500)]}>{saveIssue === 'reload' ? strings.placeSearch.scheduleChanged : t.saveFailed}</Text>
           {saveIssue === 'retry' ? <Pressable accessibilityRole="button" onPress={() => retryLast.current?.()} style={styles.textButton}>

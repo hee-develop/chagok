@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "@chagok/server": "workspace:*",
     "@expo-google-fonts/ibm-plex-sans-kr": "^0.4.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~58.0.21",
@@ -25,7 +26,6 @@
     "react-native-svg": "15.16.0"
   },
   "devDependencies": {
-    "@chagok/server": "workspace:*",
     "@testing-library/react-native": "^14.1.0",
     "@types/jest": "30.0.0",
     "@types/react": "~19.3.0",

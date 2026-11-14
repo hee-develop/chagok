@@ -11,7 +11,11 @@ export type KeyValueStorage = {
 export type TravelExceptionChange = { name: string; travel: boolean };
 
 export type TravelExceptions = {
-  /** 저장소에서 목록을 읽어 이름 집합을 돌려준다(처음 한 번만 읽고 기억한다). 저장소 오류는 빈 목록으로 본다. */
+  /**
+   * 저장소에서 목록을 읽어 이름 집합을 돌려준다. 읽기는 `LOAD_TIMEOUT_MS` 안에 끝나지 않으면 실패로 본다.
+   * 읽는 데 성공하면 이후 다시 읽지 않는다. 실패하면 이 세션에서 더한 이름만 담은 집합을 돌려주고(거부하지 않는다: 동기화가 멈추면 안 된다)
+   * 다음 호출에서 다시 읽는다. 실패하는 동안에는 저장소의 기존 목록을 덮어쓰지 않는다.
+   */
   load(): Promise<ReadonlySet<string>>;
   /** 이 일정 제목이 예외인가. load()를 기다린 뒤에만 정확하다. */
   has(title: string): boolean;
@@ -19,6 +23,8 @@ export type TravelExceptions = {
   add(title: string): Promise<void>;
   /** 예외를 지운다(다시 거르게 됨). */
   remove(title: string): Promise<void>;
+  /** 저장소를 아직 읽지 못한 상태인가(true인 동안 `has`는 저장된 이름을 모른다). */
+  readFailed(): boolean;
   /** 바뀔 때마다 부른다. 해제 함수를 돌려준다(J2b가 서버 목록에 올리는 자리). */
   subscribe(listener: (change: TravelExceptionChange) => void): () => void;
 };
@@ -26,6 +32,8 @@ export type TravelExceptions = {
 export const STORAGE_KEY = 'chagok.travelExceptions.v1';
 /** 오래된 이름부터 밀려난다. */
 export const MAX_EXCEPTIONS = 500;
+/** 저장소 읽기가 이 시간 안에 끝나지 않으면 읽기 실패로 본다(동기화가 영영 멈추지 않게). */
+export const LOAD_TIMEOUT_MS = 5_000;
 
 /** 앞뒤 공백 제거·연속 공백 하나·대소문자 무시. 서버의 장소 이름 정규화와 같은 규칙이다. */
 export const normalizeTitle = (title: string) => title.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -38,32 +46,74 @@ const defaultStorage: KeyValueStorage = {
   setItem: async (key, value) => loadAsyncStorage().setItem(key, value),
 };
 
-export function createTravelExceptions(storage: KeyValueStorage = defaultStorage): TravelExceptions {
-  let names: string[] | null = null;
+export function createTravelExceptions(
+  storage: KeyValueStorage = defaultStorage,
+  { loadTimeoutMs = LOAD_TIMEOUT_MS }: { loadTimeoutMs?: number } = {},
+): TravelExceptions {
+  /** 메모리 목록. 저장소를 읽기 전에 더한 이름도 여기에 있다. */
+  let names: string[] = [];
+  /** 저장소를 한 번 읽는 데 성공했는가. 성공해야 쓴다. */
+  let loaded = false;
+  let failed = false;
+  /** 읽기 전에 지운 이름: 읽은 뒤 저장소에 남아 있어도 되살리지 않는다. */
+  const removedBeforeLoad = new Set<string>();
+  /** 읽기 전에 바꾼 것이 있어 읽은 뒤 한 번 써야 하는가. */
+  let dirty = false;
   let loading: Promise<ReadonlySet<string>> | null = null;
   const listeners = new Set<(change: TravelExceptionChange) => void>();
 
   const persist = async () => {
+    // 읽지 못한 동안 쓰면 저장소의 기존 목록을 이 세션의 일부 목록으로 덮어쓴다.
+    if (!loaded) return;
     try {
-      await storage.setItem(STORAGE_KEY, JSON.stringify(names ?? []));
+      await storage.setItem(STORAGE_KEY, JSON.stringify(names));
     } catch {
       // 저장하지 못해도 앱이 떠 있는 동안은 메모리 목록이 맞는다.
     }
   };
 
+  /** 저장된 이름. 저장소를 읽지 못하거나 시간이 넘으면 null(읽기 실패). 내용이 망가졌으면 빈 목록(다음 저장 때 덮어쓴다). */
+  const readStored = async (): Promise<string[] | null> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let raw: string | null;
+    try {
+      raw = await Promise.race([
+        storage.getItem(STORAGE_KEY),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('timeout')), loadTimeoutMs);
+        }),
+      ]);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+    try {
+      const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === 'string') : [];
+    } catch {
+      return [];
+    }
+  };
+
   const load = (): Promise<ReadonlySet<string>> => {
-    if (names !== null) return Promise.resolve(new Set(names));
+    if (loaded) return Promise.resolve(new Set(names));
     loading ??= (async () => {
-      let stored: string[] = [];
-      try {
-        const raw = await storage.getItem(STORAGE_KEY);
-        const parsed: unknown = raw === null ? [] : JSON.parse(raw);
-        if (Array.isArray(parsed)) stored = parsed.filter((n): n is string => typeof n === 'string');
-      } catch {
-        // 읽지 못하면 빈 목록
+      const stored = await readStored();
+      loading = null; // 실패해도 다음 load()가 다시 읽는다
+      if (stored === null) {
+        failed = true;
+        return new Set(names);
       }
-      // 읽는 동안 add가 먼저 들어왔다면 그 이름을 잃지 않는다.
-      names = [...stored, ...(names ?? []).filter((n) => !stored.includes(n))];
+      failed = false;
+      // 읽는 동안·읽기 전에 더한 이름은 잃지 않고, 지운 이름은 되살리지 않는다.
+      names = [...stored.filter((n) => !removedBeforeLoad.has(n)), ...names.filter((n) => !stored.includes(n))].slice(-MAX_EXCEPTIONS);
+      removedBeforeLoad.clear();
+      loaded = true;
+      if (dirty) {
+        dirty = false;
+        await persist();
+      }
       return new Set(names);
     })();
     return loading;
@@ -73,21 +123,29 @@ export function createTravelExceptions(storage: KeyValueStorage = defaultStorage
 
   return {
     load,
-    has: (title) => (names ?? []).includes(normalizeTitle(title)),
+    has: (title) => names.includes(normalizeTitle(title)),
+    readFailed: () => failed,
     async add(title) {
       const name = normalizeTitle(title);
       if (name === '') return;
       await load();
-      if (!names!.includes(name)) names = [...names!, name].slice(-MAX_EXCEPTIONS);
-      await persist();
+      removedBeforeLoad.delete(name);
+      if (!names.includes(name)) names = [...names, name].slice(-MAX_EXCEPTIONS);
+      if (loaded) await persist();
+      else dirty = true;
       notify({ name, travel: true });
     },
     async remove(title) {
       const name = normalizeTitle(title);
       await load();
-      if (!names!.includes(name)) return;
-      names = names!.filter((n) => n !== name);
-      await persist();
+      if (loaded && !names.includes(name)) return;
+      names = names.filter((n) => n !== name);
+      if (loaded) await persist();
+      else {
+        // 저장소에 남아 있을 수 있으니 읽은 뒤에도 빼도록 기억한다.
+        removedBeforeLoad.add(name);
+        dirty = true;
+      }
       notify({ name, travel: false });
     },
     subscribe(listener) {

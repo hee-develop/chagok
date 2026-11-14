@@ -28,7 +28,7 @@ type Row = {
   candidate: MockPlace | undefined;
   memo: string | null;
   attendees: string[];
-  /** 온라인 회의·회의실이라 저절로 '이동 없음'인 이유. 보정(장소 넣기·이동 없음)이 있으면 보정이 이긴다. */
+  /** 온라인 회의·건물 안이라 저절로 '이동 없음'인 이유. 종일 일정은 거르지 않는다(차가 첫 탑승 인사에 이름을 쓴다). 보정(장소 넣기·이동 없음)이 있으면 보정이 이긴다. */
   autoNoTravel: NoTravelReason | null;
 };
 
@@ -96,7 +96,7 @@ export const createSchedulesRoute = (
         candidate: remembered.get(s.title),
         memo: s.memo,
         attendees: s.attendees,
-        autoNoTravel: detectNoTravel({ title: s.title, locationText: s.locationText, notes: s.memo }),
+        autoNoTravel: s.allDay ? null : detectNoTravel({ title: s.title, locationText: s.locationText, notes: s.memo }),
       }));
     }
     return phone.events.map((e) => {
@@ -113,7 +113,7 @@ export const createSchedulesRoute = (
         candidate: exact ? undefined : remembered.get(e.title) ?? partialMatch(e.locationText),
         memo: e.notes,
         attendees: e.attendees,
-        autoNoTravel: e.travelConfirmed ? null : detectNoTravel({ title: e.title, locationText: e.locationText, notes: e.notes }),
+        autoNoTravel: e.travelConfirmed || e.allDay ? null : detectNoTravel({ title: e.title, locationText: e.locationText, notes: e.notes }),
       };
     });
   };
