@@ -10,6 +10,8 @@ import { FilteredEventCard } from '../calendar-sync/FilteredEventCard';
 import { useFilteredEvents, type FilteredEvent } from '../calendar-sync/filteredEvents';
 import { TravelMarkNotice } from '../calendar-sync/TravelMarkNotice';
 import { useTravelMark, type TravelMarkOptions } from '../calendar-sync/useTravelMark';
+import type { SkipMemory } from '../skips/skipMemory';
+import { NoTravelNotices } from './NoTravelNotices';
 import { ScheduleActions } from './ScheduleActions';
 import { mergeScheduleItems } from './scheduleItems';
 import { formatScheduleDate } from './scheduleFormat';
@@ -22,21 +24,23 @@ type Props = {
   /** 폰이 거른 일정(서버로 보내지 않은 것). 기본은 앱 전체가 공유하는 목록. */
   filteredEvents?: readonly FilteredEvent[];
   /** 거른 일정을 "이동 일정이에요"로 바꾸고 되돌리는 동작(기본은 `calendar-sync/travelMark.ts`). 바뀌면 서버 목록을 다시 조회한다. */
-  travelMark?: Pick<TravelMarkOptions, 'mark' | 'undo' | 'undoVisibleMs'>;
+  travelMark?: Pick<TravelMarkOptions, 'mark' | 'undo' | 'unskip' | 'undoUnskip' | 'undoVisibleMs'>;
+  /** '이동 없음'으로 기억한 이름(기본은 앱 전체가 공유하는 기억). [이동 없음] 전에 이미 기억하던 이름인지, 기억이 가득 찼는지 본다. */
+  skips?: Pick<SkipMemory, 'has' | 'full' | 'dismissFull' | 'subscribe'>;
 };
 
 /**
  * 첫 설정 3단계: 일정마다 장소를 넣거나 이동 없음으로 둔다. 일정 한 줄의 버튼(장소·채비·가족)은 오늘 탭과 같은 `ScheduleActions`다.
  * 폰이 읽을 때 거른 일정(온라인·건물 안·종일)은 흐린 줄로 같이 보이고, 누르면 확인을 거쳐 이동 일정으로 바꾼다.
  */
-export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_TIMEOUT_MS, filteredEvents, travelMark }: Props) {
+export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_TIMEOUT_MS, filteredEvents, travelMark, skips }: Props) {
   const sharedFiltered = useFilteredEvents();
   const filtered = filteredEvents ?? sharedFiltered;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
   const t = strings.fillPlaces;
-  const sched = useSchedulePlaces({ api, timeoutMs });
+  const sched = useSchedulePlaces({ api, timeoutMs, skips, undoVisibleMs: travelMark?.undoVisibleMs });
   const { load, saveIssue, clearSaveIssue, save, retrySave, reload } = sched;
   // 거른 줄을 이동 일정으로 바꾸거나 되돌리면 서버가 아는 일정이 달라지므로 서버 목록을 다시 조회한다.
   const travel = useTravelMark({ ...travelMark, lines: filtered, onChanged: reload });
@@ -90,6 +94,8 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 32) }]}>
         {saving ? <View accessible accessibilityRole="progressbar" accessibilityLabel={t.saving}><ActivityIndicator color={colors.text} /></View> : null}
         <TravelMarkNotice undoable={travel.undoable} issue={travel.issue} disabled={saving} onUndo={() => void travel.undoNow()} />
+        <NoTravelNotices notice={sched.skipNotice} full={sched.memoryFull} disabled={saving}
+          onUndo={() => void sched.undoSkipNotice()} onDismissFull={sched.dismissFull} />
         {saveIssue ? <View accessibilityLiveRegion="polite" style={styles.status}>
           <Text style={[styles.error, font(500)]}>{saveIssue === 'reload' ? strings.placeSearch.scheduleChanged : t.saveFailed}</Text>
           {saveIssue === 'retry' ? <Pressable accessibilityRole="button" onPress={retrySave} style={styles.textButton}>

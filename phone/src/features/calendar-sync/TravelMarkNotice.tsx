@@ -10,10 +10,12 @@ type Props = {
   issue: TravelMarkIssue | null;
   disabled: boolean;
   onUndo: () => void;
+  /** 되돌리기 옆 문구. 기본은 "이동 일정으로 바꿨어요"(3단계 [이동 없음] 안내는 다른 문구를 넘긴다). */
+  message?: (title: string) => string;
 };
 
 /** "이동 일정이에요"로 바꾼 직후의 '되돌리기'와, 바꾸기·되돌리기가 차에 반영되지 못했을 때의 안내. 보일 것이 없으면 아무것도 그리지 않는다. */
-export function TravelMarkNotice({ undoable, issue, disabled, onUndo }: Props) {
+export function TravelMarkNotice({ undoable, issue, disabled, onUndo, message }: Props) {
   const font = useFont();
   const t = strings.travelFilter;
   if (!undoable && !issue) return null;
@@ -22,7 +24,7 @@ export function TravelMarkNotice({ undoable, issue, disabled, onUndo }: Props) {
       {issue ? <Text style={[styles.error, font(500)]}>{issue === 'mark' ? t.markFailed : t.undoFailed}</Text> : null}
       {undoable ? (
         <View style={styles.row}>
-          <Text style={[styles.text, font(400)]}>{t.changed(undoable.title)}</Text>
+          <Text style={[styles.text, font(400)]}>{(message ?? t.changed)(undoable.title)}</Text>
           <Pressable accessibilityRole="button" accessibilityLabel={`${undoable.title} ${t.undo}`} accessibilityState={{ disabled }}
             disabled={disabled} onPress={onUndo} style={styles.button}>
             <Text style={[styles.buttonText, font(600)]}>{t.undo}</Text>

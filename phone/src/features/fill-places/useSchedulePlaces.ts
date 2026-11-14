@@ -1,10 +1,15 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AccessibilityInfo } from 'react-native';
 
 import { isClientError, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
 import { strings } from '../../i18n/ko';
+import { UNDO_VISIBLE_MS } from '../calendar-sync/useTravelMark';
+import { appSkipMemory, type SkipMemory } from '../skips/skipMemory';
 import { schedulePlacesApi, type SchedulePlaceChange, type SchedulePlacesApi, type SetupSchedule } from './schedulePlacesApi';
+
+/** 방금 누른 [이동 없음]: 같은 이름 일정을 앞으로 차에 보내지 않는다는 안내와 [되돌리기]를 보이는 동안의 상태. `keepName`은 누르기 전부터 기억하던 이름이다(되돌려도 기억은 그대로). */
+export type SkipNotice = { id: string; title: string; keepName: boolean };
 
 export type ScheduleLoadState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; anchor: string; schedules: SetupSchedule[] };
 
@@ -16,12 +21,22 @@ export type ScheduleLoadState = { status: 'loading' } | { status: 'error' } | { 
  * - 새 조회가 시작되거나 저장이 끝나기 전에 이전 조회가 오면 그 응답은 버린다(controller가 아직 현재 것인지 확인).
  * - 저장은 한 번에 하나만 둔다. 4xx는 일정이 바뀐 것이라 다시 읽고, 그 밖의 실패는 같은 저장을 다시 시도하게 한다.
  * enabled가 false면 요청하지 않는다(권한 없음 등).
+ * 일정에 [이동 없음]을 고르면(`{ noTravel: true }`) 같은 이름을 기억하고(`schedulePlacesApi.savePlace`) 안내와 10초 [되돌리기]를 `skipNotice`로 낸다. 되돌리면
+ * 일정별 이동 없음과 이름 기억을 함께 되돌린다(`undoSkipNotice`). 서버가 기억 상한이라며 거절하면 `memoryFull`로 알린다(3단계·오늘 탭이 같은 `NoTravelNotices`를 보인다).
  */
 export function useSchedulePlaces({
   api = schedulePlacesApi,
   timeoutMs = REQUEST_TIMEOUT_MS,
   enabled = true,
-}: { api?: SchedulePlacesApi; timeoutMs?: number; enabled?: boolean } = {}) {
+  skips = appSkipMemory,
+  undoVisibleMs = UNDO_VISIBLE_MS,
+}: {
+  api?: SchedulePlacesApi;
+  timeoutMs?: number;
+  enabled?: boolean;
+  skips?: Pick<SkipMemory, 'has' | 'full' | 'dismissFull' | 'subscribe'>;
+  undoVisibleMs?: number;
+} = {}) {
   const [load, setLoad] = useState<ScheduleLoadState>({ status: 'loading' });
   const [savingId, setSavingId] = useState<string | null>(null);
   const [saveIssue, setSaveIssue] = useState<'retry' | 'reload' | null>(null);
@@ -31,6 +46,19 @@ export function useSchedulePlaces({
   /** 진행 중인 저장이 끝나면 풀리는 약속(실패해도 거부하지 않는다). */
   const saveDone = useRef<Promise<void> | null>(null);
   const retryLast = useRef<(() => void) | null>(null);
+  const [skipNotice, setSkipNotice] = useState<SkipNotice | null>(null);
+  const skipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 마지막으로 읽은 일정(저장하는 일정의 제목을 알아내는 데 쓴다). */
+  const schedulesRef = useRef<SetupSchedule[]>([]);
+  schedulesRef.current = load.status === 'ready' ? load.schedules : [];
+  const memoryFull = useSyncExternalStore(skips.subscribe, skips.full, skips.full);
+
+  const showSkipNotice = (notice: SkipNotice | null) => {
+    if (skipTimer.current !== null) clearTimeout(skipTimer.current);
+    skipTimer.current = null;
+    setSkipNotice(notice);
+    if (notice) skipTimer.current = setTimeout(() => setSkipNotice(null), undoVisibleMs);
+  };
 
   useFocusEffect(useCallback(() => {
     if (!enabled) return undefined;
@@ -59,6 +87,7 @@ export function useSchedulePlaces({
     const pending = saveRequest.current;
     saveRequest.current = null;
     pending?.abort();
+    if (skipTimer.current !== null) clearTimeout(skipTimer.current);
   }, []);
 
   useEffect(() => {
@@ -67,6 +96,10 @@ export function useSchedulePlaces({
 
   const save = (id: string, change: SchedulePlaceChange): Promise<void> => {
     if (saveRequest.current) return Promise.resolve();
+    // [이동 없음]이면 이름을 기억하므로 제목과, 이미 기억하던 이름인지(되돌려도 기억은 그대로 둔다)를 저장 전에 본다. 다른 저장을 시작하면 이전 안내는 닫는다.
+    const skipTitle = 'noTravel' in change ? schedulesRef.current.find((s) => s.id === id)?.title : undefined;
+    const keepName = skipTitle !== undefined && skips.has(skipTitle);
+    showSkipNotice(null);
     // 조회를 끝내기 전에 저장 응답이 오면 이전 조회가 덮어쓰지 않도록 취소한다.
     loadRequest.current?.abort();
     loadRequest.current = null;
@@ -78,12 +111,48 @@ export function useSchedulePlaces({
     const done = (async () => {
       try {
         const updated = await requestWithTimeout((signal) => api.savePlace(id, change, signal), timeoutMs, controller);
-        if (saveRequest.current === controller) setLoad((prev) => prev.status === 'ready'
-          ? { ...prev, schedules: prev.schedules.map((s) => s.id === updated.id ? { ...s, ...updated } : s) } : prev);
+        if (saveRequest.current === controller) {
+          setLoad((prev) => prev.status === 'ready'
+            ? { ...prev, schedules: prev.schedules.map((s) => s.id === updated.id ? { ...s, ...updated } : s) } : prev);
+          if (skipTitle !== undefined) showSkipNotice({ id, title: skipTitle, keepName });
+        }
       } catch (error) {
         if (saveRequest.current === controller) {
           setSaveIssue(isClientError(error) ? 'reload' : 'retry');
           if (isClientError(error)) { retryLast.current = null; setAttempt((n) => n + 1); }
+        }
+      } finally {
+        if (saveRequest.current === controller) { saveRequest.current = null; setSavingId(null); }
+      }
+    })();
+    saveDone.current = done;
+    void done.then(() => { if (saveDone.current === done) saveDone.current = null; });
+    return done;
+  };
+
+  /** 방금 누른 [이동 없음]을 되돌린다: 일정별 이동 없음과 이름 기억을 함께 되돌린다. */
+  const undoSkipNotice = (): Promise<void> => {
+    if (!skipNotice || saveRequest.current) return Promise.resolve();
+    const { id, title, keepName } = skipNotice;
+    loadRequest.current?.abort();
+    loadRequest.current = null;
+    const controller = new AbortController();
+    saveRequest.current = controller;
+    retryLast.current = () => void undoSkipNotice();
+    setSavingId(id);
+    setSaveIssue(null);
+    const done = (async () => {
+      try {
+        const updated = await requestWithTimeout((signal) => api.undoNoTravel(id, title, keepName, signal), timeoutMs, controller);
+        if (saveRequest.current === controller) {
+          setLoad((prev) => prev.status === 'ready'
+            ? { ...prev, schedules: prev.schedules.map((s) => s.id === updated.id ? { ...s, ...updated } : s) } : prev);
+          showSkipNotice(null);
+        }
+      } catch (error) {
+        if (saveRequest.current === controller) {
+          setSaveIssue(isClientError(error) ? 'reload' : 'retry');
+          if (isClientError(error)) { retryLast.current = null; showSkipNotice(null); setAttempt((n) => n + 1); }
         }
       } finally {
         if (saveRequest.current === controller) { saveRequest.current = null; setSavingId(null); }
@@ -101,6 +170,12 @@ export function useSchedulePlaces({
     saveIssue,
     clearSaveIssue: () => setSaveIssue(null),
     save,
+    /** 방금 누른 [이동 없음] 안내(없으면 null). 10초 뒤 저절로 사라진다. */
+    skipNotice,
+    undoSkipNotice,
+    /** 서버가 기억 상한이라며 이름 기억을 거절했고 아직 확인하지 않았다. */
+    memoryFull,
+    dismissFull: skips.dismissFull,
     retrySave: () => retryLast.current?.(),
     /** 조회를 처음부터 다시 한다(오류 화면의 다시 시도, 일정이 달라진 뒤). */
     reload: () => setAttempt((n) => n + 1),

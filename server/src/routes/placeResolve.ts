@@ -3,6 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import { MAX_BODY_BYTES } from '../limits.js';
 import type { MemoryPlace } from '../placeMemory.js';
+import { displayEventName } from '../eventName.js';
 import { normalizePlaceName } from '../placeMemory.js';
 import { looksLikeAddress, parseCoordinateText } from '../placeSearch/address.js';
 import { coarseLocation, externalQuery, scopedSearch } from '../placeSearch/scoped.js';
@@ -25,7 +26,8 @@ const tooLarge = bodyLimit({
 });
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const clean = (text: string) => text.trim().replace(/\s+/g, ' ');
+/** 보이는 이름 정리: 일정 이름과 같은 규칙(NFC·보이지 않는 글자 제거·공백 정리, `eventName.ts`). */
+const clean = displayEventName;
 
 /** 응답의 후보. memory의 place와 달리 id·거리가 있다. */
 type PublicCandidate = PlaceCandidate;

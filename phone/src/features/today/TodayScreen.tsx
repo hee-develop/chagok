@@ -12,8 +12,10 @@ import { useEventSendBlock, type SendBlockReason } from '../calendar-sync/sendBl
 import { TravelMarkNotice } from '../calendar-sync/TravelMarkNotice';
 import { useTravelMark, type TravelMarkOptions } from '../calendar-sync/useTravelMark';
 import { formatScheduleDay } from '../fill-places/scheduleFormat';
+import { NoTravelNotices } from '../fill-places/NoTravelNotices';
 import { schedulePlacesApi, type SchedulePlacesApi } from '../fill-places/schedulePlacesApi';
 import type { Inbox } from '../notifications/inbox';
+import type { SkipMemory } from '../skips/skipMemory';
 import { useSchedulePlaces } from '../fill-places/useSchedulePlaces';
 import { carConnectionSource, useCarConnection, type CarConnectionSource } from './carConnection';
 import { ConnectionCard } from './ConnectionCard';
@@ -32,7 +34,9 @@ type Props = {
   /** 폰이 거른 일정(서버로 보내지 않은 것). 기본은 앱 전체가 공유하는 목록(3단계 화면과 같다). */
   filteredEvents?: readonly FilteredEvent[];
   /** 거른 일정을 "이동 일정이에요"로 바꾸고 되돌리는 동작(기본은 `calendar-sync/travelMark.ts`). 바뀌면 서버 목록을 다시 조회한다. */
-  travelMark?: Pick<TravelMarkOptions, 'mark' | 'undo' | 'undoVisibleMs'>;
+  travelMark?: Pick<TravelMarkOptions, 'mark' | 'undo' | 'unskip' | 'undoUnskip' | 'undoVisibleMs'>;
+  /** '이동 없음'으로 기억한 이름(기본은 앱 전체가 공유하는 기억). 3단계와 같은 [이동 없음] 안내·되돌리기에 쓴다. */
+  skips?: Pick<SkipMemory, 'has' | 'full' | 'dismissFull' | 'subscribe'>;
   /** 폰 알림함. 기본은 앱 전체가 공유하는 것. */
   inbox?: Inbox;
   /** 일정을 서버로 보낼 수 없는 이유. 기본은 일정 동기화 결과를 따라가는 `useEventSendBlock()`. */
@@ -52,6 +56,7 @@ export function TodayScreen({
   timeoutMs = REQUEST_TIMEOUT_MS,
   filteredEvents,
   travelMark,
+  skips,
   inbox,
   sendBlock: sendBlockProp,
 }: Props) {
@@ -69,7 +74,7 @@ export function TodayScreen({
   const permissionsPending = permissions.state.status === 'loading';
 
   const connection = useCarConnection({ source: connectionSource, timeoutMs });
-  const sched = useSchedulePlaces({ api: scheduleApi, timeoutMs, enabled: !calendarBlocked && !permissionsPending });
+  const sched = useSchedulePlaces({ api: scheduleApi, timeoutMs, enabled: !calendarBlocked && !permissionsPending, skips, undoVisibleMs: travelMark?.undoVisibleMs });
   // 거른 줄을 이동 일정으로 바꾸거나 되돌리면 서버가 아는 일정이 달라지므로 서버 목록을 다시 조회한다.
   const travel = useTravelMark({ ...travelMark, lines: filtered, onChanged: sched.reload });
   const saving = sched.saving || travel.busy;
@@ -148,6 +153,8 @@ export function TodayScreen({
         )}
         {sched.saving ? <LoadingBlock label={t.saving} /> : null}
         <TravelMarkNotice undoable={travel.undoable} issue={travel.issue} disabled={saving} onUndo={() => void travel.undoNow()} />
+        <NoTravelNotices notice={sched.skipNotice} full={sched.memoryFull} disabled={saving}
+          onUndo={() => void sched.undoSkipNotice()} onDismissFull={sched.dismissFull} />
         {sched.saveIssue === 'reload' ? (
           // 일정이 바뀌어 같은 저장을 다시 보내면 안 된다. 목록은 이미 다시 읽고 있으므로 닫기만 둔다.
           <ErrorBlock message={strings.placeSearch.scheduleChanged} retryLabel={t.close} onRetry={sched.clearSaveIssue} />

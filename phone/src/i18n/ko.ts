@@ -174,8 +174,6 @@ export const ko = {
   placesTab: {
     remembered: '기억한 장소',
     rememberedEmpty: '일정 제목으로 기억한 장소가 생기면 여기에 모여요.',
-    noTravel: '이동 없음으로 둔 일정',
-    noTravelEmpty: '이동 없음으로 둔 일정이 생기면 여기에 모여요.',
   },
   // 장소 탭의 '기억한 장소'(정책서 10.8 '기억한 장소 지우기')
   rememberedPlaces: {
@@ -247,6 +245,22 @@ export const ko = {
     markFailed: '바꾸지 못했어요. 일정은 그대로예요. 잠시 뒤 다시 시도해 주세요.',
     undoFailed: '되돌렸어요. 차에는 아직 반영하지 못했고 잠시 뒤 다시 보내요.',
   },
+  // '이동 없음' 목록(정책서 10.8): 같은 이름 일정은 앞으로 차에 보내지 않는다. 장소 탭이 붙인다.
+  skips: {
+    title: '이동 없음으로 기억한 일정',
+    description: '같은 이름의 일정은 차에서 묻지 않고 길안내도 하지 않아요. 지우면 다시 차에 보내요.',
+    empty: '이동 없음으로 기억한 일정이 없어요.',
+    remove: '지우기',
+    removeLabel: (name: string) => `${name} 이동 없음 지우기`,
+    loading: '목록을 불러오는 중',
+    notSynced: '아직 서버에 올리지 못했어요',
+    loadFailed: '목록을 새로 받지 못했어요. 저장해 둔 목록을 보여 드려요.',
+    removeFailed: '지우지 못했어요. 잠시 뒤 다시 시도해 주세요.',
+    // 서버가 기억 개수 상한이라며 이름 더하기를 거절했다(연결 전에는 상한이 더 작다).
+    full: '이동 없음으로 기억할 수 있는 일정 이름이 가득 찼어요. 이 일정은 이동 없음으로 두었지만 같은 이름의 다른 일정은 기억하지 못해요. 목록에서 지우면 다시 기억할 수 있어요.',
+    fullDismiss: '확인',
+    retry: RETRY,
+  },
   fillPlaces: {
     title: (count: number) => `장소가 빈 일정이 ${count}개 있어요`,
     heading: '일정 장소를 확인해 주세요',
@@ -255,9 +269,12 @@ export const ko = {
     noSchedules: '선택한 캘린더에 확인할 일정이 없어요.',
     missing: '장소 없음',
     noTravel: '이동 없음',
+    // 3단계에서 [이동 없음]을 누른 직후: 이름을 기억해 같은 이름 일정을 앞으로 차에 보내지 않는다. 10초 동안 되돌릴 수 있다.
+    noTravelRemembered: (title: string) => `‘${title}’ 일정을 이동 없음으로 두었어요. 같은 이름 일정을 앞으로 차에 보내지 않아요.`,
     // 저절로 이동 없음으로 본 이유(온라인 회의·건물 안). 폰이 읽을 때 거르고(서버로 보내지 않음) 서버는 안전망이다.
     // 1단계 문구 "걸러서 차에 보내지 않아요"의 실제 동작이다.
-    noTravelReason: { online: '온라인 회의', meetingRoom: '건물 안' },
+    // skipped: 같은 이름을 '이동 없음'으로 기억해서 거른 일정(차의 "안 가요"나 3단계의 '이동 없음' 뒤).
+    noTravelReason: { online: '온라인 회의', meetingRoom: '건물 안', skipped: '이동 없음으로 기억' },
     // 일정마다 적는 채비. 차가 탈 때 읽는다.
     careLabel: '채비',
     careAdd: '채비 넣기',

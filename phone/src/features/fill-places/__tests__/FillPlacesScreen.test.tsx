@@ -14,12 +14,13 @@ jest.mock('expo-router', () => {
   };
 });
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
-const empty: SetupSchedule = { id: 'lunch', title: '육전집 점심', start: '2026-11-06T04:00:00Z', end: '2026-11-06T05:00:00Z', place: null, locationText: null, noTravel: false, noTravelReason: null, care: null, suggestion: null, familyRequests: [] };
+const empty: SetupSchedule = { id: 'lunch', title: '육전집 점심', start: '2026-11-06T04:00:00Z', end: '2026-11-06T05:00:00Z', place: null, locationText: null, noTravel: false, noTravelReason: null, corrected: false, care: null, suggestion: null, familyRequests: [] };
 const resolved: SetupSchedule = { ...empty, id: 'game', title: 'KIA 직관', place: { name: '챔피언스필드', lat: 35.1, lng: 126.8 } };
 const makeApi = (overrides: Partial<SchedulePlacesApi> = {}) => ({
   fetchSchedules: jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [empty, resolved] }),
   savePlace: jest.fn().mockResolvedValue({ id: empty.id, place: null, locationText: null, noTravel: true }),
   saveCare: jest.fn().mockResolvedValue({ id: empty.id, care: null }),
+  undoNoTravel: jest.fn().mockResolvedValue({ id: empty.id, place: null, locationText: null, noTravel: false, noTravelReason: null }),
   ...overrides,
 });
 const renderScreen = (api: SchedulePlacesApi, timeoutMs?: number, extra: Partial<React.ComponentProps<typeof FillPlacesScreen>> = {}) =>
@@ -355,5 +356,134 @@ describe('폰이 거른 일정(서버로 보내지 않은 것)', () => {
     await screen.findByText('장소가 빈 일정이 1개 있어요');
     expect(screen.getAllByTestId('schedule-lunch')).toHaveLength(1);
     expect(screen.queryByText('고객사 주간 회의')).toBeNull();
+  });
+});
+
+describe('이동 없음으로 기억한 이름의 일정', () => {
+  const kia = { id: 'kia@1', title: 'KIA 직관', start: '2026-11-06T08:00:00Z', end: '2026-11-06T09:00:00Z', reason: 'skipped' as const };
+
+  it('서버가 skipped 이유로 내린 일정은 흐리게 두고 이유를 붙인다', async () => {
+    const skipped: SetupSchedule = { ...empty, id: 'kia', title: 'KIA 직관', noTravel: true, noTravelReason: 'skipped' };
+    await renderScreen(makeApi({ fetchSchedules: jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [skipped] }) }));
+    expect(await screen.findByText('✓ 이동 없음 · 이동 없음으로 기억')).toBeOnTheScreen();
+    expect(screen.getByTestId('schedule-kia')).toHaveStyle({ opacity: 0.55 });
+  });
+
+  it('폰이 거른 줄에 이유를 붙이고, "이동 일정이에요"는 예외가 아니라 기억 지우기(unskip)로 동작하며 되돌리기도 그렇다', async () => {
+    const mark = jest.fn().mockResolvedValue('ok');
+    const unskip = jest.fn().mockResolvedValue('ok');
+    const undoUnskip = jest.fn().mockResolvedValue('ok');
+    const api = makeApi();
+    await renderScreen(api, undefined, { filteredEvents: [kia], travelMark: { mark, unskip, undoUnskip } });
+    expect(await screen.findByText('✓ 이동 없음 · 이동 없음으로 기억')).toBeOnTheScreen();
+    await fireEvent.press(await screen.findByRole('button', { name: 'KIA 직관 이동 일정이에요' }));
+    await fireEvent.press(screen.getByRole('button', { name: '바꾸기' }));
+    expect(unskip).toHaveBeenCalledWith('KIA 직관');
+    expect(mark).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.fetchSchedules).toHaveBeenCalledTimes(2));
+    await fireEvent.press(await screen.findByRole('button', { name: 'KIA 직관 되돌리기' }));
+    expect(undoUnskip).toHaveBeenCalledWith('KIA 직관');
+  });
+});
+
+describe('[이동 없음]: 이름 기억 안내와 되돌리기', () => {
+  const makeSkips = (remembered: string[] = []) => {
+    const state = { full: false, names: new Set(remembered) };
+    const listeners = new Set<() => void>();
+    return {
+      state,
+      skips: {
+        has: (title: string) => state.names.has(title),
+        full: () => state.full,
+        dismissFull: jest.fn(() => { state.full = false; listeners.forEach((l) => l()); }),
+        subscribe: (l: () => void) => { listeners.add(l); return () => listeners.delete(l); },
+      },
+      setFull: () => { state.full = true; listeners.forEach((l) => l()); },
+    };
+  };
+  const pressNoTravel = () => fireEvent.press(screen.getByRole('button', { name: '육전집 점심 이동 없음' }));
+
+  it('[이동 없음]을 누르면 같은 이름 일정을 앞으로 차에 보내지 않는다는 안내와 [되돌리기]를 보인다', async () => {
+    const { skips } = makeSkips();
+    const api = makeApi();
+    await renderScreen(api, undefined, { skips });
+    await screen.findByText('장소가 빈 일정이 1개 있어요');
+    await pressNoTravel();
+    expect(await screen.findByText('‘육전집 점심’ 일정을 이동 없음으로 두었어요. 같은 이름 일정을 앞으로 차에 보내지 않아요.')).toBeOnTheScreen();
+    expect(screen.getByRole('button', { name: '육전집 점심 되돌리기' })).toBeOnTheScreen();
+    expect(api.savePlace).toHaveBeenCalledWith('lunch', { noTravel: true }, expect.any(AbortSignal));
+  });
+
+  it('[되돌리기]는 일정별 이동 없음과 이름 기억을 함께 되돌리고(undoNoTravel) 줄을 다시 장소 없음으로 보인다', async () => {
+    const { skips } = makeSkips();
+    const api = makeApi();
+    await renderScreen(api, undefined, { skips });
+    await screen.findByText('장소가 빈 일정이 1개 있어요');
+    await pressNoTravel();
+    await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 되돌리기' }));
+    expect(api.undoNoTravel).toHaveBeenCalledWith('lunch', '육전집 점심', false, expect.any(AbortSignal));
+    expect(await screen.findByText('장소가 빈 일정이 1개 있어요')).toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: '육전집 점심 되돌리기' })).toBeNull();
+    expect(screen.getByRole('button', { name: '육전집 점심 이동 없음' })).toBeOnTheScreen();
+  });
+
+  it('누르기 전부터 기억하던 이름이면 되돌려도 기억은 그대로 둔다(keepName)', async () => {
+    const { skips } = makeSkips(['육전집 점심']);
+    const api = makeApi();
+    await renderScreen(api, undefined, { skips });
+    await screen.findByText('장소가 빈 일정이 1개 있어요');
+    await pressNoTravel();
+    await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 되돌리기' }));
+    expect(api.undoNoTravel).toHaveBeenCalledWith('lunch', '육전집 점심', true, expect.any(AbortSignal));
+  });
+
+  it('안내는 10초 뒤 사라지고(되돌리기도 함께), 저장이 실패하면 보이지 않는다', async () => {
+    jest.useFakeTimers();
+    try {
+      const { skips } = makeSkips();
+      await renderScreen(makeApi(), undefined, { skips });
+      await screen.findByText('장소가 빈 일정이 1개 있어요');
+      await pressNoTravel();
+      expect(await screen.findByRole('button', { name: '육전집 점심 되돌리기' })).toBeOnTheScreen();
+      await act(async () => { await jest.advanceTimersByTimeAsync(9_000); });
+      expect(screen.getByRole('button', { name: '육전집 점심 되돌리기' })).toBeOnTheScreen();
+      await act(async () => { await jest.advanceTimersByTimeAsync(1_100); });
+      expect(screen.queryByRole('button', { name: '육전집 점심 되돌리기' })).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+    const { skips } = makeSkips();
+    await renderScreen(makeApi({ savePlace: jest.fn().mockRejectedValue(new Error('offline')) }), undefined, { skips });
+    await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 이동 없음' }));
+    await screen.findByText('저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+    expect(screen.queryByRole('button', { name: '육전집 점심 되돌리기' })).toBeNull();
+  });
+
+  it('되돌리기가 실패하면 안내하고 다시 시도할 수 있다', async () => {
+    const { skips } = makeSkips();
+    const undoNoTravel = jest.fn().mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ id: 'lunch', place: null, locationText: null, noTravel: false, noTravelReason: null });
+    await renderScreen(makeApi({ undoNoTravel }), undefined, { skips });
+    await screen.findByText('장소가 빈 일정이 1개 있어요');
+    await pressNoTravel();
+    await fireEvent.press(await screen.findByRole('button', { name: '육전집 점심 되돌리기' }));
+    await screen.findByText('저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+    await fireEvent.press(screen.getByText('다시 시도'));
+    await waitFor(() => expect(undoNoTravel).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('장소가 빈 일정이 1개 있어요')).toBeOnTheScreen();
+  });
+
+  it('서버가 기억 상한이라 거절하면 "보내지 않아요" 안내 대신 가득 참을 알리고 확인하면 닫힌다', async () => {
+    const { skips, setFull } = makeSkips();
+    await renderScreen(makeApi(), undefined, { skips });
+    await screen.findByText('장소가 빈 일정이 1개 있어요');
+    await pressNoTravel();
+    await screen.findByRole('button', { name: '육전집 점심 되돌리기' });
+    await act(async () => setFull());
+    expect(screen.getByText(/이동 없음으로 기억할 수 있는 일정 이름이 가득 찼어요/)).toBeOnTheScreen();
+    expect(screen.queryByRole('button', { name: '육전집 점심 되돌리기' })).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: '확인' }));
+    expect(skips.dismissFull).toHaveBeenCalled();
+    expect(screen.queryByText(/가득 찼어요/)).toBeNull();
   });
 });

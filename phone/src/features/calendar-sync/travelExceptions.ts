@@ -1,9 +1,11 @@
+import { normalizeEventName } from '@chagok/server/event-name';
+
 import { deviceStore } from '../../storage/keyValueStore';
 
 /**
  * "이동 일정이에요"로 바꾼 일정 이름 목록(정책서 10.3: 바꾸면 같은 이름 일정은 다음부터 거르지 않는다).
  * 폰 저장소(AsyncStorage)에 둔다. 이름만 담고 일정 내용은 담지 않는다.
- * 서버 `/skips`(이동 없음 기억 서버 목록)와 잇는 일은 다음 묶음(J2b)이다: `subscribe`로 바뀔 때마다 받아 서버에 올리면 된다.
+ * 서버 `/skips`(이동 없음 기억)와는 `skips/skipMemory.ts`가 `subscribe`로 잇는다: 예외를 더하면 같은 이름의 이동 없음 기억을 지운다(가장 최근 선택이 이긴다).
  */
 export type KeyValueStorage = {
   getItem(key: string): Promise<string | null>;
@@ -33,7 +35,7 @@ export type TravelExceptions = {
   rollbackAdd(title: string, wasException: boolean): Promise<void>;
   /** 저장소를 아직 읽지 못한 상태인가(true인 동안 `has`는 저장된 이름을 모른다). */
   readFailed(): boolean;
-  /** 바뀔 때마다 부른다. 해제 함수를 돌려준다(J2b가 서버 목록에 올리는 자리). */
+  /** 바뀔 때마다 부른다(저장보다 먼저, 이름 목록을 바꾼 바로 뒤). 해제 함수를 돌려준다. */
   subscribe(listener: (change: TravelExceptionChange) => void): () => void;
 };
 
@@ -43,10 +45,10 @@ export const MAX_EXCEPTIONS = 500;
 /** 저장소 읽기가 이 시간 안에 끝나지 않으면 읽기 실패로 본다(동기화가 영영 멈추지 않게). */
 export const LOAD_TIMEOUT_MS = 5_000;
 
-/** 앞뒤 공백 제거·연속 공백 하나·대소문자 무시. 서버의 장소 이름 정규화와 같은 규칙이다. */
-export const normalizeTitle = (title: string) => title.trim().replace(/\s+/g, ' ').toLowerCase();
+/** 앞뒤 공백 제거·연속 공백 하나·대소문자 무시. 서버의 이동 없음 기억과 같은 함수(`@chagok/server/event-name`)다. */
+export const normalizeTitle = normalizeEventName;
 
-// AsyncStorage는 `storage/keyValueStore.ts` 한 곳에서만 불러온다.
+// AsyncStorage는 `storage/keyValueStore.ts` 한 곳에서만 불러온다. 폰 안에 남기는 다른 목록(`skips/skipMemory.ts`)도 같은 `deviceStore`를 쓴다.
 const defaultStorage: KeyValueStorage = deviceStore;
 
 export function createTravelExceptions(
@@ -134,22 +136,23 @@ export function createTravelExceptions(
       await load();
       removedBeforeLoad.delete(name);
       if (!names.includes(name)) names = [...names, name].slice(-MAX_EXCEPTIONS);
-      if (loaded) await persist();
-      else dirty = true;
+      // 알림은 목록을 바꾼 바로 뒤에 한다(저장을 기다리는 동안 구독자가 '예외인데 알림이 없는' 틈을 보지 않게).
+      if (!loaded) dirty = true;
       notify({ name, travel: true });
+      if (loaded) await persist();
     },
     async remove(title) {
       const name = normalizeTitle(title);
       await load();
       if (loaded && !names.includes(name)) return;
       names = names.filter((n) => n !== name);
-      if (loaded) await persist();
-      else {
+      if (!loaded) {
         // 저장소에 남아 있을 수 있으니 읽은 뒤에도 빼도록 기억한다.
         removedBeforeLoad.add(name);
         dirty = true;
       }
       notify({ name, travel: false });
+      if (loaded) await persist();
     },
     async rollbackAdd(title, wasException) {
       if (wasException) return;

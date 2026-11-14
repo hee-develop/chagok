@@ -12,6 +12,8 @@ import { PlaceRow } from './PlaceRow';
 import { placeMemoryApi, type PlaceMemoryApi } from './memoryApi';
 import { placesApi, type Favorites, type PlacesApi, type Suggestion } from './placesApi';
 import { RememberedPlaces } from './RememberedPlaces';
+import { SkipList } from '../skips/SkipList';
+import type { UseSkipsOptions } from '../skips/useSkips';
 import { SuggestionCard } from './SuggestionCard';
 
 type Props = {
@@ -21,6 +23,8 @@ type Props = {
   timeoutMs?: number;
   /** 'setup'은 첫 설정 2단계(단계 표시·다음·건너뛰기). 'tab'은 장소 탭(단계 표시·다음 없음, 검색 화면도 단계 표시 없이 열림). */
   mode?: 'setup' | 'tab';
+  /** 장소 탭의 '이동 없음' 목록(`SkipList`)에 넘기는 옵션(기본은 앱 전체가 공유하는 기억). */
+  skipList?: UseSkipsOptions;
 };
 
 /** retry: 같은 요청을 다시 보낼 수 있는 실패. reload: 서버가 요청을 거절해 최신 상태를 다시 불러온 경우. */
@@ -30,7 +34,7 @@ type LoadState = { status: 'loading' } | { status: 'error' } | { status: 'ready'
 
 const NEXT_ROUTE = '/setup/fill-places';
 
-export function PlacesScreen({ api = placesApi, memoryApi = placeMemoryApi, timeoutMs = REQUEST_TIMEOUT_MS, mode = 'setup' }: Props) {
+export function PlacesScreen({ api = placesApi, memoryApi = placeMemoryApi, timeoutMs = REQUEST_TIMEOUT_MS, mode = 'setup', skipList }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
@@ -232,10 +236,9 @@ export function PlacesScreen({ api = placesApi, memoryApi = placeMemoryApi, time
             {mode === 'tab' ? (
               <>
                 <RememberedPlaces api={memoryApi} timeoutMs={timeoutMs} />
-                {/* 이동 없음 목록은 다음 묶음(J2b)에서 채울 자리다. 지금은 빈 상태만 보인다. */}
+                {/* 이동 없음 목록(정책서 10.8): 같은 이름 일정을 차에 보내지 않도록 기억한 이름을 보고 지운다. */}
                 <View style={styles.suggestions} testID="places-tab-noTravel">
-                  <Text accessibilityRole="header" style={[styles.heading, font(600)]}>{strings.placesTab.noTravel}</Text>
-                  <Text style={[styles.placeholder, font(400)]}>{strings.placesTab.noTravelEmpty}</Text>
+                  <SkipList {...skipList} />
                 </View>
               </>
             ) : null}
@@ -272,7 +275,6 @@ export function PlacesScreen({ api = placesApi, memoryApi = placeMemoryApi, time
 }
 
 const styles = StyleSheet.create({
-  placeholder: { fontSize: 15, lineHeight: 22, color: colors.textMuted },
   screen: { flex: 1, backgroundColor: colors.background },
   content: { paddingHorizontal: 20, paddingBottom: 16, gap: 22 },
   titles: { gap: 10 },

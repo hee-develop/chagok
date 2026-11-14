@@ -15,6 +15,7 @@ const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 
 const makeApi = (saveCare: jest.Mock = jest.fn().mockResolvedValue({ id: 'kia', care: null })): SchedulePlacesApi => ({
   fetchSchedules: jest.fn(),
   savePlace: jest.fn(),
+  undoNoTravel: jest.fn(),
   saveCare,
 });
 const renderScreen = (api: SchedulePlacesApi, initialCare = '') =>
