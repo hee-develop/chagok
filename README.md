@@ -4,7 +4,7 @@
 
 ## 지금 되는 것 (2026-11-14, 에뮬레이터 기준)
 
-- **폰 첫 설정**: 캘린더 고르기(실제 Android 캘린더) → 자주 가는 곳 → 일정별 장소 보정 · 채비 한 줄 · 가족에게 보내기('전달됨') → 차 화면 QR이나 6자리 번호로 차와 연결
+- **폰 첫 설정**: 캘린더 고르기(실제 Android 캘린더) → 자주 가는 곳 → 일정별 장소 보정 · 채비 한 줄 · 가족에게 보내기('전달됨') → 차 화면 QR이나 6자리 번호로 차와 연결(한 차에 폰 여러 대, 폰마다 운전자 자리)
 - **차 탑승 브리핑**: 오늘 일정과 채비를 읽고 "출발할까요?"를 묻고, "응"이면 내비 길안내를 시작한다. 늦었으면 같이 묻고, 일정이 없거나 여유가 많으면 자주 가는 곳을 후보로 보인다
 - **도착 → 다음 일정**: 내비 도착 알림이나 P단 + 일정 장소 300m 안이면 도착으로 보고, 다시 타면 다음 일정을 한 줄로 묻는다
 - **주행 중**: 말하지 않고 다음 일정 칩 한 줄만 보인다
@@ -43,6 +43,7 @@ pnpm typecheck         # 서버와 폰 앱 타입체크
 - `PUT /calendars/selection`은 `{ selectedIds, revision }`을 받아 저장하고(`GET`으로 조회), `GET /schedules/today`는 저장된 선택(없으면 `defaultSelected`) 캘린더의 일정 중 `at`(없으면 현재)의 Asia/Seoul 날짜 일정만 내려줍니다(전날 시작해 아직 안 끝난 일정 포함). 일정의 `calendarId`는 `fixtures/schedules/gwangju-day.json`에 있습니다.
 - 장소는 `fixtures/places/mock-places.json`(검색 대상)과 `suggestions.json`('캘린더에서 자주 나온 곳' 고정 추천)이 단일 출처입니다. `GET /places/search?q=`(이름·주소 부분 일치, 최대 10개, q 50자 상한, 빈 q는 400), `GET /places/suggestions`, `GET /places/favorites`(`{ home, work, others, revision }`), `PUT /places/favorites/home`·`/work`(`{ placeId|null }`), `POST /places/favorites/others`(`{ placeId }`)를 둡니다. 쓰기 요청은 자리 하나만 바꾸고 전체 상태를 돌려주며, 같은 장소가 다른 자리에 있으면 서버가 옮깁니다. others 최대 20, 이미 추가한 장소·모르는 id는 400이고 `revision`은 서버가 올립니다. 차량 앱은 `GET /schedules/today`의 `favorites`(집 → 회사 → 추가한 순서)로 받아 '어디로 갈까요?' 후보로 씁니다([목적지 후보 문서](docs/destination-candidates.md)).
 - `PUT /events`(폰이 오늘·내일 일정 전체를 교체. 본문 1MB·일정 200개·필드 길이 상한, 시각은 오프셋 있는 ISO8601, 오늘·내일(서울) 밖 일정은 거름)와 `GET /events?date=YYYY-MM-DD`(저장값 확인)를 둡니다. `DELETE /events`(같은 기기 요청만, 개발·데모용)는 폰 일정을 비워 픽스처 출처로 되돌립니다. 폰이 한 번이라도 일정을 보냈으면 `/schedules/today`·`/schedules/places`는 그 일정(선택 캘린더 필터·서울 날짜 규칙·3단계 보정 적용)을 쓰고, 한 번도 안 보냈으면 지금처럼 픽스처를 씁니다(데모·차량 E2E 경로). 선택은 `source`(`mock`|`device`)를 함께 저장하며 일정 출처와 같을 때만 적용합니다. 폰 일정의 장소는 목 장소 이름과 정규화해 완전히 같을 때만 좌표를 확정하고, 일부만 겹치거나 지난번 기억(제목)과 맞으면 `suggestion`(확인 필요)으로만 내립니다. 날짜가 지난 일정은 읽을 때·교체할 때 지웁니다. **주의**: 폰 앱을 8787 서버에 붙이면 데모·차량 E2E가 폰 일정을 받으니 `GET /events`의 `receivedAt`이 null인지 확인하고(값이 있으면 `curl -X DELETE http://127.0.0.1:8787/events`), `HOST=0.0.0.0`으로 열 때는 `EVENTS_LOOPBACK_ONLY=1`을 함께 주세요. 계약은 [폰 캘린더 연결 문서](docs/calendar-sync.md)를 따릅니다.
+- 운전자 자리: 한 차에 폰 여러 대를 연결하고(`Car`·`Seat`, 폰 한 대 = 자리 하나, 이름은 폰 기기 이름) 일정·캘린더 선택·장소 보정·채비·자주 가는 곳·가족 요청을 자리별로 나눠 둡니다(메모리 저장). 폰은 연결 때 받은 폰 토큰(`expo-secure-store`)을 `Authorization: Bearer`로 붙이고, 차는 `driver=<seatId>`와 차 토큰으로 그 자리의 일정을 읽습니다. 토큰 없이 기기 id(`X-Chagok-Device`)만 보내는 폰은 그 기기의 연결 전 버킷을, 식별이 전혀 없는 요청은 '기본 자리'(픽스처·데모·차량 E2E 경로)를 씁니다. 연결할 때는 그 폰의 버킷만 새 자리로 옮겨집니다. API는 `POST /pair/code`(차, 새 자리·바꿀 자리, 5분)·`POST /pair/claim`(폰)·`GET /pair`·`DELETE /pair`(폰 연결 끊기)·`GET /drivers`·`PUT /drivers/selected`·`POST /presence`·`DELETE /car`(차곡 초기화)이고, 현재 차 앱이 쓰는 `/pairing/*`는 그대로 둡니다. 6자리 코드는 요청 주소별로 시도를 제한합니다. 계약은 [차–폰 연결 문서](docs/pairing.md)를 따릅니다.
 - `revision`은 폰이 보내는 단조 증가 정수이고, 서버는 저장된 값보다 작은 요청을 저장하지 않고 현재 저장값을 200으로 돌려줍니다. 저장 중 '나중에 할게요'로 취소한 요청도 서버에는 이미 반영됐을 수 있습니다.
 
 ## 폰 앱
@@ -96,7 +97,7 @@ adb -s emulator-5554 shell am start -n com.chagok.car/.MainActivity
 Android Studio에서는 `car/` 폴더를 열고 Run 하면 된다.
 
 빌드 없이 써 보려면 [Releases](https://github.com/hee-develop/chagok/releases)의 차량 앱 debug APK(`chagok-car-debug-*.apk`)를 받아 `adb -s emulator-5554 install -r <파일>`로 설치한다.
-이 APK는 같은 PC의 서버(`http://10.0.2.2:8787`, 에뮬레이터에서 본 PC)에만 붙으므로 서버(`pnpm demo:pt server` 또는 `pnpm server:dev`)를 먼저 띄운다.
+이 APK는 같은 PC의 서버(`http://10.0.2.2:8787`, 에뮬레이터에서 본 PC)에만 붙으므로 서버(`pnpm demo:pt server` 또는 `pnpm server:dev`. 폰을 연결한 뒤에도 목 일정으로 시연하려면 서버를 `FIXTURE_SEATS=1`로 띄운다. `demo:pt server`는 이미 그렇다)를 먼저 띄운다.
 PT 시연 순서(폰 → 차 연결 → 브리핑 → 도착)와 점검 명령(`pnpm demo:pt check`)은 `docs/pt-demo.md`에 있다.
 
 ## 테스트

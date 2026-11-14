@@ -3,6 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import type { MockPlace, PlacesCatalog } from '../fixture-types.js';
 import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
+import { openDenied, type SeatEnv, type SeatGuard } from '../seatScope.js';
 
 /** 응답에 내보내는 장소. 픽스처 전용 필드(fictional)는 뺀다. */
 export type PublicPlace = Omit<MockPlace, 'fictional'>;
@@ -17,7 +18,7 @@ export type SavedFavorites = { home: string | null; work: string | null; others:
 export type AddOtherResult = { ok: true; saved: SavedFavorites } | { ok: false; reason: 'duplicate' | 'full' };
 
 /**
- * 목 사용자 한 명의 자주 가는 곳을 메모리에 둔다. 연산은 자리 하나만 바꾸고,
+ * 운전자 자리 하나의 자주 가는 곳을 메모리에 둔다. 연산은 자리 하나만 바꾸고,
  * 같은 장소가 다른 자리에 있으면 그 자리에서 빼고 옮긴다. 한 연산은 한 번에 적용된다.
  */
 export type FavoritesStore = {
@@ -83,7 +84,7 @@ const tooLarge = bodyLimit({
 });
 
 // RPC 타입 추론을 위해 체이닝을 유지한다.
-export const createPlacesRoute = (catalog: PlacesCatalog, store: FavoritesStore) => {
+export const createPlacesRoute = (catalog: PlacesCatalog, guard: SeatGuard) => {
   // 검색 목록과 추천에 같은 id가 있으면 같은 장소이므로 한 번만 둔다.
   const toPlace = (p: MockPlace): PublicPlace => ({ id: p.id, name: p.name, address: p.address, lat: p.lat, lng: p.lng });
   const byId = new Map<string, PublicPlace>();
@@ -105,7 +106,7 @@ export const createPlacesRoute = (catalog: PlacesCatalog, store: FavoritesStore)
       return { placeId: parsed.placeId };
     });
 
-  return new Hono()
+  return new Hono<SeatEnv>()
     .get(
       '/search',
       validator('query', (value, c) => {
@@ -119,11 +120,21 @@ export const createPlacesRoute = (catalog: PlacesCatalog, store: FavoritesStore)
       (c) => c.json({ places: searchPlaces(searchable, c.req.valid('query').q) }, 200),
     )
     .get('/suggestions', (c) => c.json({ suggestions }))
-    .get('/favorites', (c) => c.json(view(store.get())))
-    .put('/favorites/home', tooLarge, placeIdValidator(true), (c) => c.json(view(store.setHome(c.req.valid('json').placeId)), 200))
-    .put('/favorites/work', tooLarge, placeIdValidator(true), (c) => c.json(view(store.setWork(c.req.valid('json').placeId)), 200))
-    .post('/favorites/others', tooLarge, placeIdValidator(false), (c) => {
-      const result = store.addOther(c.req.valid('json').placeId as string);
+    .get('/favorites', guard.read, (c) => c.json(view(c.var.seat.data.favorites.get())))
+    .put('/favorites/home', guard.write, tooLarge, placeIdValidator(true), (c) => {
+      const opened = c.var.seat.open();
+      if (!opened.ok) return c.json(openDenied(opened.reason), 429);
+      return c.json(view(opened.data.favorites.setHome(c.req.valid('json').placeId)), 200);
+    })
+    .put('/favorites/work', guard.write, tooLarge, placeIdValidator(true), (c) => {
+      const opened = c.var.seat.open();
+      if (!opened.ok) return c.json(openDenied(opened.reason), 429);
+      return c.json(view(opened.data.favorites.setWork(c.req.valid('json').placeId)), 200);
+    })
+    .post('/favorites/others', guard.write, tooLarge, placeIdValidator(false), (c) => {
+      const opened = c.var.seat.open();
+      if (!opened.ok) return c.json(openDenied(opened.reason), 429);
+      const result = opened.data.favorites.addOther(c.req.valid('json').placeId as string);
       if (!result.ok) {
         const error = result.reason === 'duplicate' ? '이미 추가한 장소입니다' : `추가한 장소는 ${MAX_OTHER_PLACES}개 이하여야 합니다`;
         return c.json({ error }, 400);

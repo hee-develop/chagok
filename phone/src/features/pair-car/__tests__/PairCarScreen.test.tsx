@@ -21,12 +21,12 @@ jest.mock('expo-camera', () => {
 });
 
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
-const PAIRED = { carId: 'car-1', pairedAt: '2026-11-06T00:20:00.000Z' };
-const makeApi = (claim: PairingApi['claim'] = jest.fn().mockResolvedValue(PAIRED)): PairingApi => ({ claim });
-const renderScreen = (api: PairingApi) =>
+const PAIRED = { seatId: 'seat-1', name: 'Pixel', mode: 'new' as const, pairedAt: '2026-11-06T00:20:00.000Z' };
+const makeApi = (claim: PairingApi['claim'] = jest.fn().mockResolvedValue(PAIRED)): PairingApi => ({ claim, disconnect: jest.fn(), status: jest.fn() });
+const renderScreen = (api: PairingApi, props: { onSkip?: () => void; onDone?: () => void } = {}) =>
   render(
     <SafeAreaProvider initialMetrics={insets}>
-      <PairCarScreen api={api} />
+      <PairCarScreen api={api} {...props} />
     </SafeAreaProvider>,
   );
 
@@ -57,7 +57,7 @@ it('4단계 진행 표시와 제목을 보이고, 번호 6자리를 넣어야 �
 
 it('없거나 만료된 번호는 새 번호를 넣으라고 하고, 네트워크 실패는 같은 번호로 다시 시도한다', async () => {
   const claim = jest.fn()
-    .mockRejectedValueOnce(new HttpError(404, 'POST /pairing/claim 404'))
+    .mockRejectedValueOnce(new HttpError(404, 'POST /pair/claim 404'))
     .mockRejectedValueOnce(new Error('offline'))
     .mockResolvedValueOnce(PAIRED);
   await renderScreen(makeApi(claim));
@@ -101,4 +101,50 @@ it('카메라를 거부하면 번호를 넣으라고 안내한다', async () => 
   expect(await screen.findByText('카메라를 쓸 수 없어요. 차 화면의 번호를 넣어 주세요.')).toBeOnTheScreen();
   expect(screen.queryByTestId('pair-camera')).toBeNull();
   await waitFor(() => expect(screen.getByRole('button', { name: 'QR 찍기' })).toBeOnTheScreen());
+});
+
+it('차에 폰이 가득이면(409)·요청이 몰려 잠시 막히면(429) 번호 오류와 다른 안내를 보이고 다시 시도 버튼은 없다', async () => {
+  const claim = jest.fn()
+    .mockRejectedValueOnce(new HttpError(409, 'POST /pair/claim 409'))
+    .mockRejectedValueOnce(new HttpError(429, 'POST /pair/claim 429'));
+  await renderScreen(makeApi(claim));
+
+  await fireEvent.changeText(screen.getByTestId('pair-code-input'), '111111');
+  await fireEvent.press(screen.getByRole('button', { name: '연결하기' }));
+  expect(await screen.findByText('이 차에는 더 연결할 수 없어요. 차에 연결된 폰이 많아요.')).toBeOnTheScreen();
+  expect(screen.queryByText('번호가 맞지 않거나 시간이 지났어요. 차 화면의 새 번호로 다시 해 주세요.')).toBeNull();
+  expect(screen.queryByRole('button', { name: '다시 시도' })).toBeNull();
+
+  await fireEvent.press(screen.getByRole('button', { name: '연결하기' }));
+  expect(await screen.findByText('지금은 연결할 수 없어요. 잠시 뒤 다시 해 주세요.')).toBeOnTheScreen();
+  expect(screen.queryByText('이 차에는 더 연결할 수 없어요. 차에 연결된 폰이 많아요.')).toBeNull();
+  expect(screen.queryByRole('button', { name: '다시 시도' })).toBeNull();
+});
+
+it('onSkip이 없으면 건너뛰기 버튼이 없다(지금 동작 그대로. 기본 [완료] 이동은 첫 테스트가 본다)', async () => {
+  await renderScreen(makeApi());
+  expect(screen.queryByRole('button', { name: '건너뛰기' })).toBeNull();
+});
+
+it('onSkip을 주면 연결하기 전에 건너뛸 수 있고, 연결된 뒤에는 건너뛰기가 사라진다', async () => {
+  const onSkip = jest.fn();
+  await renderScreen(makeApi(), { onSkip });
+  await fireEvent.press(screen.getByRole('button', { name: '건너뛰기' }));
+  expect(onSkip).toHaveBeenCalledTimes(1);
+  expect(mockReplace).not.toHaveBeenCalled();
+
+  await fireEvent.changeText(screen.getByTestId('pair-code-input'), '123456');
+  await fireEvent.press(screen.getByRole('button', { name: '연결하기' }));
+  await screen.findByRole('header', { name: '✓ 차와 연결됐어요' });
+  expect(screen.queryByRole('button', { name: '건너뛰기' })).toBeNull();
+});
+
+it('onDone을 주면 [완료]가 기본 이동 대신 그 콜백을 부른다', async () => {
+  const onDone = jest.fn();
+  await renderScreen(makeApi(), { onDone });
+  await fireEvent.changeText(screen.getByTestId('pair-code-input'), '123456');
+  await fireEvent.press(screen.getByRole('button', { name: '연결하기' }));
+  await fireEvent.press(await screen.findByRole('button', { name: '완료' }));
+  expect(onDone).toHaveBeenCalledTimes(1);
+  expect(mockReplace).not.toHaveBeenCalled();
 });

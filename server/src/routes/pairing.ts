@@ -2,78 +2,34 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
-
-/** 연결 코드가 살아 있는 시간. 차는 만료되면 새 코드를 받는다. */
-export const PAIRING_CODE_TTL_MS = 10 * 60_000;
+import { bearerOf, connectionAddress, deviceOf, DEVICE_HEADER } from '../seatScope.js';
+import type { SeatStore } from '../seats.js';
+import { accessCar, claimFailure, qrContent, type PairRouteOptions } from './pair.js';
+import { isLoopbackRequest } from './events.js';
 
 const CODE_PATTERN = /^\d{6}$/;
-
-/**
- * 차–폰 연결(QR · 6자리 숫자). 회원가입 없이 차를 목 사용자 한 명의 폰에 묶는다.
- * 차는 설치 때 만든 익명 차 id로 코드를 받아 QR과 숫자로 보이고, 폰이 그 코드를 보내면 연결된다.
- * 연결은 메모리에만 두며 서버를 다시 켜면 사라진다. 차는 한 번 연결되면 저장해 두고 다시 묻지 않는다.
- * 연결 전인 차는 상태의 codeActive가 false면(서버 재시작·만료) 새 코드를 받는다.
- */
-export type PairingStore = {
-  /** 차 하나에 새 코드를 낸다. 그 차의 이전 코드는 버린다. */
-  issue(carId: string): { code: string; expiresAt: string };
-  /** 살아 있는 코드면 그 차를 연결하고 코드를 버린다. 없거나 만료면 null */
-  claim(code: string): { carId: string; pairedAt: string } | null;
-  /** codeActive: 이 차에 살아 있는 코드가 있는가. 서버를 다시 켜 코드를 잃었으면 false라 차가 새 코드를 받는다. */
-  status(carId: string): { paired: boolean; pairedAt: string | null; codeActive: boolean };
-  /** 연결을 푼다(데모 초기화용). 그 차의 코드도 버린다. */
-  unpair(carId: string): void;
-};
-
-export function createPairingStore(now: () => Date = () => new Date(), random: () => number = Math.random): PairingStore {
-  const codes = new Map<string, { carId: string; expiresAt: number }>();
-  const paired = new Map<string, string>();
-  const purge = () => {
-    const t = now().getTime();
-    for (const [code, entry] of codes) if (entry.expiresAt <= t) codes.delete(code);
-  };
-  const dropCodesOf = (carId: string) => {
-    for (const [code, entry] of codes) if (entry.carId === carId) codes.delete(code);
-  };
-  return {
-    issue: (carId) => {
-      purge();
-      dropCodesOf(carId);
-      let code: string;
-      do code = String(Math.floor(random() * 1_000_000)).padStart(6, '0');
-      while (codes.has(code));
-      const expiresAt = now().getTime() + PAIRING_CODE_TTL_MS;
-      codes.set(code, { carId, expiresAt });
-      return { code, expiresAt: new Date(expiresAt).toISOString() };
-    },
-    claim: (code) => {
-      purge();
-      const entry = codes.get(code);
-      if (!entry) return null;
-      codes.delete(code);
-      const pairedAt = now().toISOString();
-      paired.set(entry.carId, pairedAt);
-      return { carId: entry.carId, pairedAt };
-    },
-    status: (carId) => {
-      purge();
-      const codeActive = [...codes.values()].some((entry) => entry.carId === carId);
-      return { paired: paired.has(carId), pairedAt: paired.get(carId) ?? null, codeActive };
-    },
-    unpair: (carId) => {
-      paired.delete(carId);
-      dropCodesOf(carId);
-    },
-  };
-}
+const MAX_BODY_NAME_LENGTH = 100;
 
 const tooLarge = bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => c.json({ error: '본문이 너무 큽니다' }, 413) });
 const validCarId = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= MAX_ID_LENGTH;
 
+/**
+ * 차–폰 연결의 옛 경로(차 id만으로 부르는 호환 경로). 현재 차 앱이 쓴다. 운전자 자리 모델은 같은 저장소(SeatStore)를 쓰고,
+ * 정책서 이름의 새 API(`/pair/*`, `/drivers`, `/presence`, `/car`)가 차 토큰·폰 토큰을 쓰는 본 경로다(계약: docs/pairing.md).
+ *
+ * - `paired`는 '이 차에 연결된 자리가 하나라도 있는가'이고 `pairedAt`은 가장 최근 연결 시각이다.
+ * - 코드는 언제나 새 자리용이다(폰 바꾸기는 새 API).
+ * - 응답에는 새 필드(carToken·seatId·name·phoneToken)가 더해졌다. 옛 필드는 그대로다.
+ */
 // RPC 타입 추론을 위해 체이닝을 유지한다. 검증기는 받은 본문 모양 그대로를 돌려준다(폰 RPC 타입이 이 모양을 쓴다).
-export const createPairingRoute = (store: PairingStore) =>
-  new Hono()
-    // 차가 코드를 받는다. qr은 차 화면 QR에 담을 글이다.
+export const createPairingRoute = (seats: SeatStore, { clientAddress = connectionAddress, isLoopback = isLoopbackRequest }: PairRouteOptions = {}) => {
+  const status = (carId: string) => {
+    const list = seats.seatsOf(carId);
+    const latest = list.map((s) => s.pairedAt).sort().at(-1) ?? null;
+    return { paired: list.length > 0, pairedAt: latest as string | null, codeActive: seats.codeStatus(carId).state === 'waiting' };
+  };
+  return new Hono()
+    // 차가 코드를 받는다. qr은 차 화면 QR에 담을 글이다. carToken은 차를 처음 만든 응답에만 실린다(그 뒤 새 API에 쓴다).
     .post('/codes', tooLarge,
       validator('json', (raw: unknown, c) => {
         const v = raw as Record<string, unknown> | null;
@@ -83,33 +39,58 @@ export const createPairingRoute = (store: PairingStore) =>
         return { carId: v.carId };
       }),
       (c) => {
-        const { code, expiresAt } = store.issue(c.req.valid('json').carId);
-        return c.json({ code, expiresAt, qr: `chagok://pair?code=${code}` }, 200);
+        const access = accessCar(seats, c, c.req.valid('json').carId, true, { clientAddress, isLoopback });
+        if (access instanceof Response) return access;
+        const result = seats.issueCode(access.car.carId, { kind: 'new' });
+        if (!result.ok) return c.json({ error: '이 차에 연결할 수 있는 폰 수를 넘었습니다', reason: 'seat-limit' as const }, 409);
+        const { code, expiresAt } = result.issued;
+        return c.json({ code, expiresAt, qr: qrContent(code), carToken: access.carToken }, 200);
       })
     // 차가 연결됐는지 본다(연결 카드를 띄운 동안 몇 초마다).
     .get('/cars/:carId', (c) => {
       const carId = c.req.param('carId');
       if (!validCarId(carId)) return c.json({ error: 'carId가 올바르지 않습니다' }, 400);
-      return c.json(store.status(carId), 200);
+      return c.json(status(carId), 200);
     })
-    // 폰이 QR이나 숫자로 받은 코드를 보낸다.
+    // 폰이 QR이나 숫자로 받은 코드를 보낸다. 새 API(/pair/claim)와 같지만 응답 앞부분이 옛 모양({ carId, pairedAt })이다.
     .post('/claim', tooLarge,
       validator('json', (raw: unknown, c) => {
         const v = raw as Record<string, unknown> | null;
-        if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).length !== 1 || typeof v.code !== 'string' || !CODE_PATTERN.test(v.code)) {
-          return c.json({ error: 'code(숫자 6자리) 하나가 필요합니다' }, 400);
+        if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).some((k) => k !== 'code' && k !== 'name') || typeof v.code !== 'string' || !CODE_PATTERN.test(v.code)) {
+          return c.json({ error: 'code(숫자 6자리)와 선택 항목 name만 보낼 수 있습니다' }, 400);
         }
-        return { code: v.code };
+        if (v.name !== undefined && (typeof v.name !== 'string' || v.name.length > MAX_BODY_NAME_LENGTH)) {
+          return c.json({ error: `name은 ${MAX_BODY_NAME_LENGTH}자 이하 문자열이어야 합니다` }, 400);
+        }
+        return (v.name === undefined ? { code: v.code } : { code: v.code, name: v.name }) as { code: string; name?: string };
       }),
       (c) => {
-        const result = store.claim(c.req.valid('json').code);
-        if (!result) return c.json({ error: '없거나 만료된 코드입니다. 차 화면의 새 코드로 다시 해 주세요' }, 404);
-        return c.json(result, 200);
+        const { code, name } = c.req.valid('json');
+        const device = deviceOf(c);
+        if (device.kind === 'bad') return c.json({ error: `${DEVICE_HEADER} 헤더가 올바르지 않습니다`, reason: 'bad-device' as const }, 400);
+        const auth = bearerOf(c);
+        const result = seats.claim({
+          code, name, source: clientAddress(c), phoneToken: auth.kind === 'token' ? auth.token : null, deviceId: device.kind === 'id' ? device.id : null,
+        });
+        if (!result.ok) {
+          const failure = claimFailure(result);
+          return c.json(failure.body, failure.status, failure.status === 429 ? { 'Retry-After': String(failure.body.retryAfterSeconds) } : {});
+        }
+        const { seat, phoneToken } = result;
+        return c.json({ pairedAt: seat.pairedAt, seatId: seat.seatId, name: seat.name, phoneToken }, 200);
       })
-    // 데모 초기화: 연결을 푼다.
+    // 데모 초기화: 그 차의 연결(모든 자리)과 서버 데이터를 지운다. 새 API의 DELETE /car와 같다.
+    // 자리가 있는 차는 그 차의 토큰이 있거나 같은 기기(루프백) 요청일 때만 지운다(carId만 아는 다른 기기가 남의 연결을 끊지 못하게).
     .delete('/cars/:carId', (c) => {
       const carId = c.req.param('carId');
       if (!validCarId(carId)) return c.json({ error: 'carId가 올바르지 않습니다' }, 400);
-      store.unpair(carId);
-      return c.json(store.status(carId), 200);
+      if (seats.seatsOf(carId).length > 0) {
+        const auth = bearerOf(c);
+        if (auth.kind === 'bad') return c.json({ error: 'Authorization 형식이 올바르지 않습니다', reason: 'unauthorized' as const }, 401);
+        const own = auth.kind === 'token' && seats.carByToken(auth.token)?.carId === carId;
+        if (!own && !isLoopback(c)) return c.json({ error: '연결된 폰이 있는 차는 차 토큰이 필요합니다', reason: 'unauthorized' as const }, 401);
+      }
+      seats.resetCar(carId);
+      return c.json(status(carId), 200);
     });
+};

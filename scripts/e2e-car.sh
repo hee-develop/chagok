@@ -92,7 +92,8 @@ echo "== debug 앱 설치"
 echo "== 서버 시작 (포트 $PORT)"
 mkdir -p "$RUN_DIR"
 # watch 없이 한 번만 띄운다. 서브셸이 곧 프로세스 그룹 리더라 그룹 전체(tsx와 자식 node)를 함께 종료한다.
-(cd "$ROOT/server" && PORT="$PORT" exec ./node_modules/.bin/tsx src/index.ts >"$RUN_DIR/server.log" 2>&1) &
+# FIXTURE_SEATS=1: pairing flow가 연결한 자리(일정을 받은 적 없음)도 이어지는 flow에서 픽스처 일정을 쓰게 한다(데모·E2E 전용).
+(cd "$ROOT/server" && PORT="$PORT" FIXTURE_SEATS=1 exec ./node_modules/.bin/tsx src/index.ts >"$RUN_DIR/server.log" 2>&1) &
 SERVER_PGID=$!
 for _ in $(seq 1 30); do
   curl -fs "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break

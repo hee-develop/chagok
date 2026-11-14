@@ -35,7 +35,7 @@ case "${1:-}" in
       exit 1
     fi
     echo "PT 일정으로 서버를 띄웁니다: http://127.0.0.1:$PORT ($PT_FIXTURE, 기준 12/3 08:50)"
-    cd "$ROOT/server" && PORT="$PORT" FIXTURE_PATH="$PT_FIXTURE" exec ./node_modules/.bin/tsx src/index.ts
+    cd "$ROOT/server" && PORT="$PORT" FIXTURE_PATH="$PT_FIXTURE" FIXTURE_SEATS=1 exec ./node_modules/.bin/tsx src/index.ts
     ;;
   reset)
     if [ "${PT_REAL:-0}" = 1 ]; then mode="trip=real&route=real&listen=real"; else mode="trip=none&route=ok&listen=off"; fi

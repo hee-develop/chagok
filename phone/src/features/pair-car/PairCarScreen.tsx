@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { isClientError, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
+import { HttpError, isClientError, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
 import { strings } from '../../i18n/ko';
 import { SetupHeader } from '../../ui/SetupHeader';
 import { colors, useFont } from '../../ui/theme';
@@ -14,15 +14,26 @@ import { pairingApi, type PairingApi } from './pairingApi';
 type Props = {
   api?: PairingApi;
   timeoutMs?: number;
+  /** 주면 연결하기 전에도 누를 수 있는 [건너뛰기]를 보이고 누르면 부른다(없으면 버튼이 없다). */
+  onSkip?: () => void;
+  /** 주면 연결된 뒤 [완료]가 기본 이동(3단계 일정 목록) 대신 이것을 부른다. */
+  onDone?: () => void;
 };
 
-type Issue = 'invalidCode' | 'failed' | 'cameraDenied' | 'notChagokQr';
+type Issue = 'invalidCode' | 'failed' | 'cameraDenied' | 'notChagokQr' | 'seatLimit' | 'locked';
+
+/** 서버 응답 상태로 안내 문구를 고른다. 409(차에 폰이 가득)·429(코드를 너무 많이 틀림)는 번호를 다시 넣는 문제가 아니라 따로 안내한다. */
+const issueOf = (error: unknown): Issue => {
+  if (error instanceof HttpError && error.status === 409) return 'seatLimit';
+  if (error instanceof HttpError && error.status === 429) return 'locked';
+  return isClientError(error) ? 'invalidCode' : 'failed';
+};
 
 /**
  * 첫 설정 4단계: 차 화면의 QR을 찍거나 숫자 6자리를 넣어 차와 연결한다. 서버가 그 코드의 차를 이 사용자에게 묶으면
  * 차가 2초 안에 알아채 연결 카드를 접고, 방금 넣은 일정·장소·채비로 탑승 브리핑을 한다(계약: docs/pairing.md).
  */
-export function PairCarScreen({ api = pairingApi, timeoutMs = REQUEST_TIMEOUT_MS }: Props) {
+export function PairCarScreen({ api = pairingApi, timeoutMs = REQUEST_TIMEOUT_MS, onSkip, onDone }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
@@ -60,8 +71,8 @@ export function PairCarScreen({ api = pairingApi, timeoutMs = REQUEST_TIMEOUT_MS
       setPaired(true);
       AccessibilityInfo.announceForAccessibility(t.paired);
     } catch (error) {
-      // 4xx는 없거나 만료된 번호라 같은 번호로 다시 보내도 같다. 차 화면의 새 번호를 받게 한다.
-      if (request.current === controller) setIssue(isClientError(error) ? 'invalidCode' : 'failed');
+      // 404 같은 4xx는 없거나 만료된 번호라 같은 번호로 다시 보내도 같다. 차 화면의 새 번호를 받게 한다.
+      if (request.current === controller) setIssue(issueOf(error));
     } finally {
       if (request.current === controller) request.current = null;
       setClaiming(false);
@@ -163,7 +174,7 @@ export function PairCarScreen({ api = pairingApi, timeoutMs = REQUEST_TIMEOUT_MS
           </View>
         ) : null}
         {paired ? (
-          <Pressable accessibilityRole="button" onPress={() => router.replace('/setup/fill-places')} style={styles.primary}>
+          <Pressable accessibilityRole="button" onPress={() => (onDone ? onDone() : router.replace('/setup/fill-places'))} style={styles.primary}>
             <Text style={[styles.primaryText, font(600)]}>{t.done}</Text>
           </Pressable>
         ) : (
@@ -172,6 +183,11 @@ export function PairCarScreen({ api = pairingApi, timeoutMs = REQUEST_TIMEOUT_MS
             <Text style={[styles.primaryText, font(600)]}>{t.connect}</Text>
           </Pressable>
         )}
+        {onSkip && !paired ? (
+          <Pressable accessibilityRole="button" onPress={onSkip} style={styles.textButton}>
+            <Text style={[styles.textButtonLabel, font(600)]}>{t.skip}</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );

@@ -5,6 +5,13 @@ import { loadDayFixture, loadFamilyMembers, loadMockCalendars, loadPlacesCatalog
 const port = Number(process.env.PORT ?? 8787);
 const hostname = process.env.HOST ?? '127.0.0.1';
 
+const fixtureSeats = process.env.FIXTURE_SEATS === '1';
+if (fixtureSeats) {
+  console.warn(
+    '경고: FIXTURE_SEATS=1 — 데모 전용 옵션입니다. 일정을 받은 적 없는 연결된 자리·버킷에도 목 일정(픽스처)이 보입니다. 실제 사용자가 쓰는 서버에서는 켜지 마세요.',
+  );
+}
+
 let app: ReturnType<typeof createApp>;
 try {
   const calendars = loadMockCalendars();
@@ -14,6 +21,8 @@ try {
     places: loadPlacesCatalog(),
     familyMembers: loadFamilyMembers(),
     eventsLoopbackOnly: process.env.EVENTS_LOOPBACK_ONLY === '1',
+    // 차량 Maestro(e2e-car.sh)·PT 시연(pt-demo.sh) 같은 데모 서버에서만 켠다. 실제 사용자 서버에서는 일정을 받은 적 없는 자리가 0건이다.
+    fixtureSeats,
   });
 } catch (e) {
   console.error(`차곡 서버를 시작할 수 없습니다: ${(e as Error).message}`);

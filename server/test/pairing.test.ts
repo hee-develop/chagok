@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { createPairingStore, PAIRING_CODE_TTL_MS } from '../src/routes/pairing.js';
+import { CODE_TTL_MS, createSeatStore } from '../src/seats.js';
 import { newApp } from './helpers.js';
 
 let clockMs = Date.parse('2026-11-14T09:00:00+09:00');
 const makeApp = (random?: () => number) => {
   clockMs = Date.parse('2026-11-14T09:00:00+09:00');
   const now = () => new Date(clockMs);
-  return newApp({ now, pairing: createPairingStore(now, random) });
+  return newApp({ now, seats: createSeatStore(now, random), isLoopback: () => true });
 };
 type App = ReturnType<typeof makeApp>;
 const post = (app: App, path: string, body: unknown) =>
@@ -14,7 +14,7 @@ const post = (app: App, path: string, body: unknown) =>
 const issue = async (app: App, carId = 'car-1') => (await (await post(app, '/pairing/codes', { carId })).json()) as { code: string; expiresAt: string; qr: string };
 const status = async (app: App, carId = 'car-1') => (await (await app.request(`/pairing/cars/${carId}`)).json()) as { paired: boolean; pairedAt: string | null; codeActive: boolean };
 
-describe('차–폰 연결', () => {
+describe('차–폰 연결(옛 /pairing 경로, 차 id만으로)', () => {
   it('차가 6자리 코드와 QR 글을 받고, 폰이 그 코드를 보내면 연결된다', async () => {
     const app = makeApp();
     expect(await status(app)).toEqual({ paired: false, pairedAt: null, codeActive: false });
@@ -22,27 +22,44 @@ describe('차–폰 연결', () => {
     expect(await status(app)).toEqual({ paired: false, pairedAt: null, codeActive: true });
     expect(issued.code).toMatch(/^\d{6}$/);
     expect(issued.qr).toBe(`chagok://pair?code=${issued.code}`);
-    expect(issued.expiresAt).toBe(new Date(clockMs + PAIRING_CODE_TTL_MS).toISOString());
+    expect(issued.expiresAt).toBe(new Date(clockMs + CODE_TTL_MS).toISOString());
 
     clockMs += 60_000;
     const claimed = await post(app, '/pairing/claim', { code: issued.code });
     expect(claimed.status).toBe(200);
-    expect(await claimed.json()).toEqual({ carId: 'car-1', pairedAt: '2026-11-14T00:01:00.000Z' });
+    // 옛 필드 pairedAt은 그대로이고 자리·토큰 필드가 더해졌다. 폰에는 차 id(carId)를 주지 않는다.
+    expect(await claimed.json()).toEqual({
+      pairedAt: '2026-11-14T00:01:00.000Z', seatId: expect.any(String), name: '내 폰', phoneToken: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
     expect(await status(app)).toEqual({ paired: true, pairedAt: '2026-11-14T00:01:00.000Z', codeActive: false });
     // 쓴 코드는 다시 쓸 수 없다.
     expect((await post(app, '/pairing/claim', { code: issued.code })).status).toBe(404);
   });
 
-  it('만료된 코드와 새 코드를 받아 버려진 코드는 404이고 연결되지 않는다', async () => {
+  it('코드는 5분 동안만 산다', async () => {
     const app = makeApp();
+    const { code, expiresAt } = await issue(app);
+    expect(CODE_TTL_MS).toBe(5 * 60_000);
+    expect(expiresAt).toBe(new Date(clockMs + 5 * 60_000).toISOString());
+    clockMs += 5 * 60_000 - 1;
+    expect((await status(app)).codeActive).toBe(true);
+    clockMs += 1;
+    expect((await status(app)).codeActive).toBe(false);
+    expect((await post(app, '/pairing/claim', { code })).status).toBe(404);
+  });
+
+  it('만료된 코드와 새 코드를 받아 버려진 코드는 404이고 연결되지 않는다', async () => {
+    const codes = [0.111111, 0.222222, 0.333333];
+    const app = makeApp(() => codes.shift() ?? 0.5);
     const first = await issue(app);
-    clockMs += PAIRING_CODE_TTL_MS;
+    clockMs += CODE_TTL_MS;
     expect((await status(app)).codeActive).toBe(false);
     expect((await post(app, '/pairing/claim', { code: first.code })).status).toBe(404);
     const second = await issue(app);
     const third = await issue(app);
-    expect((await post(app, '/pairing/claim', { code: second.code })).status).toBe(second.code === third.code ? 200 : 404);
-    expect((await post(app, '/pairing/claim', { code: third.code })).status).toBe(second.code === third.code ? 404 : 200);
+    expect(second.code).not.toBe(third.code);
+    expect((await post(app, '/pairing/claim', { code: second.code })).status).toBe(404);
+    expect((await post(app, '/pairing/claim', { code: third.code })).status).toBe(200);
   });
 
   it('살아 있는 다른 차의 코드와 겹치지 않게 낸다', async () => {
@@ -58,6 +75,7 @@ describe('차–폰 연결', () => {
     const app = makeApp();
     const { code } = await issue(app);
     await post(app, '/pairing/claim', { code });
+    expect((await status(app)).paired).toBe(true);
     const res = await app.request('/pairing/cars/car-1', { method: 'DELETE' });
     expect(await res.json()).toEqual({ paired: false, pairedAt: null, codeActive: false });
     expect(await status(app)).toEqual({ paired: false, pairedAt: null, codeActive: false });
