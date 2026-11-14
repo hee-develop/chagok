@@ -12,7 +12,7 @@ import com.chagok.car.ui.DesignScale
 import java.time.Clock
 
 /**
- * MainActivity 맨 아래에 깔리는 가짜 길안내 층(화면 시안 Drive·Main): 창 전체를 채우는 지도, 카드가 뜰 때의 검정 50% 덮개,
+ * MainActivity 맨 아래에 깔리는 가짜 길안내 층(화면 시안 Drive·Main·Arrive): 창 전체를 채우는 지도, 카드가 뜰 때의 검정 50% 덮개(하차 카드는 72%),
  * 왼쪽 아래 길안내 패널, 오른쪽 위 "시연용 가짜 지도" 표시.
  *
  * 크기: 시안 1600×640의 px는 이 앱의 디자인 px(창 한 칸 너비 800 기준)와 같은 단위다. 시안의 카드가 800×592로 앱의 카드 규격과 같고
@@ -25,6 +25,7 @@ import java.time.Clock
 class FakeNaviLayer(context: Context, private val d: DesignScale, private val clock: Clock) : FrameLayout(context) {
     private val map = FakeMapView(context, d)
     private val scrim = View(context)
+    private var appliedScrimColor = d.color(R.color.scrim)
 
     // 시안 패널: 1줄 17px ink-3, 2줄 큰 시각 38px(이 앱은 400·600만 써서 600)과 20px ink-2를 기준선에 맞춰 나란히
     private val destination: TextView = d.text(R.style.t_status, d.color(R.color.ink_3)).apply {
@@ -42,6 +43,14 @@ class FakeNaviLayer(context: Context, private val d: DesignScale, private val cl
 
     /** 카드가 떠 있는가. 떠 있으면 덮개를 깔고 패널을 숨긴다. */
     var cardShown = false
+        set(value) {
+            if (field == value) return
+            field = value
+            refresh()
+        }
+
+    /** 떠 있는 카드가 하차 카드인가. 맞으면 덮개를 72%로 더 어둡게 한다([FakeNaviScrim]). */
+    var exitCardShown = false
         set(value) {
             if (field == value) return
             field = value
@@ -105,6 +114,11 @@ class FakeNaviLayer(context: Context, private val d: DesignScale, private val cl
         // 덮개는 카드가 있을 때만(시안 Main). 카드가 없으면 지도가 그대로 보인다.
         val scrimShown = if (cardShown) View.VISIBLE else View.GONE
         if (scrim.visibility != scrimShown) scrim.visibility = scrimShown
+        val scrimColor = FakeNaviScrim.color(d.color(R.color.scrim), exitCardShown)
+        if (scrimColor != appliedScrimColor) {
+            appliedScrimColor = scrimColor
+            scrim.setBackgroundColor(scrimColor)
+        }
         if (trip == null || cardShown) {
             if (panel.visibility != View.GONE) panel.visibility = View.GONE
             return

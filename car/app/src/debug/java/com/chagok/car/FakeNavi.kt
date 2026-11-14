@@ -3,6 +3,7 @@ package com.chagok.car
 import android.app.Activity
 import android.view.View
 import com.chagok.car.fakenavi.FakeNaviLayer
+import com.chagok.car.fakenavi.FakeNaviScrim
 import com.chagok.car.fakenavi.FakeNaviSession
 import com.chagok.car.runtime.UiState
 import com.chagok.car.ui.CardAlign
@@ -36,6 +37,7 @@ object FakeNavi {
     fun render(state: UiState) {
         FakeNaviSession.shared.setDriving(state.driving)
         layer?.duckingShown = state.ducking
+        layer?.exitCardShown = FakeNaviScrim.isExitCard(state.card)
         layer?.cardShown = state.card != null
     }
 

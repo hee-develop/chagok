@@ -6,16 +6,18 @@ PT 핵심 흐름 "탑승 브리핑 → 응 → 길안내 → 주행 → 도착"�
 
 - 수락("응, 출발") → 가짜 경로 시작 → 주행 중 차 이동·남은 거리·도착 시각 → 도착 표시까지.
 - 도착하면 세션에 내비 도착 알림(`Event.DestinationArrived`)을 넣어 도착 판단·다음 일정 칩이 실제 내비와 같은 길로 이어집니다(`docs/arrival.md`, `docs/next-chip.md`).
-- 음악 패널, 회전 안내("300m 앞 우회전")는 시안에 없어 넣지 않았습니다. 하차 카드와 위치 기반 하차는 아직 없습니다.
+- 도착 뒤 정차(P단)하면 main의 하차 카드("도착 · 내리기 전", `docs/exit-card.md`)가 뜨고, 그동안 지도 덮개만 시안 Arrive처럼 72%로 더 어두워집니다. 하차 카드 자체는 가짜 내비와 상관없이 같은 코드입니다.
+- 음악 패널, 회전 안내("300m 앞 우회전")는 시안에 없어 넣지 않았습니다. 집 하차와 위치 어댑터(`LocationManager`)는 아직 없습니다.
 - 지도는 시연용이라 Pleos 카테고리 가이드(주행 중 지도는 Maps/Navigation 앱 몫)의 범위 밖입니다. 그래서 출시 빌드에 두지 않습니다.
 
-## 화면 (시안 Drive·Main)
+## 화면 (시안 Drive·Main·Arrive)
 
 | 요소 | 내용 |
 | --- | --- |
 | 지도 | 창 전체를 채우는 곡선 도로. 지도 타일 없이 앱이 그립니다(오프라인, 다크 토큰). 도로색 두 가지만 `debug/res/values/colors.xml`에 둡니다. |
 | 경로·차 | 흰 경로선이 지도 도로를 따라가고(한 도로를 따라가다 교차점에서 갈아탐, 목적지 좌표로 고른 변형이라 같은 목적지면 같음) 원형 차 마커는 화면 가운데에 고정입니다. 차가 움직이는 대신 지도가 움직이고(진행 방향이 위인 heading-up, 커브에서 지수 감쇠로 부드럽게 돔, 2배 확대) 경로 끝에는 목적지 핀이 섭니다. |
 | 카드가 뜰 때 | 지도 위에 검정 50% 덮개(`R.color.scrim`)를 깔고 카드 열이 왼쪽 위(여백 24)로 갑니다(`CardAlign.START`). 가짜 내비가 꺼져 있거나 release면 가로 가운데 그대로, 세로 창(한 칸)에서는 차이 없습니다. |
+| 하차 카드가 뜰 때 | 같은 덮개의 알파만 72%(184/255)로 올립니다(시안 Arrive). 하차 카드는 상태 칩 문구(`Phrases.STATUS_BEFORE_EXIT` = "도착 · 내리기 전")로 가립니다. `CardContent`에 카드 종류 필드를 새로 두지 않아 main 소스셋은 그대로이고, 판별·알파 규칙은 debug의 `FakeNaviScrim`(순수 함수)에 있습니다. 그 밖의 카드는 50%입니다. |
 | 길안내 패널 | 왼쪽 아래. "목적지 · {장소}", 큰 도착 시각, `도착 · 3.1km 남음`(km 앞 공백 없음, 10km 미만은 소수 한 자리). 도착하면 "{장소} 도착". 카드가 뜨면 숨기고, 볼륨 낮춤 알약이 있으면 그 위로 올립니다. |
 | 표시 | 오른쪽 위에 "시연용 가짜 지도" |
 
@@ -33,7 +35,7 @@ PT 핵심 흐름 "탑승 브리핑 → 응 → 길안내 → 주행 → 도착"�
 | `route=ok`·`fail` | 길안내 요청 결과. 가짜 내비에서 `fail`이면 경로를 시작하지 않고 남아 있던 이전 가짜 경로도 지웁니다(옛 경로가 도착 알림을 내지 않게, 기본은 성공). |
 | `loc=<위도>,<경도>`·`real` | 현재 위치 주입(기존 신호). 가짜 내비가 켜져 있어도 주입한 동안은 위치 요청에 가짜 경로 위 위치로 답하거나 가짜 경로 위치를 넣지 않고 주입 위치가 쓰입니다. `real`이면 주입을 풀어 가짜 경로(또는 실제 내비)로 돌아갑니다. 가짜 내비가 꺼져 있을 때의 동작은 그대로입니다. |
 
-`now`(데모 초기화)와 [데모 초기화] 버튼은 가짜 경로도 지웁니다. 기존 신호(`paired`·`now`·`trip`·`route`·`listen`·`ignition`·`gear`·`restricted`·`loc`·`arrived`·`enter`·`board`·`heard`)와 버튼은 그대로입니다.
+`now`(데모 초기화)와 [데모 초기화] 버튼은 가짜 경로도 지웁니다(하차 카드 시간 `exitcard`도 기준값으로 되돌림). 기존 신호(`paired`·`now`·`trip`·`route`·`listen`·`exitcard`·`ignition`·`gear`·`restricted`·`loc`·`arrived`·`enter`·`board`·`heard`)와 버튼은 그대로입니다. `exitcard=<초>`(하차 카드가 떠 있는 시간, `real`이면 5초)는 E2E가 하차 카드를 확인하게 늘리는 데 씁니다.
 
 ## 세션과 이어지는 곳
 
@@ -42,21 +44,23 @@ PT 핵심 흐름 "탑승 브리핑 → 응 → 길안내 → 주행 → 도착"�
 - 가짜 경로가 달리는 동안 차 위치를 1초마다 `Event.LocationChanged`로 넣습니다(끝점은 목적지 좌표). P단 도착 판단이 위치를 물으면(`Effect.RequestLocation`) 가짜 경로가 있을 때 경로 위 차 위치로 답하고, 없으면 실제 내비에 묻습니다.
 - 세션이 내비 어댑터를 멈추는 Suspend(`Effect.EnterSuspend`) 동안에는 `InjectedNavigator.stop()`이 가짜 내비도 멈춥니다. 시계가 서고 위치·도착 이벤트를 넣지 않으며, `start()`(`ExitSuspend`)로 다시 켜지면 멈춘 자리에서 이어 갑니다(멈춘 사이 닿은 도착은 그때 한 번 알림).
 - 차는 주행 중(`UiState.driving`)이고 화면이 떠 있을 때만 갑니다. 정차나 `onPause`에서는 시계를 멈추고 다시 조건이 갖춰지면 멈춘 자리에서 이어 갑니다(백그라운드 애니메이션 없음).
-- `MainActivity`의 연결(`FakeNavi` 창구)은 지도 층 깔기, 화면 상태 전달, 카드 열 정렬뿐입니다. release의 `FakeNavi`는 정렬을 늘 가운데로 돌려주는 빈 스텁입니다.
+- `MainActivity`의 연결(`FakeNavi` 창구)은 지도 층 깔기, 화면 상태(주행 여부·카드 유무·하차 카드 여부) 전달, 카드 열 정렬뿐입니다. release의 `FakeNavi`는 정렬을 늘 가운데로 돌려주는 빈 스텁입니다.
 - 주행 중에는 카드·말·소리가 없다는 규칙은 그대로입니다. 지도 자체만 debug 시연용입니다.
 
 ## 흐름 로그 (`ChagokFlow`)
 
 debug 빌드는 세션에 들어간 이벤트와 나온 Effect를 `ChagokFlow` 태그로 한 줄씩 남깁니다(`FlowLog`). release에는 빈 스텁만 있습니다. 가짜 내비의 도착은 `ChagokFakeNavi` 태그로도 한 줄 남습니다.
 
-- 남는 것: 이벤트 이름과 값(기어·시동·주행 제한·소요 시간 응답 등), 카드 문구(칩·voice·sub·각주·안내·버튼), 말한 문장, 결과 한 줄, 다음 일정 칩 문구, 길안내·소요 시간을 요청한 장소 이름, 일정 상태 변화(일정 ID). 카드·칩 문구에는 일정 제목이 들어 있어 그대로 남습니다. 시나리오 확인용이라 debug 빌드에만 둡니다.
+- 남는 것: 이벤트 이름과 값(기어·시동·주행 제한·소요 시간 응답 등), 카드 문구(칩·voice·sub·각주·안내·버튼, 하차 카드는 `카드 칩=도착 · 내리기 전 | voice=유니폼·응원봉·티켓 챙기세요! | 각주=… | 버튼=챙겼어요` 한 줄, 닫히면 `카드 접음`), 말한 문장, 결과 한 줄, 다음 일정 칩 문구, 길안내·소요 시간을 요청한 장소 이름, 일정 상태 변화(일정 ID). 카드·칩 문구에는 일정 제목이 들어 있어 그대로 남습니다. 시나리오 확인용이라 debug 빌드에만 둡니다.
 - 남기지 않는 것: 위치(`LocationChanged` 이벤트는 줄 자체를 남기지 않고, 좌표가 어떤 줄에도 실리지 않음), 연결 번호·QR(`PairingCodeIssued`는 이름만), 들은 말 원문(`Heard`는 길이만, 예 `Heard(len=3)`). 단 세션이 들은 말에 답해 말하거나 카드를 바꾸면 그 문구는 위 규칙대로 남습니다.
 
 ## 터미널 시나리오 (`pnpm demo:car`)
 
 `scripts/demo-car.sh`가 단계마다 신호를 넣고 `ChagokFlow` 로그를 기대 패턴과 비교해 ✓/✗를 냅니다. 화면은 직접 보면서 Enter로 넘깁니다(`DEMO_AUTO=1`이면 자동).
 
-1. 초기화 → 2. 첫 탑승 전체 브리핑 → 3. 수락(길안내 시작) → 4. 주행 중 칩 → 도착 → 5. 도착 기록 → 6. 정차(카드·말 없음) → 7. 재탑승 한 줄(13:30, KIA 직관) → 8. 위치로 도착(내비 도착 알림 없이 육전집 300m 안 P단) → 9. 실제 내비로 되돌림
+1. 초기화 → 2. 첫 탑승 전체 브리핑 → 3. 수락(길안내 시작) → 4. 주행 중 칩 → 도착 → 5. 도착 기록 → 6. 정차(P): 하차 카드(말함, [챙겼어요], 5초 뒤 접힘) → 7. 재탑승 한 줄(13:30, KIA 직관) → 8. 위치로 도착(내비 도착 알림 없이 육전집 300m 안 P단, 그 시점에 하차 카드) → 9. 실제 내비로 되돌림(주입값 `exitcard` 포함)
+
+집 하차·위치 어댑터 단계는 아직 없습니다.
 
 로그 문구(`FlowLog.kt`)를 바꾸면 스크립트의 기대 패턴도 고칩니다. 시작할 때 `paired=true`로 연결됨 상태로 두며 되돌리지 않으므로, PT 시연 전에는 `pnpm demo:pt reset`을 합니다. 서버가 폰 일정을 받은 상태(`GET /events`의 `receivedAt`)면 픽스처 시나리오가 맞지 않아 멈춥니다.
 
@@ -66,11 +70,11 @@ debug 빌드는 세션에 들어간 이벤트와 나온 Effect를 `ChagokFlow` �
 
 ## 검증
 
-- `cd car && ./gradlew :app:testDebugUnitTest`: `testDebug`의 `fakenavi/*`(경로·카메라·도로·패널 문구·세션 틱), `InjectedNavigatorTest`(가짜 내비 켬·끔에 따른 내비 응답, route=fail, loc 주입, Suspend 정지), `FakeNaviFlowTest`(`DriveSession`+`InjectedNavigator`+`FakeNaviSession`을 이어 붙인 수락 → 주행 → 도착 → P단·route=fail·Suspend 흐름), `DebugSignalsTest`(advance 범위), `FlowLogTest`, `FakeNaviAlignTest`와 `test`의 `CardAlignTest`
+- `cd car && ./gradlew :app:testDebugUnitTest`: `testDebug`의 `fakenavi/*`(경로·카메라·도로·패널 문구·세션 틱), `InjectedNavigatorTest`(가짜 내비 켬·끔에 따른 내비 응답, route=fail, loc 주입, Suspend 정지), `FakeNaviFlowTest`(`DriveSession`+`InjectedNavigator`+`FakeNaviSession`을 이어 붙인 수락 → 주행 → 도착 → P단·route=fail·Suspend 흐름), `DebugSignalsTest`(advance 범위), `FlowLogTest`, `FakeNaviAlignTest`·`FakeNaviScrimTest`(하차 카드 판별과 덮개 알파 72%)와 `test`의 `CardAlignTest`
 - `./gradlew :app:assembleRelease`가 통과하고 release 소스·dex에 `fakenavi` 패키지가 없어야 합니다(`FakeNavi` 스텁 클래스만 있음).
-- 에뮬레이터: `pnpm e2e:car`의 `fake-navi.yaml`(출발 제안 → 수락 → 패널 → `progress=0.5` → 주행 도착 → 칩 → 정차), 스크린샷은 `e2e/output/car/<실행 시각>/shots/fake-*.png`에서 눈으로 확인합니다.
+- 에뮬레이터: `pnpm e2e:car`의 `fake-navi.yaml`(출발 제안 → 수락 → 패널 → `progress=0.5` → 주행 도착 → 칩 → 정차 → 하차 카드와 72% 덮개 → [챙겼어요]), 스크린샷은 `e2e/output/car/<실행 시각>/shots/fake-*.png`에서 눈으로 확인합니다.
 
 ## 알려진 한계
 
-- 시안 Arrive의 하차 카드(지도 덮개 72%)와 위치·집 하차는 아직 없습니다. 하차 카드가 들어오면 `FakeNavi.render`에서 카드 종류를 `FakeNaviLayer`에 알려 덮개 알파를 바꾸면 됩니다.
+- 집 하차와 위치 어댑터는 아직 없습니다. 하차 카드 판별을 상태 칩 문구에 기대므로 `Phrases.STATUS_BEFORE_EXIT`가 바뀌면 `FakeNaviScrimTest`가 알려 줍니다(집 하차 카드가 같은 칩을 쓰면 덮개도 72%가 됩니다).
 - 실제 내비의 도착 알림·경로 시작·위치 답은 `docs/sdk-check.md`의 수동 확인 목록입니다. 가짜 내비는 그것을 대신 보증하지 않습니다.

@@ -2,7 +2,8 @@
 # navi=fake: 실제 내비 대신 직접 그린 지도와 가짜 경로를 쓴다(수락하면 가짜 경로 시작, route=ok). drive=10: 전체 경로를 실제 10초에 지나간다.
 #   trip=12000은 출발 제안 카드를 띄우려고 준 값이다(가짜 경로 길이에서 구한 소요 시간은 짧아 목적지를 묻는 카드가 된다).
 #   progress=0.5: 정차 중에 진행률을 바로 옮긴다. 차는 gear=D에서만 가고 gear=P에서는 멈춘다. 끝에서 navi=real로 되돌려 이어지는 flow에 영향이 없게 한다.
-# 가짜 내비가 목적지에 닿으면 내비 도착 알림을 세션에 넣는다(도착 판단은 docs/arrival.md). 하차 카드·위치 하차는 아직 없어 도착해도 카드는 없다.
+# 가짜 내비가 목적지에 닿으면 내비 도착 알림을 세션에 넣는다(도착 판단은 docs/arrival.md). 도착 순간에는 카드가 없고, 달린 다음 정차(P단)하면 하차 카드("도착 · 내리기 전")가 뜬다(docs/exit-card.md).
+#   하차 카드가 떠 있는 동안에만 지도 덮개가 72%로 더 어둡다(시안 Arrive). exitcard=60은 Maestro가 확인하게 카드 시간을 늘린 값이고 끝에 real로 되돌린다. 집 하차·위치 어댑터는 아직 없다.
 # 대상 일정은 픽스처의 '육전집 점심'(13:00, 장면 시각 09:20 KST). 목적지 이름은 "광주 육전집".
 # 시각 사이 공백은 화면에서 NBSP라 '.'로 받는다. 스크린샷은 ${SHOT_DIR} 아래에 남긴다. 기기 시간대는 Asia/Seoul 이어야 한다(스크립트가 맞춘다).
 appId: com.chagok.car
@@ -52,7 +53,7 @@ env:
 
 # 5. 주행 시작 → 남은 구간을 지나 도착: 패널에 "{장소 이름} 도착". 도착 알림이 세션에 들어가 육전집 점심이 '도착'이 되고
 #    주행 중 다음 일정 칩이 다음 일정으로 바뀐다(말·카드 없음). 주행 중에는 화면이 계속 움직여 Maestro가 안정되기를 기다리므로, 주행은 이 단계에서만 한다.
-- openLink: chagok-debug://signal?gear=D
+- openLink: chagok-debug://signal?exitcard=60&gear=D
 - extendedWaitUntil:
     visible: "광주 육전집 도착"
     timeout: 40000
@@ -60,16 +61,30 @@ env:
 - assertVisible: ".*17.00 KIA 직관.*"
 - takeScreenshot: ${SHOT_DIR}/fake-05-arrived
 
-# 6. 정차(P) → 도착 순간·정차에는 카드도 말도 없다(하차 카드는 아직 없음). 칩은 사라지고 패널만 남는다
+# 6. 정차(P) → 달린 뒤 넣은 P단이라 하차 카드가 한 번 뜬다. 칩은 사라지고 카드가 뜨면 패널은 숨고 지도 덮개가 72%로 어두워진다.
+#    육전집 점심 메모('유니폼·응원봉·티켓')가 목록이라 "챙기세요!" + [챙겼어요]. 카드가 있는 동안 패널은 숨는다(시안 Arrive)
 - openLink: chagok-debug://signal?gear=P
+- extendedWaitUntil:
+    visible: "도착 · 내리기 전"
+    timeout: 5000
+- assertVisible: ".*유니폼·응원봉·티켓 챙기세요!.*"
+- assertVisible: "챙겼어요"
 - assertNotVisible: ".*17.00 KIA 직관.*"
 - assertNotVisible: ".*육전집 점심까지.*"
-- assertVisible: "광주 육전집 도착"
+- assertNotVisible: "광주 육전집 도착"
 - assertVisible: "시연용 가짜 지도"
-- takeScreenshot: ${SHOT_DIR}/fake-06-parked-after-arrival
+- takeScreenshot: ${SHOT_DIR}/fake-06-exit-card
 
-# 7. 가짜 내비를 끈다
-- openLink: chagok-debug://signal?navi=real
+# 6-1. [챙겼어요]로 닫으면 하차 카드가 사라지고(덮개도 걷힘) 패널이 다시 "광주 육전집 도착"으로 보인다
+- tapOn: "챙겼어요"
+- extendedWaitUntil:
+    notVisible: "도착 · 내리기 전"
+    timeout: 5000
+- assertVisible: "광주 육전집 도착"
+- takeScreenshot: ${SHOT_DIR}/fake-07-parked-after-exit
+
+# 7. 가짜 내비를 끄고 하차 카드 시간도 되돌린다
+- openLink: chagok-debug://signal?navi=real&exitcard=real
 - extendedWaitUntil:
     notVisible: "시연용 가짜 지도"
     timeout: 5000

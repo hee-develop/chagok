@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 차량 앱 시나리오 데모(터미널): 가짜 길안내로 출발 제안 → 길안내 → 주행 → 도착 → 재탑승 한 줄 → 위치로 도착 판단을 단계마다 신호로 넣고,
+# 차량 앱 시나리오 데모(터미널): 가짜 길안내로 출발 제안 → 길안내 → 주행 → 도착 → 하차 카드 → 재탑승 한 줄 → 위치로 도착 판단을 단계마다 신호로 넣고,
 # debug 빌드가 남기는 ChagokFlow 로그를 읽어 정책서 기준 기대 동작과 맞는지 ✓/✗로 알려 준다(docs/fake-navi.md).
 # 사용: pnpm demo:car   (에뮬레이터가 떠 있어야 한다. 화면은 직접 보면서 Enter로 넘긴다)
 # 환경 변수:
@@ -8,7 +8,7 @@
 #   DEMO_AUTO=1     Enter를 기다리지 않고 바로 진행한다.
 #   PORT            서버 포트(기본 8787). 이미 떠 있으면 그대로 쓰고, 없으면 tsx src/index.ts로 띄웠다가 끝날 때 내린다.
 # 시작할 때 앱을 force-stop한 뒤 MainActivity를 다시 띄운다(DemoClock이 시작할 때 시간대를 잡고, 가짜 내비는 MainActivity가 앞에 있어야 움직인다).
-# 끝날 때(Ctrl-C 포함) 주입값(trip·route·listen·navi·drive·loc)을 실제 값으로 되돌린다. 휴대폰 연결 상태는 되돌리지 않는다:
+# 끝날 때(Ctrl-C 포함) 주입값(trip·route·listen·navi·drive·loc·exitcard)을 실제 값으로 되돌린다. 휴대폰 연결 상태는 되돌리지 않는다:
 # 시작할 때 paired=true로 '연결됨'으로 두므로(연결 카드가 단계 판정을 가리지 않게), PT 시연 전에는 `pnpm demo:pt reset`으로 다시 연결 전으로 돌린다.
 # 시계는 09:20(기준 시각)에서 시작해 재탑승 단계에서 13:30으로 보낸다. 서버·앱 데이터는 바꾸지 않는다.
 # 같은 에뮬레이터를 다른 세션이 쓰는 중일 수 있어 Maestro가 돌고 있으면 멈춘다. 이 스크립트는 e2e-car.sh와 달리 flow를 돌리지 않는다.
@@ -64,10 +64,10 @@ restore_timezone() {
   fi
 }
 
-# 주입값을 되돌려 이 데모가 남긴 trip·route·listen·navi·drive·loc이 이어지는 다른 확인에 영향을 주지 않게 한다.
+# 주입값을 되돌려 이 데모가 남긴 trip·route·listen·navi·drive·loc·exitcard가 이어지는 다른 확인에 영향을 주지 않게 한다.
 reset_injection() {
   [ "$APP_STARTED" = "1" ] || return 0
-  "${ADB[@]}" shell "am start -a android.intent.action.VIEW -d 'chagok-debug://signal?trip=real&route=real&listen=real&navi=real&drive=4.5&loc=real'" </dev/null >/dev/null 2>&1 || true
+  "${ADB[@]}" shell "am start -a android.intent.action.VIEW -d 'chagok-debug://signal?trip=real&route=real&listen=real&navi=real&drive=4.5&loc=real&exitcard=real'" </dev/null >/dev/null 2>&1 || true
   sleep 1
 }
 
@@ -172,7 +172,7 @@ step() {
   if [ -n "$wait_re" ]; then
     local waited=0
     while [ "$waited" -lt "$max_wait" ]; do
-      log_lines_since "$from" | grep -Eq "$wait_re" && break
+      log_lines_since "$from" | tr '\n' '\t' | grep -Eq "$wait_re" && break
       sleep 1
       waited=$((waited + 1))
     done
@@ -185,13 +185,16 @@ step() {
   lines="$(log_lines_since "$from")"
   if [ -n "$lines" ]; then echo "$lines" | show_lines; else echo "   | (새 로그 없음)"; fi
 
+  # 필수 패턴은 줄을 탭으로 이어 붙인 한 줄에서 찾는다(".*"로 줄 순서도 확인할 수 있다). 금지 패턴은 줄 단위다.
+  local joined
+  joined="$(printf '%s' "$lines" | tr '\n' '\t')"
   local ok=1 reason="" m
   local IFS_SAVE="$IFS"
   if [ -n "$musts" ]; then
     local rest="$musts"
     while [ -n "$rest" ]; do
       if [[ "$rest" == *";;"* ]]; then m="${rest%%;;*}"; rest="${rest#*;;}"; else m="$rest"; rest=""; fi
-      if ! echo "$lines" | grep -Eq "$m"; then ok=0; reason="$reason 기대: /$m/ 없음."; fi
+      if ! printf '%s' "$joined" | grep -Eq "$m"; then ok=0; reason="$reason 기대: /$m/ 없음."; fi
     done
   fi
   IFS="$IFS_SAVE"
@@ -251,20 +254,23 @@ step "주행: 카드·말 없음, 도착까지 기다림" \
   "$SILENT"
 
 step "도착: 육전집 점심이 '도착'으로 기록됨" \
-  "정책서 6장: 도착 → 일정을 도착으로 기록. 화면·대사 없음(하차 카드는 아직 없다)" \
+  "정책서 6장: 도착 → 일정을 도착으로 기록. 화면·대사 없음(하차 카드는 정차해야 뜬다)" \
   "카드·말 없이 패널만 '광주 육전집 도착', 왼쪽 위 칩은 '다음 17:00 KIA 직관'" \
   "" \
   "" 0 \
   "저장: [^ ,]+ 예정→도착" \
   "$SILENT|결과 한 줄:" 1
 
-step "정차(P): 카드·말 없음" \
-  "도착이 기록된 뒤 P단에 넣어도 카드·말은 없다(하차 카드는 아직 없다). 주행 중 칩은 같은 이벤트에서 바로 숨는다. 위치는 가짜 내비 경로 끝(= 육전집)이라 다음 일정(KIA) 장소에서는 멀어 또 도착으로 보지 않는다" \
-  "칩이 사라지고 패널('광주 육전집 도착')만 남음, 카드 없음" \
+# 하차 카드(일정 장소): 도착이 기록된 뒤 달린 다음 P단에 넣으면 한 번 말하고 5초(Rules.EXIT_CARD) 뒤 닫힌다. 육전집 점심 메모는 '유니폼·응원봉·티켓'이라 챙길 것 카드다.
+# 닫힌 뒤에 재탑승 단계가 오도록 "카드 접음"까지 기다린다(카드가 떠 있는 채 탑승 신호가 오면 잠깐 정차 규칙을 따른다).
+# 위치는 가짜 내비 경로 끝(= 육전집)이라 다음 일정(KIA) 장소에서는 멀어 또 도착으로 보지 않는다.
+step "정차(P): 하차 카드" \
+  "도착이 기록된 뒤 P단 → 일정 장소 하차 카드(docs/exit-card.md). 메모가 짧아 챙길 것을 한 번 말하고(듣지 않음) 5초 뒤 자동으로 닫힌다. 질문 없음. 주행 중 칩은 같은 이벤트에서 바로 숨는다" \
+  "'도착 · 내리기 전' 칩, 큰 문구 '유니폼·응원봉·티켓 챙기세요!', 채비 타일, 메모 한 줄, [챙겼어요], '5초 뒤 자동으로 닫혀요' + 줄어드는 막대, 지도 덮개 72%(패널은 카드가 떠 있는 동안 숨음). 5초 뒤 카드가 접히고 패널('광주 육전집 도착')이 다시 보임" \
   "gear=P" \
-  "" 0 \
-  "GearChanged\\(gear=PARK\\);;다음 일정 칩 숨김" \
-  "$SILENT"
+  "카드 칩=도착 · 내리기 전.*카드 접음" 12 \
+  "GearChanged\\(gear=PARK\\);;다음 일정 칩 숨김;;카드 칩=도착 · 내리기 전 \\| voice=유니폼·응원봉·티켓 챙기세요!;;각주=‘육전집 점심’ 일정 메모: 유니폼·응원봉·티켓;;버튼=챙겼어요;;말함: 유니폼·응원봉·티켓 챙기세요!.*카드 접음" \
+  "\\(듣기\\)|sub=|소요 시간 요청|결과 한 줄:"
 
 # 재탑승 시각은 13:30(09:20부터 250분)이다. 점심(13:00~14:00)이 끝나기 전이라, 도착이 기록됐을 때만 KIA 직관 한 줄이 뜨고
 # 기록되지 않았으면 점심 늦게 탐 카드가 뜬다(14:00 뒤면 건너뜀 처리로 구분이 안 된다). 사람이 Enter로 지체한 실제 시간은 advance에서 뺀다.
@@ -283,17 +289,17 @@ step "재탑승: 다음 일정 한 줄" \
 LUNCH_LOC='35.1595,126.8526'
 
 step "위치로 도착: 내비 도착 알림 없이 육전집 300m 안에서 P단" \
-  "정책서 3·4장: 달린 뒤 P단에 넣은 곳이 대상 일정 장소 300m 안이면 도착으로 기록한다. 내비 도착 알림은 없다(길안내를 하지 않았다). 도착 순간에는 말하지 않는다" \
-  "가짜 지도가 사라지고 아무 도착 카드도 없음(초기화 직후라 첫 탑승 브리핑 카드는 떠 있을 수 있음)" \
-  "now=$FIRST_AT&advance=170&navi=real&listen=off&trip=none&gear=P gear=D loc=$LUNCH_LOC&gear=P" \
-  "저장: .*예정→도착" 15 \
-  "저장: [^ ,]+ 예정→도착" \
+  "정책서 3·4장: 달린 뒤 P단에 넣은 곳이 대상 일정 장소 300m 안이면 도착으로 기록하고 그 시점에 바로 하차 카드를 띄운다(docs/exit-card.md). 내비 도착 알림은 없다(길안내를 하지 않았다)" \
+  "가짜 지도가 사라지고 '도착 · 내리기 전' 칩, '유니폼·응원봉·티켓 챙기세요!', 채비 타일, [챙겼어요]. 5초 뒤 접힘(초기화 직후라 첫 탑승 브리핑 카드가 먼저 떠 있을 수 있음)" \
+  "now=$FIRST_AT&advance=170&navi=real&listen=off&trip=none&exitcard=real&gear=P gear=D loc=$LUNCH_LOC&gear=P" \
+  "카드 칩=도착 · 내리기 전.*카드 접음" 15 \
+  "저장: [^ ,]+ 예정→도착;;카드 칩=도착 · 내리기 전 \\| voice=유니폼·응원봉·티켓 챙기세요!;;버튼=챙겼어요;;말함: 유니폼·응원봉·티켓 챙기세요!.*카드 접음" \
   "DestinationArrived"
 
 step "끝: 실제 내비로 되돌림" \
   "가짜 내비를 끄고 실제 내비 모드로, 주입값도 실제 값으로(이어지는 다른 확인에 영향이 없게)" \
   "'시연용 가짜 지도' 표시가 사라짐" \
-  "navi=real&trip=real&route=real&listen=real&drive=4.5&loc=real" \
+  "navi=real&trip=real&route=real&listen=real&drive=4.5&loc=real&exitcard=real" \
   "" 0 \
   "" \
   ""

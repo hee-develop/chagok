@@ -3,15 +3,19 @@ package com.chagok.car
 import com.chagok.car.domain.BoardingLog
 import com.chagok.car.domain.LatLng
 import com.chagok.car.domain.Place
+import com.chagok.car.domain.Schedule
 import com.chagok.car.domain.ScheduleStatus
 import com.chagok.car.flow.Effect
 import com.chagok.car.flow.Event
+import com.chagok.car.flow.Phrases
 import com.chagok.car.flow.Snapshot
 import com.chagok.car.ui.CardContent
+import java.time.Instant
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -34,6 +38,19 @@ class FlowLogTest {
             "카드 칩=정차 중 · 출발 전 | voice=광주 직관 날이에요! / 1시 육전집 점심까지 3시간 40분이에요. | sub=출발할까요? | 버튼=응, 출발/잠깐만",
             FlowLog.lineOf(Effect.ShowCard(card)),
         )
+    }
+
+    @Test fun `하차 카드는 칩 문구와 챙길 것과 버튼을 한 줄로 적는다`() {
+        val schedule = Schedule(
+            id = "lunch", title = "육전집 점심",
+            start = Instant.parse("2026-11-06T04:00:00Z"), end = Instant.parse("2026-11-06T05:00:00Z"),
+            memo = "유니폼·응원봉·티켓",
+        )
+        val line = FlowLog.lineOf(Effect.ShowCard(Phrases.exitCard(schedule)))!!
+        // scripts/demo-car.sh의 '정차(P): 하차 카드' 단계가 이 문구를 읽는다.
+        assertTrue(line, line.startsWith("카드 칩=도착 · 내리기 전 | voice=유니폼·응원봉·티켓 챙기세요!"))
+        assertTrue(line, line.contains("각주=‘육전집 점심’ 일정 메모: 유니폼·응원봉·티켓"))
+        assertTrue(line, line.endsWith("버튼=챙겼어요"))
     }
 
     @Test fun `결과 한 줄과 말하기와 길안내 요청`() {
