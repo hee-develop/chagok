@@ -15,21 +15,12 @@ appId: ${APP_ID}
     commands:
       - stopApp
       - openLink: ${EXPO_URL}
-      # Expo Go 첫 실행 안내와 개발자 메뉴가 뜨면 닫는다.
+      # Expo Go 개발자 메뉴 안내를 닫는다(expo-dev-menu.yaml 설명 참고). 화면이 뜨기 전에 권한 창이 먼저 덮을 수 있어
+      # 화면 제목이나 권한 버튼 중 하나를 기다린다.
       - runFlow:
-          when:
-            visible: 'Continue'
-          commands:
-            - tapOn: 'Continue'
-      - runFlow:
-          when:
-            visible: 'Go home'
-          commands:
-            - back
-      # 화면이 뜨기 전에 권한 창이 먼저 덮을 수 있어 화면 제목이나 권한 버튼 중 하나를 기다린다.
-      - extendedWaitUntil:
-          visible: '(캘린더를 골라 주세요|ALLOW|Allow|허용)'
-          timeout: 60000
+          file: expo-dev-menu.yaml
+          env:
+            SCREEN_TITLE: '(캘린더를 골라 주세요|ALLOW|Allow|허용)'
 
 # 권한 창은 두 겹일 수 있다: Expo Go의 '다른 Expo 앱에 이미 허용했다' 확인 창(대문자 ALLOW)과
 # 시스템 캘린더 권한 창(Allow·허용). 영어·한국어 에뮬레이터 모두 받는다.
@@ -54,9 +45,11 @@ appId: ${APP_ID}
     commands:
       - tapOn: 'ALLOW'
 
-- extendedWaitUntil:
-    visible: '캘린더를 골라 주세요'
-    timeout: 30000
+# 권한 창을 닫은 뒤에 개발자 메뉴 안내가 늦게 올라올 수 있어 한 번 더 닫고 화면 제목을 기다린다.
+- runFlow:
+    file: expo-dev-menu.yaml
+    env:
+      SCREEN_TITLE: '캘린더를 골라 주세요'
 
 # 심어 둔 캘린더가 목록에 보이고, 소유 캘린더라 기본 선택돼 있다.
 - extendedWaitUntil:
