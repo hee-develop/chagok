@@ -1,3 +1,4 @@
+import { createArrivalsStore, type ArrivalsStore } from './arrivals.js';
 import { createSelectionStore, type SelectionStore } from './routes/calendars.js';
 import { createEventsStore, type EventsStore } from './routes/events.js';
 import { createFamilyStore, type FamilyStore } from './routes/family.js';
@@ -26,6 +27,8 @@ export type SeatData = {
   cares: Map<string, string>;
   /** 장소 기억: 일정의 장소 칸 글자(또는 들은 이름) → 장소, 애매 여부. 폰을 바꿔도 남고 연결을 끊으면 자리와 함께 지워진다. */
   memory: PlaceMemoryStore;
+  /** 장소별 도착 횟수(장소·횟수·마지막 날짜만). 폰을 바꿔도 같은 자리에 남는 기억이다. */
+  arrivals: ArrivalsStore;
 };
 
 /**
@@ -43,6 +46,8 @@ export const SEAT_DATA_POLICY: Record<keyof SeatData, 'keep' | 'reset'> = {
   family: 'keep',
   overrides: 'reset',
   cares: 'reset',
+  memory: 'keep',
+  arrivals: 'keep',
 };
 
 export type BucketDenied = 'rate-limited';
@@ -132,6 +137,7 @@ export function createSeatDataRegistry({
       overrides: new Map(),
       cares: new Map(),
       memory: createPlaceMemoryStore(now, memoryMax),
+      arrivals: createArrivalsStore(now),
     };
     // 폰 일정이 교체되거나 비워지면, 더는 없는 일정 id의 보정·채비를 버린다(픽스처 id의 것은 남긴다).
     data.events.subscribe((ids) => {
@@ -183,6 +189,7 @@ export function createSeatDataRegistry({
       d.overrides.size === 0 &&
       d.cares.size === 0 &&
       d.memory.size() === 0 &&
+      d.arrivals.list().length === 0 &&
       saved.home === null &&
       saved.work === null &&
       saved.others.length === 0 &&

@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import type { DayFixture, FamilyMember, MockCalendar, PlacesCatalog } from './fixture-types.js';
+import { createArrivalsRoute, createFrequentRoute } from './routes/arrivals.js';
 import { createCalendarsRoute, type SelectionStore } from './routes/calendars.js';
 import { createEmptyEnergySources } from './energy/fixtureSources.js';
 import type { EnergySources } from './energy/types.js';
@@ -150,6 +151,8 @@ export const createApp = ({
     .route('/calendars', createCalendarsRoute(calendars, guard))
     .route('/places', createPlacesRoute(places, guard, searchDeps))
     .route('/places', createPlaceResolveRoute(guard, searchDeps))
+    .route('/places', createFrequentRoute(places, guard, seats))
+    .route('/arrivals', createArrivalsRoute(guard, seats, { now }))
     .route('/events', createEventsRoute(guard, { now, isLoopback, loopbackOnly: eventsLoopbackOnly, onReceived: onEventsReceived }))
     .route('/family', createFamilyRoute(familyMembers, guard))
     .route('/pairing', createPairingRoute(seats, { clientAddress, isLoopback }))

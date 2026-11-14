@@ -26,7 +26,7 @@ const setup = () => {
 type Setup = ReturnType<typeof setup>;
 
 /** 자리 하나에 자리 데이터 항목을 모두 채운다(+ 알림함). */
-const fillSeat = async ({ app, notifications }: Setup, seat: { seatId: string; phoneToken: string }) => {
+const fillSeat = async ({ app, notifications }: Setup, seat: { seatId: string; phoneToken: string }, car: { carToken: string }) => {
   const token = seat.phoneToken;
   expect((await call(app, 'PUT', '/events', { token, body: { events: [event({ id: 'e1' }), event({ id: 'e2', start: '2026-11-12T10:00:00+09:00', end: '2026-11-12T11:00:00+09:00' })] } })).status).toBe(200);
   expect((await call(app, 'PUT', '/calendars/selection', { token, body: { selectedIds: ['cal-1'], revision: 1, source: 'device' } })).status).toBe(200);
@@ -37,6 +37,7 @@ const fillSeat = async ({ app, notifications }: Setup, seat: { seatId: string; p
   expect((await call(app, 'PUT', '/schedules/e1/care', { token, body: { care: '우산' } })).status).toBe(200);
   expect((await call(app, 'POST', '/schedules/e1/family-request', { token, body: { memberId: 'family-mom' } })).status).toBe(200);
   expect((await call(app, 'POST', '/presence', { token, body: { connected: true } })).status).toBe(200);
+  expect((await call(app, 'POST', `/arrivals?driver=${seat.seatId}`, { token: car.carToken, body: { scheduleId: 'e1', place: { name: '광주 시립도서관', lat: 35.1329, lng: 126.9025 } } })).status).toBe(200);
   expect(notifications.notifier.notify(seat.seatId, { kind: 'family-status', title: '알림', body: '내용' }).ok).toBe(true);
 };
 
@@ -48,20 +49,21 @@ const filled = (d: SeatData) => ({
   family: d.family.list().length > 0,
   overrides: d.overrides.size > 0,
   cares: d.cares.size > 0,
+  arrivals: d.arrivals.list().length > 0,
 });
 
 describe('자리 데이터 등록 방식', () => {
   it('자리 데이터의 모든 항목이 폰 바꾸기 때의 처리를 선언한다(빠뜨리면 타입 오류이고, 여기서는 실제 키와 대조한다)', () => {
     const registry = createSeatDataRegistry({ now, fixtureIds: new Set() });
     expect(Object.keys(registry.get('seat-x')).sort()).toEqual(Object.keys(SEAT_DATA_POLICY).sort());
-    expect(SEAT_DATA_POLICY).toMatchObject({ favorites: 'keep', family: 'keep', events: 'reset', selection: 'reset', overrides: 'reset', cares: 'reset' });
+    expect(SEAT_DATA_POLICY).toMatchObject({ favorites: 'keep', family: 'keep', arrivals: 'keep', events: 'reset', selection: 'reset', overrides: 'reset', cares: 'reset' });
   });
 
   it('자리를 지우면 항목에 상관없이 묶음 전체가 새것으로 바뀐다(공유되는 저장소가 남지 않는다)', async () => {
     const s = setup();
     const car = await registerCar(s.app);
     const seat = await connectPhone(s.app, car, '폰');
-    await fillSeat(s, seat);
+    await fillSeat(s, seat, car);
     const before = s.registry.get(seat.seatId);
     expect((await call(s.app, 'DELETE', '/pair', { token: seat.phoneToken })).status).toBe(200);
     const after = s.registry.get(seat.seatId);
@@ -72,7 +74,7 @@ describe('자리 데이터 등록 방식', () => {
     const s = setup();
     const car = await registerCar(s.app);
     const seat = await connectPhone(s.app, car, '폰');
-    await fillSeat(s, seat);
+    await fillSeat(s, seat, car);
     const before = s.registry.get(seat.seatId);
     const issued = await call(s.app, 'POST', '/pair/code', { token: car.carToken, body: { mode: 'replace', seatId: seat.seatId } });
     expect((await call(s.app, 'POST', '/pair/claim', { body: { code: issued.body.code, name: '새 폰' } })).status).toBe(200);
@@ -80,7 +82,7 @@ describe('자리 데이터 등록 방식', () => {
     for (const key of Object.keys(SEAT_DATA_POLICY) as (keyof SeatData)[]) {
       if (SEAT_DATA_POLICY[key] === 'keep') expect(after[key], key).toBe(before[key]);
     }
-    expect(filled(after)).toEqual({ events: false, selection: false, favorites: true, family: true, overrides: false, cares: false });
+    expect(filled(after)).toEqual({ events: false, selection: false, favorites: true, family: true, overrides: false, cares: false, arrivals: true });
   });
 });
 
@@ -94,12 +96,12 @@ describe.each([
     return res.body;
   };
 
-  it('그 자리의 연결·일정·선택·자주 가는 곳·가족 요청·보정·채비·접속 상태·알림·푸시 토큰을 항목별로 모두 지운다', async () => {
+  it('그 자리의 연결·일정·선택·자주 가는 곳·가족 요청·보정·채비·도착 횟수·접속 상태·알림·푸시 토큰을 항목별로 모두 지운다', async () => {
     const s = setup();
     const car = await registerCar(s.app);
     const a = await connectPhone(s.app, car, '폰A');
-    await fillSeat(s, a);
-    expect(filled(s.registry.get(a.seatId))).toEqual({ events: true, selection: true, favorites: true, family: true, overrides: true, cares: true });
+    await fillSeat(s, a, car);
+    expect(filled(s.registry.get(a.seatId))).toEqual({ events: true, selection: true, favorites: true, family: true, overrides: true, cares: true, arrivals: true });
     expect(s.notifications.outbox.size(a.seatId)).toBe(1);
 
     const body = await wipe(s, car, a);
@@ -112,8 +114,9 @@ describe.each([
     expect((await call(s.app, 'GET', '/drivers', { token: car.carToken })).body.seats).toEqual([]);
     // 데이터: 항목별로 비어 있다
     const fresh = s.registry.get(a.seatId);
-    expect(filled(fresh)).toEqual({ events: false, selection: false, favorites: false, family: false, overrides: false, cares: false });
+    expect(filled(fresh)).toEqual({ events: false, selection: false, favorites: false, family: false, overrides: false, cares: false, arrivals: false });
     expect(fresh.events.get()).toBeNull(); // '받았고 0건'이 아니라 받은 적 없음
+    expect(fresh.arrivals.list()).toEqual([]);
     expect(fresh.favorites.get()).toMatchObject({ home: null, work: null, others: [] });
     // 알림함·중복 억제·푸시 토큰
     expect(s.notifications.outbox.size(a.seatId)).toBe(0);
@@ -130,12 +133,12 @@ describe.each([
     const a = await connectPhone(s.app, car1, '폰A');
     const car2 = await registerCar(s.app);
     const b = await connectPhone(s.app, car2, '폰B');
-    await fillSeat(s, a);
-    await fillSeat(s, b);
+    await fillSeat(s, a, car1);
+    await fillSeat(s, b, car2);
     const bData = s.registry.get(b.seatId);
     await wipe(s, car1, a);
     expect(s.registry.get(b.seatId)).toBe(bData);
-    expect(filled(bData)).toEqual({ events: true, selection: true, favorites: true, family: true, overrides: true, cares: true });
+    expect(filled(bData)).toEqual({ events: true, selection: true, favorites: true, family: true, overrides: true, cares: true, arrivals: true });
     expect(s.notifications.outbox.size(b.seatId)).toBe(1);
     expect(s.seats.seat(b.seatId)).not.toBeNull();
     expect((await call(s.app, 'GET', '/pair', { token: b.phoneToken })).status).toBe(200);
@@ -146,11 +149,11 @@ describe.each([
     const s = setup();
     const car = await registerCar(s.app);
     const a = await connectPhone(s.app, car, '폰A', 'p'.repeat(32));
-    await fillSeat(s, a);
+    await fillSeat(s, a, car);
     await wipe(s, car, a);
     const again = await connectPhone(s.app, car, '폰A', 'p'.repeat(32));
     expect(again.seatId).not.toBe(a.seatId);
-    expect(filled(s.registry.get(again.seatId))).toEqual({ events: false, selection: false, favorites: false, family: false, overrides: false, cares: false });
+    expect(filled(s.registry.get(again.seatId))).toEqual({ events: false, selection: false, favorites: false, family: false, overrides: false, cares: false, arrivals: false });
     expect((await call(s.app, 'GET', '/schedules/today', { token: again.phoneToken })).body.schedules).toEqual([]);
   });
 });
@@ -161,14 +164,14 @@ describe('DELETE /car: 자리가 여럿이고 코드가 떠 있을 때', () => {
     const car = await registerCar(s.app);
     const a = await connectPhone(s.app, car, '폰A');
     const b = await connectPhone(s.app, car, '폰B');
-    await fillSeat(s, a);
-    await fillSeat(s, b);
+    await fillSeat(s, a, car);
+    await fillSeat(s, b, car);
     const issued = await call(s.app, 'POST', '/pair/code', { token: car.carToken, body: { mode: 'replace', seatId: a.seatId } });
     expect((await call(s.app, 'DELETE', '/car', { token: car.carToken })).body).toEqual({ removedSeats: 2 });
     expect((await call(s.app, 'POST', '/pair/claim', { body: { code: issued.body.code, name: '새 폰' } })).status).toBe(404);
     expect((await call(s.app, 'GET', '/pair/status', { token: car.carToken })).body.state).toBe('none');
     for (const id of [a.seatId, b.seatId]) {
-      expect(filled(s.registry.get(id))).toEqual({ events: false, selection: false, favorites: false, family: false, overrides: false, cares: false });
+      expect(filled(s.registry.get(id))).toEqual({ events: false, selection: false, favorites: false, family: false, overrides: false, cares: false, arrivals: false });
       expect(s.notifications.outbox.size(id)).toBe(0);
     }
     expect(s.forgotten.sort()).toEqual([a.seatId, b.seatId].sort());
