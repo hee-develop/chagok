@@ -143,6 +143,15 @@ appId: ${APP_ID}
       NAME: 'E2E Today Meeting'
       STAGE: forgotten
 # 3) 다시 [이동 없음]을 누르고 앱을 다시 열면 일정 동기화가 같은 이름 일정을 거른다: 서버로 보내지 않고 오늘 탭에 '이동 없음으로 기억'으로 흐리게 보인다.
+- runFlow:
+    when:
+      notVisible: 'E2E Today Meeting 이동 없음'
+    commands:
+      - scrollUntilVisible:
+          element: 'E2E Today Meeting 13:00.*'
+          direction: DOWN
+          timeout: 20000
+      - tapOn: 'E2E Today Meeting 13:00.*'
 - scrollUntilVisible:
     element: 'E2E Today Meeting 이동 없음'
     direction: DOWN
@@ -205,6 +214,15 @@ appId: ${APP_ID}
       STAGE: event-sent
 - takeScreenshot: 08-today-unskipped
 # 5) 장소를 넣으면 같은 이름의 이동 없음 기억이 지워지고 그 일정은 다시 서버로 간다(장소 보정이 이동 없음 기억을 이긴다).
+- runFlow:
+    when:
+      notVisible: 'E2E Today Meeting 이동 없음'
+    commands:
+      - scrollUntilVisible:
+          element: 'E2E Today Meeting 13:00.*'
+          direction: DOWN
+          timeout: 20000
+      - tapOn: 'E2E Today Meeting 13:00.*'
 - scrollUntilVisible:
     element: 'E2E Today Meeting 이동 없음'
     direction: DOWN
@@ -308,6 +326,7 @@ appId: ${APP_ID}
     direction: DOWN
     timeout: 20000
 - assertVisible: 'E2E Tomorrow Visit'
+- scroll
 - takeScreenshot: 10-places-tab-skip-list
 - tapOn: 'E2E Tomorrow Visit 이동 없음 지우기'
 - extendedWaitUntil:
