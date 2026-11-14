@@ -26,6 +26,11 @@ export type PhoneEvent = {
   locationText: string | null;
   notes: string | null;
   attendees: string[];
+  /**
+   * 폰에서 사용자가 "이동 일정이에요"로 바꾼 같은 이름 일정. true면 서버의 이동 없음 안전망(온라인·건물 안 판정)을 적용하지 않는다.
+   * 없으면 false로 본다(안전망 적용).
+   */
+  travelConfirmed?: boolean;
 };
 
 export type SavedEvents = { receivedAt: string; events: PhoneEvent[] };
@@ -146,6 +151,9 @@ function parseEvents(raw: unknown): Parsed {
     ) {
       return { ok: false, error: `attendees는 이름 문자열(${MAX_ATTENDEE_NAME_LENGTH}자 이하) ${MAX_ATTENDEES}개 이하 배열이어야 합니다` };
     }
+    if (e.travelConfirmed !== undefined && typeof e.travelConfirmed !== 'boolean') {
+      return { ok: false, error: 'travelConfirmed는 boolean이어야 합니다' };
+    }
     const start = typeof e.start === 'string' ? parseAt(e.start) : null;
     const end = typeof e.end === 'string' ? parseAt(e.end) : null;
     if (start === null || end === null) return { ok: false, error: 'start와 end는 오프셋이 있는 ISO8601 시각이어야 합니다' };
@@ -160,6 +168,7 @@ function parseEvents(raw: unknown): Parsed {
       locationText: e.locationText as string | null,
       notes: e.notes as string | null,
       attendees: e.attendees as string[],
+      ...(e.travelConfirmed === true ? { travelConfirmed: true } : {}),
     });
   }
   return { ok: true, events };
@@ -175,6 +184,7 @@ const toJson = (e: PhoneEvent) => ({
   locationText: e.locationText,
   notes: e.notes,
   attendees: e.attendees,
+  ...(e.travelConfirmed === true ? { travelConfirmed: true as const } : {}),
 });
 
 /** 요청이 이 서버와 같은 기기(127.0.0.1·::1)에서 왔는가. node 서버가 아닌 환경(app.request 등)에서는 알 수 없어 false. */

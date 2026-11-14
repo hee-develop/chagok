@@ -2,7 +2,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { HttpError } from '../../../api/request';
-import { FillPlacesScreen } from '../FillPlacesScreen';
+import { appEventSync } from '../../calendar-sync/eventSync';
+import { appFilteredEvents } from '../../calendar-sync/filteredEvents';
+import { appTravelExceptions } from '../../calendar-sync/travelExceptions';
+import { FillPlacesScreen, markTravelByTitle } from '../FillPlacesScreen';
 import type { SchedulePlacesApi, SetupSchedule } from '../schedulePlacesApi';
 
 const mockPush = jest.fn();
@@ -22,7 +25,8 @@ const makeApi = (overrides: Partial<SchedulePlacesApi> = {}) => ({
   saveCare: jest.fn().mockResolvedValue({ id: empty.id, care: null }),
   ...overrides,
 });
-const renderScreen = (api: SchedulePlacesApi, timeoutMs?: number) => render(<SafeAreaProvider initialMetrics={insets}><FillPlacesScreen api={api} timeoutMs={timeoutMs} /></SafeAreaProvider>);
+const renderScreen = (api: SchedulePlacesApi, timeoutMs?: number, extra: Partial<React.ComponentProps<typeof FillPlacesScreen>> = {}) =>
+  render(<SafeAreaProvider initialMetrics={insets}><FillPlacesScreen api={api} timeoutMs={timeoutMs} filteredEvents={[]} {...extra} /></SafeAreaProvider>);
 beforeEach(() => mockPush.mockReset());
 
 it('서버 일정으로 개수를 계산하고 장소가 있는 일정과 한국 시각도 보여 준다', async () => {
@@ -157,7 +161,7 @@ it('온라인 회의·회의실이라 저절로 거른 일정은 이유를 붙�
   await renderScreen(makeApi({ fetchSchedules: jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [empty, online, room, manual] }) }));
   expect(await screen.findByText('장소가 빈 일정이 1개 있어요')).toBeOnTheScreen();
   expect(screen.getByText('✓ 이동 없음 · 온라인 회의')).toBeOnTheScreen();
-  expect(screen.getByText('✓ 이동 없음 · 회의실')).toBeOnTheScreen();
+  expect(screen.getByText('✓ 이동 없음 · 건물 안')).toBeOnTheScreen();
   expect(screen.getByText('✓ 이동 없음')).toBeOnTheScreen();
   expect(screen.getByTestId('schedule-zoom')).toHaveStyle({ opacity: 0.55 });
   expect(screen.getByTestId('schedule-gym')).not.toHaveStyle({ opacity: 0.55 });
@@ -188,4 +192,74 @@ it('차로 가는 일정에는 가족에게 보내기 줄을 두고, 보낸 가�
   expect(screen.queryByRole('button', { name: '주간 회의 가족에게 보내기' })).toBeNull();
   await fireEvent.press(screen.getByRole('button', { name: 'KIA 직관 가족에게 보내기' }));
   expect(mockPush).toHaveBeenCalledWith({ pathname: '/setup/family-send', params: { scheduleId: 'kia', title: 'KIA 직관' } });
+});
+
+describe('폰이 거른 일정(서버로 보내지 않은 것)', () => {
+  const zoom = { id: 'zoom@1', title: '고객사 주간 회의', start: '2026-11-06T02:00:00Z', end: '2026-11-06T03:00:00Z', reason: 'online' as const };
+  const room = { id: 'room@1', title: '기획 리뷰', start: '2026-11-06T08:00:00Z', end: '2026-11-06T09:00:00Z', reason: 'meetingRoom' as const };
+
+  it('서버 일정과 시간순으로 섞어 흐리게 보이고 이유를 붙이며, 장소 빈 개수에는 넣지 않는다', async () => {
+    await renderScreen(makeApi(), undefined, { filteredEvents: [room, zoom] });
+    expect(await screen.findByText('장소가 빈 일정이 1개 있어요')).toBeOnTheScreen();
+    expect(screen.getByText('✓ 이동 없음 · 온라인 회의')).toBeOnTheScreen();
+    expect(screen.getByText('✓ 이동 없음 · 건물 안')).toBeOnTheScreen();
+    expect(screen.getByTestId('schedule-zoom@1')).toHaveStyle({ opacity: 0.55 });
+    const order = screen.getAllByTestId(/^schedule-/).map((n) => n.props.testID);
+    expect(order).toEqual(['schedule-zoom@1', 'schedule-lunch', 'schedule-game', 'schedule-room@1']);
+  });
+
+  it('거른 일정만 있어도 목록으로 보인다(서버 일정이 0건)', async () => {
+    const fetchSchedules = jest.fn().mockResolvedValue({ anchor: empty.start, schedules: [] });
+    await renderScreen(makeApi({ fetchSchedules }), undefined, { filteredEvents: [zoom] });
+    expect(await screen.findByText('고객사 주간 회의')).toBeOnTheScreen();
+    expect(screen.queryByText('선택한 캘린더에 확인할 일정이 없어요.')).toBeNull();
+  });
+
+  it('줄을 눌러 "이동 일정이에요"로 바꾸면 그 이름으로 처리하고 서버 목록을 다시 조회한다', async () => {
+    const onMarkTravel = jest.fn().mockResolvedValue(undefined);
+    const api = makeApi();
+    await renderScreen(api, undefined, { filteredEvents: [zoom], onMarkTravel });
+    await screen.findByText('✓ 이동 없음 · 온라인 회의');
+    expect(api.fetchSchedules).toHaveBeenCalledTimes(1);
+    await fireEvent.press(screen.getByRole('button', { name: '고객사 주간 회의 이동 일정이에요' }));
+    expect(onMarkTravel).toHaveBeenCalledWith('고객사 주간 회의');
+    await waitFor(() => expect(api.fetchSchedules).toHaveBeenCalledTimes(2));
+  });
+
+  it('처리하는 동안은 다른 저장 버튼을 막는다', async () => {
+    const onMarkTravel = jest.fn().mockReturnValue(new Promise(() => {}));
+    await renderScreen(makeApi(), undefined, { filteredEvents: [zoom], onMarkTravel });
+    await fireEvent.press(await screen.findByRole('button', { name: '고객사 주간 회의 이동 일정이에요' }));
+    expect(screen.getByRole('button', { name: '다음' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '육전집 점심 이동 없음' })).toBeDisabled();
+  });
+
+  it('서버 목록에 같은 id가 이미 있으면 서버 쪽만 보인다', async () => {
+    await renderScreen(makeApi(), undefined, { filteredEvents: [{ ...zoom, id: 'lunch' }] });
+    await screen.findByText('장소가 빈 일정이 1개 있어요');
+    expect(screen.getAllByTestId('schedule-lunch')).toHaveLength(1);
+    expect(screen.queryByText('고객사 주간 회의')).toBeNull();
+  });
+});
+
+describe('markTravelByTitle', () => {
+  it('같은 이름을 예외로 기억하고 거른 목록에서 빼고 곧바로 다시 읽어 보낸다', async () => {
+    const run = jest.spyOn(appEventSync, 'run').mockResolvedValue('sent');
+    const seen: unknown[] = [];
+    const off = appTravelExceptions.subscribe((c) => seen.push(c));
+    appFilteredEvents.set([
+      { id: 'a@1', title: '고객사  주간 회의', start: '2026-11-06T02:00:00Z', end: '2026-11-06T03:00:00Z', reason: 'online' },
+      { id: 'a@2', title: '고객사 주간 회의', start: '2026-11-07T02:00:00Z', end: '2026-11-07T03:00:00Z', reason: 'online' },
+      { id: 'b@1', title: '기획 리뷰', start: '2026-11-06T08:00:00Z', end: '2026-11-06T09:00:00Z', reason: 'meetingRoom' },
+    ]);
+    await markTravelByTitle('고객사 주간 회의');
+    off();
+    expect(appTravelExceptions.has('고객사 주간 회의')).toBe(true);
+    expect(appFilteredEvents.get().map((e) => e.id)).toEqual(['b@1']);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([{ name: '고객사 주간 회의', travel: true }]);
+    await appTravelExceptions.remove('고객사 주간 회의');
+    appFilteredEvents.set([]);
+    run.mockRestore();
+  });
 });

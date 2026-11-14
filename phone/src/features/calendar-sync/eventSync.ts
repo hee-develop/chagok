@@ -7,7 +7,10 @@ import {
   type FetchSelectionState,
 } from '../calendar-select/selectionApi';
 import { putEvents, type SendEvents } from './eventsApi';
+import { appFilteredEvents, type FilteredEvent } from './filteredEvents';
 import { fitToBudget } from './payloadBudget';
+import { appTravelExceptions, type TravelExceptions } from './travelExceptions';
+import { partitionEvents } from './travelFilter';
 
 export type SyncResult =
   | 'sent'
@@ -27,6 +30,10 @@ export type EventSyncOptions = {
   /** 서버가 선택을 잃었을 때(재시작) 기억해 둔 선택을 다시 저장한다. */
   saveSelection?: (selectedIds: string[], revision: number, signal: AbortSignal) => Promise<unknown>;
   send?: SendEvents;
+  /** "이동 일정이에요"로 바꾼 이름 목록(폰 저장소). */
+  exceptions?: Pick<TravelExceptions, 'load' | 'has'>;
+  /** 폰이 거른 일정을 받는 곳(화면이 흐리게 보인다). 서버로는 보내지 않는다. */
+  filtered?: { set(events: readonly FilteredEvent[]): void };
   timeoutMs?: number;
   now?: () => Date;
   /** 실패를 드러내는 곳. 일정 내용 없이 결과 이름과 HTTP 상태만 넘긴다. 기본은 개발 빌드에서 console.warn. */
@@ -54,6 +61,8 @@ const devLog = (message: string) => {
  * - 선택은 서버에 저장된 값을 읽는다. 기기 캘린더(source=device)로 저장한 선택만 쓰고, 없거나 목 캘린더 선택이면 보내지 않는다
  *   (목 id로 기기 일정을 조회해 빈 목록을 보내면 서버가 폰 출처로 영구 전환되므로).
  * - 서버에 선택이 없는데(재시작) 이 앱이 마지막 선택을 기억하면 그 선택을 다시 저장한 뒤 보낸다.
+ * - 읽은 일정은 보내기 전에 폰에서 거른다(`travelFilter.ts`): 온라인·건물 안 일정은 보내지 않고 폰 로컬 목록에만 두며,
+ *   종일 일정은 이름만 보낸다. 같은 내용 판단·크기 예산은 거른 뒤의 일정으로 한다.
  * - 권한을 묻지 않는다. 권한이 없으면 그냥 건너뛰고, 권한 요청은 캘린더 고르기 화면만 한다.
  * - 실패해도 화면에 알리지 않지만 결과를 기록하고 개발 로그로 남긴다. 다음에 앱이 앞으로 올 때 다시 시도한다.
  */
@@ -62,6 +71,8 @@ export function createEventSync({
   fetchSelection = fetchCalendarSelectionState,
   saveSelection = (ids, revision, signal) => saveCalendarSelection(ids, revision, signal, 'device'),
   send = putEvents,
+  exceptions = appTravelExceptions,
+  filtered: filteredSink = appFilteredEvents,
   timeoutMs = REQUEST_TIMEOUT_MS,
   now = () => new Date(),
   log = devLog,
@@ -105,7 +116,11 @@ export function createEventSync({
         return e instanceof CalendarPermissionError ? 'permission-denied' : fail('캘린더 읽기', e);
       }
       if (cancelled()) return 'cancelled';
-      events = fitToBudget(events);
+      await exceptions.load();
+      if (cancelled()) return 'cancelled';
+      const { toSend, filtered } = partitionEvents(events, exceptions.has);
+      filteredSink.set(filtered);
+      events = fitToBudget(toSend);
       const key = JSON.stringify(events);
       if (lastSent && lastSent.key === key && now().getTime() - lastSent.at < DUPLICATE_WINDOW_MS) return 'unchanged';
       try {

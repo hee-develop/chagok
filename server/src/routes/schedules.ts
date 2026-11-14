@@ -113,7 +113,7 @@ export const createSchedulesRoute = (
         candidate: exact ? undefined : remembered.get(e.title) ?? partialMatch(e.locationText),
         memo: e.notes,
         attendees: e.attendees,
-        autoNoTravel: detectNoTravel({ title: e.title, locationText: e.locationText, notes: e.notes }),
+        autoNoTravel: e.travelConfirmed ? null : detectNoTravel({ title: e.title, locationText: e.locationText, notes: e.notes }),
       };
     });
   };

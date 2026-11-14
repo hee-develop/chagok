@@ -14,7 +14,8 @@
 - `GET /schedules/places`: 선택한 캘린더의 종일이 아닌 일정 전체를 시작순으로 반환합니다.
   `{ anchor, schedules: [{ id, title, start, end, locationText, place, noTravel, noTravelReason, care, suggestion }] }`.
   `care`는 앱에서 적은 채비 한 줄(없으면 `null`)이고 카드 아래 채비 줄과 `PUT /schedules/:id/care`는 `docs/care.md`를 따릅니다.
-  `noTravelReason`은 서버가 온라인 회의·회의실이라 저절로 이동 없음으로 본 이유(`online`|`meetingRoom`)이고, 보정이 있거나 해당하지 않으면 `null`입니다(규칙은 `docs/calendar-sync.md`). 화면은 이유가 있는 이동 없음 카드를 흐리게 보이고 '이동 없음 · 온라인 회의'처럼 이유를 붙입니다.
+  `noTravelReason`은 서버(안전망)가 온라인 회의·건물 안이라 저절로 이동 없음으로 본 이유(`online`|`meetingRoom`)이고, 보정이 있거나 해당하지 않으면 `null`입니다(규칙은 `docs/calendar-sync.md`). 화면은 이유가 있는 이동 없음 카드를 흐리게 보이고 '이동 없음 · 온라인 회의'·'이동 없음 · 건물 안'처럼 이유를 붙입니다.
+  폰이 읽을 때 거른 일정(온라인·건물 안, 서버로 보내지 않은 것)은 이 응답에 없고 폰 로컬 목록(`calendar-sync/filteredEvents.ts`)에서 와서 같은 목록에 시간순으로 섞여 흐리게 보입니다. 장소 빈 개수에는 세지 않으며 채비·가족 줄이 없습니다. 줄 전체가 버튼('<제목> 이동 일정이에요')이고, 누르면 같은 이름 일정을 다음부터 거르지 않도록 폰 저장소에 기억하고 곧바로 다시 읽어 서버로 보낸 뒤 서버 목록을 다시 조회합니다(`docs/calendar-sync.md` '폰에서 이동 일정 거르기'). 서버 `/skips`와 잇는 일은 다음 묶음(J2b)입니다.
   `place`는 `{ name, lat, lng } | null`입니다. 빈 개수는 `place === null && !noTravel`이며 후보가 있는 일정도 셉니다.
   `suggestion`은 `{ placeId, name } | null`로, 장소가 비고 이동 없음이 아닌 일정 중 제목이 기억한 장소와
   같은 일정에만 채웁니다. 기억한 장소는 `fixtures/places/remembered.json`(일정 제목 → 목 장소 id)입니다.

@@ -40,8 +40,13 @@ export function attendeeNames(list: { name?: string; email?: string; isCurrentUs
 
 const nonEmpty = (value: string | null | undefined) => (value === null || value === undefined || value.trim() === '' ? null : value);
 
-/** 기본 선택: 내 계정 기본 캘린더(isPrimary)와 소유한 캘린더. 구독·공유 캘린더는 사용자가 직접 고른다. */
-const isDefaultSelected = (c: { isPrimary?: boolean; accessLevel?: string }) => c.isPrimary === true || c.accessLevel === 'owner';
+/**
+ * 기본 체크(정책서 10.2 종류 가르기): Android 접근 수준이 소유·편집 가능(owner·root·editor·contributor)이면 내 것·공유 캘린더라 체크하고,
+ * 읽기 전용(read·respond·freebusy·none…)인 공휴일·생일·구독 캘린더는 해제한다. 접근 수준을 모르는 캘린더만 기본 캘린더(isPrimary)를 따른다.
+ */
+const WRITABLE_ACCESS = new Set(['owner', 'root', 'editor', 'contributor']);
+export const isDefaultSelected = (c: { isPrimary?: boolean; accessLevel?: string }) =>
+  c.accessLevel === undefined || c.accessLevel === '' ? c.isPrimary === true : WRITABLE_ACCESS.has(c.accessLevel);
 
 export const deviceCalendarSource: CalendarSource = {
   kind: 'device',

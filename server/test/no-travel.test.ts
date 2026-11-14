@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectNoTravel } from '../src/noTravel.js';
+import { detectNoTravel, travelFilterReason } from '../src/noTravel.js';
 import { newApp } from './helpers.js';
 
 const detect = (over: { title?: string; locationText?: string | null; notes?: string | null }) =>
@@ -44,6 +44,124 @@ describe('이동 없는 일정 알아보기', () => {
   });
 });
 
+describe('온라인 표시(정책서 12장과 오탐 방지)', () => {
+  const online = (over: { title?: string; locationText?: string | null; notes?: string | null }) => detect(over) === 'online';
+
+  it.each([
+    ['장소: 온라인', { locationText: '온라인' }],
+    ['장소 전체가 화상', { locationText: '화상' }],
+    ['장소 전체가 비대면', { locationText: ' 비대면 ' }],
+    ['장소: 비대면 회의', { locationText: '비대면 회의' }],
+    ['장소: 화상 미팅', { locationText: '화상 미팅' }],
+    ['제목: 비대면회의', { title: '고객사 비대면회의' }],
+    ['메모의 주소 없는 호스트', { notes: '참여 zoom.us/j/123456' }],
+    ['메모의 teams 호스트 문장 끝 마침표', { notes: '링크는 teams.microsoft.com.' }],
+    ['장소의 호스트(주소 앞 서브도메인)', { locationText: 'us02web.zoom.us/j/1' }],
+    ['webex 호스트', { notes: '접속: company.webex.com/meet/kim' }],
+  ])('온라인이다: %s', (_name, over) => {
+    expect(online(over)).toBe(true);
+  });
+
+  it.each([
+    ['장소에 섞인 화상(병원)', { locationText: '베스티안 화상전문병원' }],
+    ['장소에 섞인 비대면(진료센터)', { locationText: '비대면진료센터 본점' }],
+    ['제목의 화상 한 단어', { title: '화상 치료' }],
+    ['이메일 주소', { notes: '문의: help@zoom.us' }],
+    ['다른 주소의 일부', { notes: 'https://example.com/redirect?to=zoom.us' }],
+    ['뒤에 다른 도메인이 붙음', { notes: 'zoom.us.example.com/j/1' }],
+    ['앞에 글자가 붙은 호스트', { notes: 'myzoom.us/j/1' }],
+    ['장소 칸이 비어 있고 표시도 없음', {}],
+  ])('온라인이 아니다: %s', (_name, over) => {
+    expect(online(over)).toBe(false);
+  });
+});
+
+describe('건물 안 표시(정책서 12장)', () => {
+  const indoor = (locationText: string | null) => detect({ locationText }) === 'meetingRoom';
+
+  it.each([
+    '회의실',
+    '7층 대회의실',
+    '3A룸',
+    '본사 3층 대회의실',
+    '미팅룸 B',
+    '스터디룸',
+    '룸',
+    '룸 2',
+    '라운지',
+    '2층 라운지',
+    '세미나실 1',
+    '대강당',
+    '3층',
+    '지하 1층',
+    '301호',
+    '301호실',
+    'A동 301호',
+    'Meeting Room A',
+    'Conference Room 4F',
+    'Lounge',
+    '본사 5층',
+    '본사 2층 라운지',
+    '12 층',
+  ])('실내 표시만 있으면 건물 안이다: %s', (text) => {
+    expect(indoor(text)).toBe(true);
+  });
+
+  it.each([
+    ['주소(로)가 함께 있음', '서울 강남구 테헤란로 152 7층 회의실'],
+    ['주소(길)가 함께 있음', '사직로8길 39 3층'],
+    ['주소(동)가 함께 있음', '역삼동 301호'],
+    ['주소(번지)가 함께 있음', '대치동 890-1번지 5층'],
+    ['주소(대로)가 함께 있음', '세종대로 110 라운지'],
+    ['주소(구)가 함께 있음', '강남구 스터디룸'],
+    ['주소(시)가 함께 있음', '광주시 3층 강당'],
+    ['쇼룸은 찾아가는 곳', '현대 모터스튜디오 쇼룸'],
+    ['건물 이름 뒤의 층', '챔피언스필드 2층'],
+    ['몰 안의 층', '롯데월드몰 8층'],
+    ['공항 라운지', '인천공항 라운지'],
+    ['호선', '2호선 강남역'],
+    ['호점', '교촌치킨 1호점'],
+    ['호기', '3호기 앞'],
+    ['층간', '층간 소음 상담'],
+    ['실내 표시 없음', '광주 육전집'],
+    ['베드룸', '베드룸 인테리어'],
+    ['빈 장소', ''],
+  ])('거르지 않는다: %s', (_name, text) => {
+    expect(indoor(text)).toBe(false);
+  });
+
+  it('장소 칸이 없으면 거르지 않는다', () => {
+    expect(indoor(null)).toBe(false);
+  });
+
+  it('온라인 표시가 같이 있으면 온라인이 먼저다', () => {
+    expect(detect({ locationText: '3층 회의실', notes: 'https://meet.google.com/abc' })).toBe('online');
+  });
+});
+
+describe('폰이 거르는 이유(정책서 10.3 표 1~3번)', () => {
+  const reason = (over: { allDay?: boolean; title?: string; locationText?: string | null; notes?: string | null }) =>
+    travelFilterReason({ allDay: false, title: '팀 회의', locationText: null, notes: null, ...over });
+
+  it('종일 일정이 먼저다. 장소나 온라인 표시가 있어도 종일이다', () => {
+    expect(reason({ allDay: true })).toBe('allDay');
+    expect(reason({ allDay: true, locationText: '온라인' })).toBe('allDay');
+  });
+
+  it('온라인 → 건물 안 순서로 본다', () => {
+    expect(reason({ locationText: 'Zoom' })).toBe('online');
+    expect(reason({ locationText: '7층 대회의실' })).toBe('meetingRoom');
+    expect(reason({ locationText: '3층 회의실', notes: 'https://zoom.us/j/1' })).toBe('online');
+  });
+
+  it('장소 칸이 빈 일정과 보통 일정은 거르지 않는다', () => {
+    expect(reason({})).toBeNull();
+    expect(reason({ locationText: '' })).toBeNull();
+    expect(reason({ locationText: '광주 육전집' })).toBeNull();
+    expect(reason({ locationText: '서울 강남구 테헤란로 152 7층 회의실' })).toBeNull();
+  });
+});
+
 describe('/schedules의 이동 없는 일정', () => {
   /** 시계를 고정한다: 서울 2026-11-11 10:00. */
   const makeApp = () => newApp({ now: () => new Date('2026-11-11T10:00:00+09:00') });
@@ -76,6 +194,29 @@ describe('/schedules의 이동 없는 일정', () => {
         ev('lunch', { title: '점심', locationText: '광주 육전집' }),
       ],
     });
+
+  it('폰에서 "이동 일정이에요"로 바꾼 일정(travelConfirmed)은 안전망이 거르지 않고 차량 응답에 남는다', async () => {
+    const app = makeApp();
+    const res = await json(app, 'PUT', '/events', {
+      events: [
+        ev('zoom', { title: '주간 회의', notes: 'https://zoom.us/j/1', travelConfirmed: true }),
+        ev('room', { title: '기획 리뷰', locationText: '본사 3층 회의실', travelConfirmed: false }),
+      ],
+    });
+    expect(res.status).toBe(200);
+    const rows = await places(app);
+    expect(rows.zoom).toMatchObject({ noTravel: false, noTravelReason: null });
+    expect(rows.room).toMatchObject({ noTravel: true, noTravelReason: 'meetingRoom' });
+    expect((await today(app)).map((s) => s.id)).toEqual(['zoom']);
+    const stored = (await (await app.request('/events?date=2026-11-11')).json()) as { events: Record<string, unknown>[] };
+    expect(stored.events.find((e) => e.id === 'zoom')?.travelConfirmed).toBe(true);
+    expect(stored.events.find((e) => e.id === 'room')).not.toHaveProperty('travelConfirmed');
+  });
+
+  it('travelConfirmed가 boolean이 아니면 400이다', async () => {
+    const app = makeApp();
+    expect((await json(app, 'PUT', '/events', { events: [ev('x', { travelConfirmed: 'yes' })] })).status).toBe(400);
+  });
 
   it('온라인 회의·회의실은 저절로 이동 없음이 되어 차량 응답에서 빠지고, 3단계에는 이유와 함께 남는다', async () => {
     const app = makeApp();

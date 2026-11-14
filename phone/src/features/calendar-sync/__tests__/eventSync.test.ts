@@ -1,7 +1,9 @@
 import { CalendarPermissionError, type CalendarSource, type DeviceEvent } from '../../calendar-select/calendarSource';
 import { HttpError } from '../../../api/request';
 import { createEventSync, DUPLICATE_WINDOW_MS } from '../eventSync';
+import { createFilteredEventsStore } from '../filteredEvents';
 import { PAYLOAD_BUDGET_BYTES } from '../payloadBudget';
+import { createTravelExceptions } from '../travelExceptions';
 
 const event = (id = 'a'): DeviceEvent => ({
   id,
@@ -237,6 +239,100 @@ describe('createEventSync', () => {
       expect(await result).toBe('cancelled');
       expect(listEvents).not.toHaveBeenCalled();
       expect(send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('폰에서 거르기', () => {
+    const memory = () => {
+      const data = new Map<string, string>();
+      return { getItem: async (k: string) => data.get(k) ?? null, setItem: async (k: string, v: string) => void data.set(k, v) };
+    };
+    const filterSetup = (events: DeviceEvent[]) => {
+      const exceptions = createTravelExceptions(memory());
+      const filtered = createFilteredEventsStore();
+      const listEvents = jest.fn().mockImplementation(async () => events);
+      const source: CalendarSource = { kind: 'device', list: async () => [], listEvents };
+      const send = jest.fn().mockResolvedValue({});
+      const sync = createEventSync({
+        source,
+        fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
+        send,
+        exceptions,
+        filtered,
+        timeoutMs: 1000,
+        now: () => new Date(1_000_000),
+        log: jest.fn(),
+      });
+      return { sync, send, exceptions, filtered };
+    };
+    const zoom = { ...event('zoom'), title: '고객사 주간 회의', locationText: 'Zoom', notes: '비밀번호 1234' };
+    const room = { ...event('room'), title: '기획 리뷰', locationText: '7층 대회의실' };
+    const lunch = { ...event('lunch'), title: '육전집 점심', locationText: '광주 육전집' };
+    const empty = { ...event('empty'), title: '장소 없는 약속', locationText: null };
+    const trip = { ...event('trip'), title: '제주 출장', allDay: true, locationText: null, notes: '항공권 ABC', attendees: ['김철수'] };
+
+    it('걸러진 일정은 PUT /events 본문에 없고(제목이 폰 밖으로 나가지 않음) 폰 로컬 목록에만 남는다', async () => {
+      const { sync, send, filtered } = filterSetup([zoom, room, lunch, empty, trip]);
+      expect(await sync.run()).toBe('sent');
+      const body = send.mock.calls[0][0] as DeviceEvent[];
+      expect(body.map((e) => e.id)).toEqual(['lunch', 'empty', 'trip']);
+      const wire = JSON.stringify({ events: body });
+      expect(wire).not.toMatch(/고객사 주간 회의|기획 리뷰|비밀번호|Zoom|대회의실/);
+      expect(filtered.get().map((e) => [e.id, e.title, e.reason])).toEqual([
+        ['zoom', '고객사 주간 회의', 'online'],
+        ['room', '기획 리뷰', 'meetingRoom'],
+      ]);
+    });
+
+    it('종일 일정은 이름만 보낸다', async () => {
+      const { sync, send } = filterSetup([trip]);
+      await sync.run();
+      expect(send.mock.calls[0][0]).toEqual([{ ...trip, notes: null, attendees: [] }]);
+    });
+
+    it('거른 일정만 있어도 빈 목록으로 보낸다(서버가 폰 출처로 굳는다)', async () => {
+      const { sync, send } = filterSetup([zoom]);
+      expect(await sync.run()).toBe('sent');
+      expect(send).toHaveBeenCalledWith([], expect.any(AbortSignal));
+    });
+
+    it('"이동 일정이에요" 뒤에는 같은 이름 일정을 보낸다(안전망을 건너뛰는 표시와 함께)', async () => {
+      const { sync, send, exceptions, filtered } = filterSetup([zoom, room]);
+      await sync.run();
+      expect(filtered.get()).toHaveLength(2);
+      await exceptions.add('  고객사  주간 회의 ');
+      expect(await sync.run()).toBe('sent');
+      const body = send.mock.calls[1][0] as DeviceEvent[];
+      expect(body).toEqual([{ ...zoom, travelConfirmed: true }]);
+      expect(filtered.get().map((e) => e.id)).toEqual(['room']);
+    });
+
+    it('예외 이름은 저장소에서 읽어 앱을 다시 켜도 유지된다', async () => {
+      const storage = memory();
+      await createTravelExceptions(storage).add('기획 리뷰');
+      const filtered = createFilteredEventsStore();
+      const send = jest.fn().mockResolvedValue({});
+      const sync = createEventSync({
+        source: { kind: 'device', list: async () => [], listEvents: async () => [room] },
+        fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
+        send,
+        exceptions: createTravelExceptions(storage),
+        filtered,
+        timeoutMs: 1000,
+        log: jest.fn(),
+      });
+      await sync.run();
+      expect(send.mock.calls[0][0]).toEqual([{ ...room, travelConfirmed: true }]);
+      expect(filtered.get()).toEqual([]);
+    });
+
+    it('목 출처는 거를 일정이 없고 로컬 목록을 건드리지 않는다', async () => {
+      const exceptions = createTravelExceptions(memory());
+      const filtered = createFilteredEventsStore();
+      filtered.set([{ id: 'x', title: 'x', start: 'a', end: 'b', reason: 'online' }]);
+      const sync = createEventSync({ source: { kind: 'mock', list: async () => [], listEvents: async () => [] }, exceptions, filtered, send: jest.fn(), log: jest.fn() });
+      expect(await sync.run()).toBe('mock');
+      expect(filtered.get()).toHaveLength(1);
     });
   });
 });
