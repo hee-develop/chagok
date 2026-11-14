@@ -25,7 +25,7 @@ describe('일정별 장소 보정', () => {
     const expected = { name: p.name, lat: p.lat, lng: p.lng };
     const response = await put(app, 'gwangju-friend', { placeId: p.id });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ id: 'gwangju-friend', place: expected, locationText: p.name, noTravel: false });
+    expect(await response.json()).toEqual({ id: 'gwangju-friend', place: expected, locationText: p.name, noTravel: false, noTravelReason: null });
     expect(row((await get(app)).schedules, 'gwangju-friend').place).toEqual(expected);
     expect(row((await get(app, 'today')).schedules, 'gwangju-friend').place).toEqual(expected);
     expect((await get(app)).schedules.filter((s) => s.id !== 'gwangju-friend')).toEqual(before.schedules.filter((s) => s.id !== 'gwangju-friend'));

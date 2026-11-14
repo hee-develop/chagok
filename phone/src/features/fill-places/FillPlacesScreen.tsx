@@ -109,7 +109,9 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
         ) : schedules.length === 0 ? (
           <Text style={[styles.description, font(400)]}>{t.noSchedules}</Text>
         ) : schedules.map((schedule) => (
-          <View key={schedule.id} style={styles.card} testID={`schedule-${schedule.id}`}>
+          // 온라인 회의·회의실이라 저절로 거른 일정은 흐리게 두고 이유를 붙인다. 장소를 넣으면 다시 차로 간다.
+          <View key={schedule.id} style={[styles.card, schedule.noTravel && schedule.noTravelReason ? styles.filtered : null]}
+            testID={`schedule-${schedule.id}`}>
             <View style={styles.cardTitle}>
               <Text style={[styles.date, font(400)]}>{dateFormat.format(new Date(schedule.start))}</Text>
               <Text style={[styles.scheduleTitle, font(600)]}>{schedule.title}</Text>
@@ -129,7 +131,9 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
             ) : null}
             <View style={styles.actions}>
               {schedule.place || schedule.noTravel ? <>
-                <Text style={[styles.place, font(500)]}>{schedule.noTravel ? `✓ ${t.noTravel}` : `✓ ${schedule.place!.name}`}</Text>
+                <Text style={[styles.place, font(500)]}>{schedule.noTravel
+                  ? `✓ ${t.noTravel}${schedule.noTravelReason ? ` · ${t.noTravelReason[schedule.noTravelReason]}` : ''}`
+                  : `✓ ${schedule.place!.name}`}</Text>
                 <Pressable accessibilityRole="button" accessibilityLabel={`${schedule.title} ${t.change}`}
                   accessibilityState={{ disabled: saving }} disabled={saving} style={styles.textButton}
                   onPress={() => { setSaveIssue(null); router.push({ pathname: '/setup/schedule-place-search', params: { scheduleId: schedule.id } }); }}>
@@ -179,6 +183,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, lineHeight: 36, color: colors.text },
   description: { fontSize: 16, lineHeight: 24, color: colors.textStrong },
   card: { padding: 16, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, gap: 12 },
+  filtered: { opacity: 0.55 },
   cardTitle: { gap: 2 },
   date: { fontSize: 14, color: colors.textMuted },
   scheduleTitle: { fontSize: 17, color: colors.text },

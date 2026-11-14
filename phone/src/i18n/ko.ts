@@ -69,6 +69,8 @@ export const ko = {
     noSchedules: '선택한 캘린더에 확인할 일정이 없어요.',
     missing: '장소 없음',
     noTravel: '이동 없음',
+    // 서버가 저절로 이동 없음으로 본 이유(온라인 회의·회의실). 1단계 문구 "걸러서 차에 보내지 않아요"의 실제 동작이다.
+    noTravelReason: { online: '온라인 회의', meetingRoom: '회의실' },
     rememberedHint: (title: string) => `지난번 '${title}' 일정`,
     rememberedConfirm: '여기 맞아요',
     add: '장소 넣기',

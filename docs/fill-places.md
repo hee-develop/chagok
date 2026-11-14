@@ -12,7 +12,8 @@
 실제 캘린더 연동에서는 반복 일정의 인스턴스 id(일정 id + 시작 시각 등)로 키를 바꿔야 합니다.
 
 - `GET /schedules/places`: 선택한 캘린더의 종일이 아닌 일정 전체를 시작순으로 반환합니다.
-  `{ anchor, schedules: [{ id, title, start, end, locationText, place, noTravel, suggestion }] }`.
+  `{ anchor, schedules: [{ id, title, start, end, locationText, place, noTravel, noTravelReason, suggestion }] }`.
+  `noTravelReason`은 서버가 온라인 회의·회의실이라 저절로 이동 없음으로 본 이유(`online`|`meetingRoom`)이고, 보정이 있거나 해당하지 않으면 `null`입니다(규칙은 `docs/calendar-sync.md`). 화면은 이유가 있는 이동 없음 카드를 흐리게 보이고 '이동 없음 · 온라인 회의'처럼 이유를 붙입니다.
   `place`는 `{ name, lat, lng } | null`입니다. 빈 개수는 `place === null && !noTravel`이며 후보가 있는 일정도 셉니다.
   `suggestion`은 `{ placeId, name } | null`로, 장소가 비고 이동 없음이 아닌 일정 중 제목이 기억한 장소와
   같은 일정에만 채웁니다. 기억한 장소는 `fixtures/places/remembered.json`(일정 제목 → 목 장소 id)입니다.
@@ -22,7 +23,7 @@
   장소 id는 기존 목 장소 검색·추천 목록에서 검증합니다. `null`은 저장한 보정을 지웁니다.
   장소 지정은 해당 일정만 바꾸고 이동 없음 표시를 해제합니다. 이동 없음은 장소를 비우고
   차량 대상에서 제외합니다. 둘 다 원본 픽스처는 수정하지 않습니다.
-  성공 응답은 `{ id, locationText, place, noTravel }`이며 같은 요청을 재전송해도 결과가 같습니다.
+  성공 응답은 `{ id, locationText, place, noTravel, noTravelReason }`이며 같은 요청을 재전송해도 결과가 같습니다.
 - 오류: 잘못된 본문·장소 id는 400, 없거나 선택 해제한 일정은 404,
   종일 일정은 409, 본문 64KiB 초과는 413입니다. 실패 시 저장 상태는 바뀌지 않습니다.
 - `GET /schedules/today`: 기존 응답 형식을 유지하고 같은 보정값을 반영합니다.
