@@ -12,6 +12,8 @@ import {
   MAX_NOTES_LENGTH,
   MAX_TITLE_LENGTH,
 } from '../limits.js';
+import type { SeatEnv, SeatGuard } from '../seatScope.js';
+import { DEFAULT_SEAT_ID } from '../seats.js';
 import { DAY_MS, formatSeoulDate, parseAt, parseSeoulDate, seoulDay, seoulDayStart } from '../time.js';
 
 /** 폰이 보낸 일정 한 건. 시각은 UTC 밀리초로 들고 있고, 응답에서 ISO8601로 바꾼다. */
@@ -30,7 +32,7 @@ export type PhoneEvent = {
 export type SavedEvents = { receivedAt: string; events: PhoneEvent[] };
 
 /**
- * 폰이 보낸 오늘·내일(서울) 일정을 메모리에 둔다. 목 사용자 한 명.
+ * 폰이 보낸 오늘·내일(서울) 일정을 메모리에 둔다. 운전자 자리마다 저장소 하나(자리가 없으면 기본 자리).
  * 한 번이라도 받았으면 일정이 0건이어도 '폰 일정이 출처'로 본다(실제 사용자에게 목 일정이 보이면 안 되므로).
  * 날짜가 지나 끝난 일정은 읽을 때마다 지운다. 받은 시각(receivedAt)은 다음 PUT까지 남는다.
  */
@@ -178,17 +180,23 @@ export type EventsRouteOptions = {
   isLoopback?: (c: Context) => boolean;
   /** true면 같은 기기가 아닌 곳의 /events 요청을 모두 403으로 막는다(HOST=0.0.0.0으로 열었을 때 일정 노출 방지). */
   loopbackOnly?: boolean;
+  /** 자리(기본 자리 제외)가 일정을 받았을 때 부른다(마지막으로 일정 받은 시각 갱신). */
+  onReceived?: (seatId: string) => void;
 };
 
 // RPC 타입 추론을 위해 체이닝을 유지한다.
-export const createEventsRoute = (store: EventsStore, { now = () => new Date(), isLoopback = isLoopbackRequest, loopbackOnly = false }: EventsRouteOptions = {}) =>
-  new Hono()
+export const createEventsRoute = (
+  guard: SeatGuard,
+  { now = () => new Date(), isLoopback = isLoopbackRequest, loopbackOnly = false, onReceived }: EventsRouteOptions = {},
+) =>
+  new Hono<SeatEnv>()
     .use('*', async (c, next) => {
       if (loopbackOnly && !isLoopback(c)) return c.json({ error: '이 서버의 /events는 같은 기기에서만 쓸 수 있습니다' }, 403);
       await next();
     })
     .put(
       '/',
+      guard.write,
       bodyLimit({
         maxSize: MAX_EVENTS_BODY_BYTES,
         onError: (c) => c.json({ error: `본문은 ${MAX_EVENTS_BODY_BYTES}바이트 이하여야 합니다` }, 413),
@@ -203,12 +211,15 @@ export const createEventsRoute = (store: EventsStore, { now = () => new Date(), 
         // 오늘·내일(서울)에 걸치지 않는 일정은 저장하지 않는다.
         const { start, end } = eventWindow(now());
         const inWindow = events.filter((e) => overlaps(e, start, end)).sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
-        const saved = store.replace(inWindow);
+        const { seatId, data } = c.var.seat;
+        const saved = data.events.replace(inWindow);
+        if (seatId !== DEFAULT_SEAT_ID) onReceived?.(seatId);
         return c.json({ receivedAt: saved.receivedAt, stored: inWindow.length, dropped: events.length - inWindow.length }, 200);
       },
     )
     .get(
       '/',
+      guard.read,
       validator('query', (value: { date?: string | string[] }, c) => {
         if (value.date === undefined) return { date: undefined as string | undefined };
         if (typeof value.date !== 'string' || parseSeoulDate(value.date) === null) {
@@ -219,15 +230,20 @@ export const createEventsRoute = (store: EventsStore, { now = () => new Date(), 
       (c) => {
         const query = c.req.valid('query').date;
         const day = query === undefined ? seoulDay(now().getTime()) : (parseSeoulDate(query) as number);
-        const saved = store.get();
+        const saved = c.var.seat.data.events.get();
         const from = seoulDayStart(day);
         const events = (saved?.events ?? []).filter((e) => overlaps(e, from, from + DAY_MS));
         return c.json({ date: formatSeoulDate(day), receivedAt: saved?.receivedAt ?? (null as string | null), events: events.map(toJson) }, 200);
       },
     )
     // 개발·데모 전용: 폰이 보낸 일정을 지워 /schedules/today·places를 픽스처 출처로 되돌린다. 같은 기기 요청만 받는다.
+    // 폰 토큰이 있으면 그 자리만, 없으면 기본 자리와 자리 지정 없이 읽는 자리(옛 차 앱이 보는 곳)를 비운다.
     .delete('/', (c) => {
       if (!isLoopback(c)) return c.json({ error: '같은 기기에서만 초기화할 수 있습니다' }, 403);
-      store.clear();
+      const write = guard.resolveWrite(c);
+      if (write instanceof Response) return write;
+      const read = guard.resolveRead(c);
+      if (read instanceof Response) return read;
+      for (const scope of new Map([[write.seatId, write], [read.seatId, read]]).values()) scope.data.events.clear();
       return c.json({ receivedAt: null as string | null }, 200);
     });

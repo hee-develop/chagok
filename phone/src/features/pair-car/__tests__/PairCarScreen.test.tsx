@@ -21,8 +21,8 @@ jest.mock('expo-camera', () => {
 });
 
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
-const PAIRED = { carId: 'car-1', pairedAt: '2026-11-06T00:20:00.000Z' };
-const makeApi = (claim: PairingApi['claim'] = jest.fn().mockResolvedValue(PAIRED)): PairingApi => ({ claim });
+const PAIRED = { carId: 'car-1', seatId: 'seat-1', name: 'Pixel', mode: 'new' as const, pairedAt: '2026-11-06T00:20:00.000Z' };
+const makeApi = (claim: PairingApi['claim'] = jest.fn().mockResolvedValue(PAIRED)): PairingApi => ({ claim, disconnect: jest.fn() });
 const renderScreen = (api: PairingApi) =>
   render(
     <SafeAreaProvider initialMetrics={insets}>
@@ -57,7 +57,7 @@ it('4단계 진행 표시와 제목을 보이고, 번호 6자리를 넣어야 �
 
 it('없거나 만료된 번호는 새 번호를 넣으라고 하고, 네트워크 실패는 같은 번호로 다시 시도한다', async () => {
   const claim = jest.fn()
-    .mockRejectedValueOnce(new HttpError(404, 'POST /pairing/claim 404'))
+    .mockRejectedValueOnce(new HttpError(404, 'POST /pair/claim 404'))
     .mockRejectedValueOnce(new Error('offline'))
     .mockResolvedValueOnce(PAIRED);
   await renderScreen(makeApi(claim));

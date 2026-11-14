@@ -3,6 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import type { MockCalendar } from '../fixture-types.js';
 import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
+import type { SeatEnv, SeatGuard } from '../seatScope.js';
 
 export const MAX_SELECTED_IDS = 50;
 
@@ -11,7 +12,7 @@ export type SelectionSource = 'mock' | 'device';
 
 export type SavedSelection = { selectedIds: string[]; savedAt: string; revision: number; source: SelectionSource };
 
-/** 목 사용자 한 명의 선택을 메모리에 둔다. */
+/** 운전자 자리 하나의 선택을 메모리에 둔다. */
 export type SelectionStore = {
   get(): SavedSelection | null;
   /** 저장된 revision보다 작은 요청은 저장하지 않고 현재 저장값을 돌려준다. */
@@ -70,19 +71,21 @@ function parseSelection(
 }
 
 // RPC 타입 추론을 위해 체이닝을 유지한다.
-export const createCalendarsRoute = (calendars: MockCalendar[], store: SelectionStore) => {
+export const createCalendarsRoute = (calendars: MockCalendar[], guard: SeatGuard) => {
   const knownIds = new Set(calendars.map((c) => c.id));
-  return new Hono()
-    .get('/selection', (c) =>
-      c.json({
+  return new Hono<SeatEnv>()
+    .get('/selection', guard.read, (c) => {
+      const store = c.var.seat.data.selection;
+      return c.json({
         selectedIds: store.get()?.selectedIds ?? (null as string[] | null),
         savedAt: store.get()?.savedAt ?? (null as string | null),
         revision: store.get()?.revision ?? (null as number | null),
         source: store.get()?.source ?? (null as SelectionSource | null),
-      }),
-    )
+      });
+    })
     .put(
       '/selection',
+      guard.write,
       bodyLimit({
         maxSize: MAX_BODY_BYTES,
         onError: (c) => c.json({ error: `본문은 ${MAX_BODY_BYTES}바이트 이하여야 합니다` }, 413),
@@ -94,7 +97,7 @@ export const createCalendarsRoute = (calendars: MockCalendar[], store: Selection
       }),
       (c) => {
         const { selectedIds, revision, source } = c.req.valid('json');
-        const saved = store.set(selectedIds, revision, source);
+        const saved = c.var.seat.data.selection.set(selectedIds, revision, source);
         return c.json({ selectedIds: saved.selectedIds, savedAt: saved.savedAt, revision: saved.revision, source: saved.source }, 200);
       },
     );
