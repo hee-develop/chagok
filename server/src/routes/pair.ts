@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
-import { bearerOf, connectionAddress } from '../seatScope.js';
+import { bearerOf, connectionAddress, deviceOf, DEVICE_HEADER } from '../seatScope.js';
 import type { Car, ClaimResult, CodeBinding, CodeMode, SeatStore } from '../seats.js';
 
 const CODE_PATTERN = /^\d{6}$/;
@@ -17,6 +17,11 @@ export type PairRouteOptions = {
    * 프록시 뒤에서는 모든 요청이 한 주소로 보이니 이 함수를 바꿔야 한다. 헤더(X-Forwarded-For)는 속일 수 있어 기본으로는 믿지 않는다.
    */
   clientAddress?: (c: Context) => string;
+  /**
+   * 같은 기기(루프백) 요청인가. 자리가 이미 있는 차의 옛 `/pairing/*` 경로(코드 발급·초기화)는 차 토큰이 있거나 같은 기기일 때만 받는다
+   * (에뮬레이터의 차 앱은 호스트 루프백으로 들어온다). 기본은 `/events`와 같은 판정이고, 프록시 뒤에서는 바꿔야 한다.
+   */
+  isLoopback?: (c: Context) => boolean;
 };
 
 const tooLarge = bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => c.json({ error: '본문이 너무 큽니다' }, 413) });
@@ -56,14 +61,17 @@ export const requireSeat = (seats: SeatStore, c: Context) => {
 
 type CarAccess = { car: Car; carToken: string | null } | Response;
 
+export type CarAccessContext = { clientAddress: (c: Context) => string; isLoopback: (c: Context) => boolean };
+
 /**
- * 코드를 요청하는 차를 정한다. carToken은 이번 응답으로 차에 처음 알려 주는 토큰이고, 이미 가진 차에는 null이다.
+ * 코드를 요청하는 차를 정한다. carToken은 이번 응답으로 차에 처음 알려 주는 토큰이고, 이미 가진 차에는 null이다. 토큰은 다시 내주지 않는다
+ * (토큰을 잃은 차는 새 carId로 다시 등록하고, 자리 없는 옛 차는 TTL로 정리된다).
  * - 토큰이 있으면 그 차(본문 carId가 다르면 403).
- * - 토큰이 없고 아는 차가 아니면 새로 만든다(본문 carId를 쓰고, 없으면 서버가 정한다).
- * - 토큰이 없는데 아는 차이면: 연결된 자리가 없는 차는 토큰을 새로 줘 이어 쓰게 하고(지킬 것이 없다), 자리가 있는 차는 401.
- *   legacy(옛 /pairing 경로)는 토큰 없이 carId만으로 쓰는 호환이라 자리가 있어도 막지 않고 토큰도 새로 주지 않는다.
+ * - 토큰이 없고 아는 차가 아니면 새로 만든다(본문 carId를 쓰고, 없으면 서버가 정한다. 한 요청 주소가 짧은 시간에 만들 수 있는 수는 제한).
+ * - 토큰이 없는데 아는 차이면: 새 API는 401. legacy(옛 `/pairing` 경로, 현재 차 앱)는 연결된 자리가 없는 차는 예전처럼 carId만으로,
+ *   자리가 있는 차는 같은 기기(루프백) 요청일 때만 받는다. legacy는 토큰도 새로 주지 않는다.
  */
-export function accessCar(seats: SeatStore, c: Context, bodyCarId: string | undefined, legacy: boolean): CarAccess {
+export function accessCar(seats: SeatStore, c: Context, bodyCarId: string | undefined, legacy: boolean, ctx: CarAccessContext): CarAccess {
   const auth = bearerOf(c);
   if (auth.kind === 'bad') return unauthorized(c, 'Authorization 형식이 올바르지 않습니다');
   if (auth.kind === 'token') {
@@ -74,13 +82,18 @@ export function accessCar(seats: SeatStore, c: Context, bodyCarId: string | unde
   }
   const existing = bodyCarId === undefined ? null : seats.car(bodyCarId);
   if (existing) {
-    if (legacy) return { car: existing, carToken: null };
-    const rotated = seats.rotateCarToken(existing.carId);
-    return rotated ? { car: rotated, carToken: rotated.carToken } : unauthorized(c, '이 차에는 이미 연결된 폰이 있어 차 토큰이 필요합니다');
+    if (!legacy) return unauthorized(c, '이미 등록된 차는 차 토큰이 필요합니다. 토큰을 잃었다면 새 carId로 다시 등록해 주세요');
+    if (seats.seatsOf(existing.carId).length > 0 && !ctx.isLoopback(c)) {
+      return unauthorized(c, '연결된 폰이 있는 차는 차 토큰이 필요합니다');
+    }
+    return { car: existing, carToken: null };
   }
-  const created = seats.createCar(bodyCarId);
-  if (!created) return c.json({ error: '서버가 받을 수 있는 차 수를 넘었습니다', reason: 'too-many-cars' as const }, 429);
-  return { car: created, carToken: created.carToken };
+  const created = seats.createCar(ctx.clientAddress(c), bodyCarId);
+  if (created.ok) return { car: created.car, carToken: created.car.carToken };
+  if (created.reason === 'exists') return unauthorized(c, '이미 등록된 차는 차 토큰이 필요합니다');
+  return created.reason === 'too-many-cars'
+    ? c.json({ error: '서버가 받을 수 있는 차 수를 넘었습니다', reason: 'too-many-cars' as const }, 429)
+    : c.json({ error: '차를 너무 자주 등록했습니다. 잠시 뒤 다시 해 주세요', reason: 'rate-limited' as const }, 429);
 }
 
 type CodeRequest = { carId?: string; mode: CodeMode; binding: CodeBinding };
@@ -131,14 +144,17 @@ export const claimFailure = (result: Exclude<ClaimResult, { ok: true }>) =>
       : ({ status: 404 as const, body: { error: invalidCodeMessage, reason: 'invalid' as const } });
 
 // RPC 타입 추론을 위해 체이닝을 유지한다. 폰은 claim·상태·끊기를, 차는 code·status를 부른다.
-export const createPairRoute = (seats: SeatStore, { now = () => new Date(), clientAddress = connectionAddress }: PairRouteOptions = {}) =>
+export const createPairRoute = (
+  seats: SeatStore,
+  { now = () => new Date(), clientAddress = connectionAddress, isLoopback = () => false }: PairRouteOptions = {},
+) =>
   new Hono()
     // 차: 코드 발급. 본문 { carId?, mode?, seatId?, btDeviceId?, pleosProfileId? }는 모두 생략할 수 있다(생략하면 새 자리).
     // Authorization 토큰이 이 차의 것이면 그 차로, 처음이면 차를 만들어 carToken을 한 번 알려 준다.
     .post('/code', tooLarge, async (c) => {
       const body = parseCodeRequest(await readBody(c));
       if (typeof body === 'string') return c.json({ error: body }, 400);
-      const access = accessCar(seats, c, body.carId, false);
+      const access = accessCar(seats, c, body.carId, false, { clientAddress, isLoopback });
       if (access instanceof Response) return access;
       const result = seats.issueCode(access.car.carId, body.mode, body.binding);
       if (!result.ok) {
@@ -167,22 +183,27 @@ export const createPairRoute = (seats: SeatStore, { now = () => new Date(), clie
       }),
       (c) => {
         const { code, name } = c.req.valid('json');
+        const device = deviceOf(c);
+        if (device.kind === 'bad') return c.json({ error: `${DEVICE_HEADER} 헤더가 올바르지 않습니다`, reason: 'bad-device' as const }, 400);
         const auth = bearerOf(c);
-        const result = seats.claim({ code, name, source: clientAddress(c), phoneToken: auth.kind === 'token' ? auth.token : null });
+        const result = seats.claim({
+          code, name, source: clientAddress(c), phoneToken: auth.kind === 'token' ? auth.token : null, deviceId: device.kind === 'id' ? device.id : null,
+        });
         if (!result.ok) {
           const failure = claimFailure(result);
           return c.json(failure.body, failure.status, failure.status === 429 ? { 'Retry-After': String(failure.body.retryAfterSeconds) } : {});
         }
-        const { seat, carId, phoneToken, mode } = result;
-        return c.json({ carId, seatId: seat.seatId, name: seat.name, phoneToken, pairedAt: seat.pairedAt, mode }, 200);
+        // 폰에는 차 id를 주지 않는다(차 id는 옛 경로에서 차를 가리키는 열쇠라 차만 안다). 폰은 자리 id·이름으로 연결을 본다.
+        const { seat, phoneToken, mode } = result;
+        return c.json({ seatId: seat.seatId, name: seat.name, phoneToken, pairedAt: seat.pairedAt, mode }, 200);
       })
-    // 폰: 지금 연결 상태. 토큰이 끊기거나 다른 폰으로 바뀌었으면 401.
+    // 폰: 지금 연결 상태(200 연결됨: 자리 이름·연결 시각 / 401 연결 안 됨). carId는 주지 않는다.
     .get('/', (c) => {
       const found = requireSeat(seats, c);
       if (found instanceof Response) return found;
-      const { seat, carId } = found;
+      const { seat } = found;
       return c.json({
-        paired: true as const, carId, seatId: seat.seatId, name: seat.name, pairedAt: seat.pairedAt, lastEventsAt: seat.lastEventsAt,
+        paired: true as const, seatId: seat.seatId, name: seat.name, pairedAt: seat.pairedAt, lastEventsAt: seat.lastEventsAt,
         presence: seat.presence, lastPresenceAt: seat.lastPresenceAt,
       }, 200);
     })

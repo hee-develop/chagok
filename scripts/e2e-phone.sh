@@ -207,7 +207,7 @@ start_metro() {
   local source="$1"
   port_in_use "$METRO_PORT" && { echo "포트 $METRO_PORT 사용 중. E2E_METRO_PORT로 바꿔 주세요." >&2; return 1; }
   (cd "$ROOT/phone" && CI=1 EXPO_NO_TELEMETRY=1 EXPO_PUBLIC_API_URL="http://127.0.0.1:$SERVER_PORT" \
-    EXPO_PUBLIC_CALENDAR_SOURCE="$source" \
+    EXPO_PUBLIC_CALENDAR_SOURCE="$source" EXPO_PUBLIC_DEVICE_ID=none \
     exec "$ROOT/phone/node_modules/.bin/expo" start --port "$METRO_PORT" --clear) \
     >"$LOG_DIR/metro.log" 2>&1 &
   METRO_PID=$!

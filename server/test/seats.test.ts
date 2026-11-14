@@ -49,7 +49,8 @@ const connect = async (app: App, car: Car, name: string, opts: { ip?: string; ph
   expect(issued.status).toBe(200);
   const claimed = await call(app, 'POST', '/pair/claim', { body: { code: issued.body.code, name }, ip: opts.ip, token: opts.phoneToken });
   expect(claimed.status).toBe(200);
-  return claimed.body as { carId: string; seatId: string; name: string; phoneToken: string; pairedAt: string; mode: 'new' | 'replace' };
+  expect(claimed.body).not.toHaveProperty('carId'); // 폰에는 차 id를 주지 않는다
+  return claimed.body as { seatId: string; name: string; phoneToken: string; pairedAt: string; mode: 'new' | 'replace' };
 };
 const replaceSeat = async (app: App, car: Car, seatId: string, name: string, binding: Record<string, unknown> = {}) => {
   const issued = await call(app, 'POST', '/pair/code', { token: car.carToken, body: { mode: 'replace', seatId, ...binding } });
@@ -91,19 +92,16 @@ describe('POST /pair/code · 차 등록', () => {
     expect(again.body).toMatchObject({ carId: first.body.carId, carToken: null });
   });
 
-  it('차 id를 정해 오면 그 id로 만들고, 토큰 없이 같은 id를 또 부르면 자리가 있는 차는 401이다', async () => {
+  it('차 id를 정해 오면 그 id로 만들고, 토큰 없이 같은 id를 또 부르면 자리가 없어도 401이며 토큰을 다시 내주지 않는다', async () => {
     const app = makeApp();
     const car = await registerCar(app, 'car-1');
     expect(car.carId).toBe('car-1');
-    // 연결된 자리가 없는 차는 토큰을 잃어도 새 토큰으로 이어 쓴다(지킬 것이 없다).
-    const lost = await call(app, 'POST', '/pair/code', { body: { carId: 'car-1' } });
-    expect(lost.status).toBe(200);
-    expect(lost.body.carToken).not.toBe(car.carToken);
-    expect((await call(app, 'GET', '/drivers', { token: car.carToken })).status).toBe(401);
-    const rotated = { carId: 'car-1', carToken: lost.body.carToken as string };
-    await connect(app, rotated, 'Pixel');
+    // 토큰을 잃은 차는 carId만으로 토큰을 바꿀 수 없다(새 carId로 다시 등록한다). 원래 토큰은 그대로 쓸 수 있다.
     expect((await call(app, 'POST', '/pair/code', { body: { carId: 'car-1' } })).status).toBe(401);
-    expect((await call(app, 'POST', '/pair/code', { token: rotated.carToken, body: { carId: 'other' } })).status).toBe(403);
+    expect((await call(app, 'GET', '/drivers', { token: car.carToken })).status).toBe(200);
+    await connect(app, car, 'Pixel');
+    expect((await call(app, 'POST', '/pair/code', { body: { carId: 'car-1' } })).status).toBe(401);
+    expect((await call(app, 'POST', '/pair/code', { token: car.carToken, body: { carId: 'other' } })).status).toBe(403);
   });
 
   it.each([
@@ -302,8 +300,8 @@ describe('자리별 데이터: 서로의 일정을 보지 못한다', () => {
     const a = await connect(app, car, 'A');
     await putEvents(app, undefined, [ev({ id: 'default-ev' })]); // 연결 뒤 토큰 없이 보낸 일정은 기본 자리
     expect((await driverEvents(app, car, a.seatId)).receivedAt).toBeNull();
-    // 일정을 받은 적 없는 자리는 목 일정으로 돌아가지 않고 빈 일정이 아니라 픽스처 출처다(기존 규칙).
-    expect(await todayIds(app, car, a.seatId)).toContain('gwangju-lunch');
+    // 일정을 받은 적 없는 실제 자리는 목 일정(픽스처)으로 떨어지지 않고 0건이다(픽스처는 기본 자리에서만).
+    expect(await todayIds(app, car, a.seatId)).toEqual([]);
   });
 });
 
@@ -333,7 +331,9 @@ describe('폰 바꾸기', () => {
     // 기억은 남고, 옛 폰의 일정·캘린더 선택은 비워진다.
     expect((await call(app, 'GET', '/places/favorites', { token: replaced.phoneToken })).body.home).toMatchObject({ id: place.id });
     expect((await call(app, 'GET', `/calendars/selection`, { token: replaced.phoneToken })).body.selectedIds).toBeNull();
-    expect((await driverEvents(app, car, old.seatId)).receivedAt).toBeNull();
+    // 옛 폰의 일정은 '받았고 0건' 상태가 된다(픽스처로 떨어지지 않는다).
+    expect(await driverEvents(app, car, old.seatId)).toMatchObject({ receivedAt: new Date(clockMs).toISOString(), events: [] });
+    expect(await todayIds(app, car, old.seatId)).toEqual([]);
     // 새 폰이 일정을 보내면 같은 자리로 쌓인다. 다른 자리는 그대로다.
     await putEvents(app, replaced.phoneToken, [ev({ id: 'new-ev' })]);
     expect((await driverEvents(app, car, old.seatId)).events.map((e) => e.id)).toEqual(['new-ev']);
@@ -432,7 +432,8 @@ describe('연결 끊기·차곡 초기화', () => {
 
 describe('코드: 5분 만료·상태·시도 제한', () => {
   it('5분이 지난 코드는 연결되지 않고, 새 코드를 받으면 이전 코드는 버려진다', async () => {
-    const app = makeApp();
+    const codes = [0.111111, 0.222222, 0.333333, 0.444444];
+    const app = makeApp({ seats: createSeatStore(() => new Date(clockMs), () => codes.shift() ?? 0.5) });
     const car = await registerCar(app);
     const first = await call(app, 'POST', '/pair/code', { token: car.carToken, body: {} });
     clockMs += CODE_TTL_MS - 1;
@@ -443,7 +444,8 @@ describe('코드: 5분 만료·상태·시도 제한', () => {
 
     const second = await call(app, 'POST', '/pair/code', { token: car.carToken, body: {} });
     const third = await call(app, 'POST', '/pair/code', { token: car.carToken, body: {} });
-    if (second.body.code !== third.body.code) expect((await call(app, 'POST', '/pair/claim', { body: { code: second.body.code } })).status).toBe(404);
+    expect(second.body.code).not.toBe(third.body.code);
+    expect((await call(app, 'POST', '/pair/claim', { body: { code: second.body.code } })).status).toBe(404);
     expect((await call(app, 'POST', '/pair/claim', { body: { code: third.body.code } })).status).toBe(200);
   });
 
@@ -514,9 +516,9 @@ describe('폰 연결 상태 GET /pair', () => {
     const app = makeApp();
     const car = await registerCar(app);
     const a = await connect(app, car, 'Pixel');
-    expect((await call(app, 'GET', '/pair', { token: a.phoneToken })).body).toMatchObject({
-      paired: true, carId: car.carId, seatId: a.seatId, name: 'Pixel', pairedAt: a.pairedAt, lastEventsAt: null,
-    });
+    const status = await call(app, 'GET', '/pair', { token: a.phoneToken });
+    expect(status.body).toMatchObject({ paired: true, seatId: a.seatId, name: 'Pixel', pairedAt: a.pairedAt, lastEventsAt: null });
+    expect(status.body).not.toHaveProperty('carId'); // 폰에는 차 id를 주지 않는다
     expect((await call(app, 'GET', '/pair')).status).toBe(401);
     expect((await call(app, 'GET', '/pair', { token: car.carToken })).status).toBe(401);
   });
@@ -532,8 +534,8 @@ describe('폰 연결 상태 GET /pair', () => {
   });
 });
 
-describe('토큰 없는 기존 경로(기본 자리·픽스처) 호환', () => {
-  it('자리가 없으면 예전처럼 픽스처를 쓰고, 토큰 없이 보낸 일정은 기본 자리에 쌓인다', async () => {
+describe('식별 없는 기존 경로(기본 자리·픽스처) 호환', () => {
+  it('식별이 없으면 읽기·쓰기 모두 기본 자리다: 픽스처를 쓰고, 보낸 일정은 기본 자리에 쌓인다', async () => {
     const app = makeApp({ isLoopback: () => true });
     expect(((await call(app, 'GET', '/schedules/today')).body.schedules as { id: string }[]).map((s) => s.id)).toContain('gwangju-lunch');
     expect((await call(app, 'GET', '/events')).body.receivedAt).toBeNull();
@@ -543,74 +545,35 @@ describe('토큰 없는 기존 경로(기본 자리·픽스처) 호환', () => {
     expect(((await call(app, 'GET', '/schedules/today')).body.schedules as { id: string }[]).map((s) => s.id)).toContain('gwangju-lunch');
   });
 
-  it('첫 연결 때 새 자리가 연결 전에 모은 데이터를 이어받고 기본 자리는 처음으로 돌아간다', async () => {
+  it('새 자리는 기본 자리의 데이터를 이어받지 않는다(이어받기 없음)', async () => {
     const app = makeApp();
-    // 첫 설정 1~3단계(연결 전): 토큰 없이 일정·선택·채비·자주 가는 곳을 넣는다.
+    // 식별 없이 보낸 연결 전 데이터(데모·옛 클라이언트)는 기본 자리에 남는다.
     await putEvents(app, undefined, [ev({ id: 'pre' })]);
     await call(app, 'PUT', '/schedules/pre/care', { body: { care: '충전기' } });
     await call(app, 'PUT', '/places/favorites/home', { body: { placeId: place.id } });
     const car = await registerCar(app);
-    const first = await connect(app, car, 'Pixel'); // 4단계: 차 연결
-    expect((await driverEvents(app, car, first.seatId)).events.map((e) => e.id)).toEqual(['pre']);
-    expect((await call(app, 'GET', `/schedules/today?driver=${first.seatId}`, { token: car.carToken })).body.schedules[0]).toMatchObject({ care: '충전기' });
-    expect((await call(app, 'GET', '/places/favorites', { token: first.phoneToken })).body.home).toMatchObject({ id: place.id });
-    // 기본 자리는 처음 상태(픽스처)다.
-    expect((await call(app, 'GET', '/events', {})).body.receivedAt).not.toBeNull(); // 자리 지정 없는 읽기는 아래 호환 규칙으로 첫 자리를 본다
-    // 두 번째 폰은 이어받을 것이 없다.
-    const second = await connect(app, car, 'Galaxy');
-    expect((await driverEvents(app, car, second.seatId)).receivedAt).toBeNull();
-    expect((await call(app, 'GET', '/places/favorites', { token: second.phoneToken })).body.home).toBeNull();
-  });
-
-  it('자리 지정 없이 읽는 옛 차 앱은 가장 최근에 연결한 자리를 보고, 끄면 기본 자리를 본다', async () => {
-    for (const legacy of [true, false]) {
-      const app = makeApp({ legacyDriverFallback: legacy });
-      const car = await registerCar(app);
-      const a = await connect(app, car, 'A');
-      clockMs += 1000;
-      const b = await connect(app, car, 'B');
-      await putEvents(app, a.phoneToken, [ev({ id: 'a-1' })]);
-      await putEvents(app, b.phoneToken, [ev({ id: 'b-1' })]);
-      const ids = ((await call(app, 'GET', '/schedules/today')).body.schedules as { id: string }[]).map((s) => s.id);
-      expect(legacy ? ids : ids.includes('gwangju-lunch')).toEqual(legacy ? ['b-1'] : true);
-      // 차 토큰만 있고 driver가 없는 읽기도 같은 기본 읽기다.
-      const withCar = ((await call(app, 'GET', '/schedules/today', { token: car.carToken })).body.schedules as { id: string }[]).map((s) => s.id);
-      expect(withCar).toEqual(ids);
-    }
-  });
-
-  it('DELETE /events(개발용 초기화)는 폰 토큰이 있으면 그 자리만, 없으면 기본 자리와 옛 차 앱이 보는 자리를 비운다', async () => {
-    const app = makeApp({ isLoopback: () => true });
-    const car = await registerCar(app);
-    const a = await connect(app, car, 'A');
-    clockMs += 1000;
-    const b = await connect(app, car, 'B');
-    await putEvents(app, a.phoneToken, [ev({ id: 'a' })]);
-    await putEvents(app, b.phoneToken, [ev({ id: 'b' })]);
-    await putEvents(app, undefined, [ev({ id: 'd' })]);
-    expect((await call(app, 'DELETE', '/events', { token: a.phoneToken })).status).toBe(200);
-    expect((await driverEvents(app, car, a.seatId)).receivedAt).toBeNull();
-    expect((await driverEvents(app, car, b.seatId)).events).toHaveLength(1);
-    expect((await call(app, 'DELETE', '/events')).status).toBe(200);
-    expect((await driverEvents(app, car, b.seatId)).receivedAt).toBeNull(); // 가장 최근 자리(B)
-    expect((await call(app, 'DELETE', '/events', { token: 'f'.repeat(64) })).status).toBe(401);
-    // 비운 뒤 기본 자리 일정도 없다(픽스처 복귀).
-    expect((await call(app, 'GET', '/events')).body.receivedAt).toBeNull();
+    const first = await connect(app, car, 'Pixel');
+    expect((await driverEvents(app, car, first.seatId)).receivedAt).toBeNull();
+    expect((await call(app, 'GET', '/places/favorites', { token: first.phoneToken })).body.home).toBeNull();
+    // 기본 자리는 그대로다.
+    expect((await call(app, 'GET', '/events')).body.events.map((e: { id: string }) => e.id)).toEqual([]); // 차가 하나뿐이라 옛 읽기는 그 자리를 본다
+    expect((await call(app, 'GET', '/places/favorites', { token: car.carToken })).body.home).toBeNull();
   });
 
   it('옛 /pairing 경로: 차 id만으로 코드·상태·초기화가 되고, 같은 저장소의 자리·토큰이 함께 생긴다', async () => {
-    const app = makeApp();
+    const app = makeApp({ isLoopback: () => true });
     const issue = async () => (await call(app, 'POST', '/pairing/codes', { body: { carId: 'car-1' } })).body as { code: string; qr: string; carToken: string | null };
     const first = await issue();
     expect(first.carToken).toMatch(/^[0-9a-f]{64}$/); // 처음 만든 응답에만 차 토큰이 실린다
     expect((await issue()).carToken).toBeNull();
     const claimed = await call(app, 'POST', '/pairing/claim', { body: { code: (await issue()).code, name: '옛 앱 폰' } });
-    expect(claimed.body).toMatchObject({ carId: 'car-1', seatId: expect.any(String), name: '옛 앱 폰' });
+    expect(claimed.body).toMatchObject({ seatId: expect.any(String), name: '옛 앱 폰', pairedAt: expect.any(String) });
+    expect(claimed.body).not.toHaveProperty('carId');
     // 새 API로도 같은 자리가 보인다.
     const view = await drivers(app, { carId: 'car-1', carToken: first.carToken as string });
     expect(view.seats.map((s) => s.name)).toEqual(['옛 앱 폰']);
     expect((await call(app, 'GET', '/pairing/cars/car-1')).body).toMatchObject({ paired: true, codeActive: false });
-    // 자리가 있어도 옛 경로는 carId만으로 새 코드를 받는다(호환).
+    // 자리가 있어도 같은 기기(루프백)의 옛 경로는 carId만으로 새 코드를 받는다(에뮬레이터 차 앱 호환).
     expect((await call(app, 'POST', '/pairing/codes', { body: { carId: 'car-1' } })).status).toBe(200);
     expect((await call(app, 'GET', '/pairing/cars/car-1')).body).toMatchObject({ paired: true, codeActive: true });
     // 데모 초기화는 모든 자리를 지운다.
@@ -625,7 +588,9 @@ describe('SeatStore 단위', () => {
     const store = createSeatStore(() => new Date(clockMs), () => 0.5);
     const events: string[] = [];
     store.subscribe((e) => events.push(`${e.type}`));
-    const car = store.createCar('c') as { carId: string };
+    const created = store.createCar('addr', 'c');
+    if (!created.ok) throw new Error('차를 만들지 못했습니다');
+    const car = created.car;
     const issued = store.issueCode(car.carId, { kind: 'new' });
     expect(issued.ok).toBe(true);
     const claim = store.claim({ code: '500000', source: 's', name: 'A' });

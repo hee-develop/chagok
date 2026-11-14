@@ -14,6 +14,8 @@ try {
     places: loadPlacesCatalog(),
     familyMembers: loadFamilyMembers(),
     eventsLoopbackOnly: process.env.EVENTS_LOOPBACK_ONLY === '1',
+    // 목 캘린더로 도는 폰 E2E·PT 시연에서만 켠다. 실제 사용자 서버에서는 일정을 받은 적 없는 자리가 0건이다.
+    fixtureSeats: process.env.FIXTURE_SEATS === '1',
   });
 } catch (e) {
   console.error(`차곡 서버를 시작할 수 없습니다: ${(e as Error).message}`);

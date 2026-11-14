@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import type { DayFixture, FamilyMember, MockCalendar, PlacesCatalog } from './fixture-types.js';
 import { createCalendarsRoute, type SelectionStore } from './routes/calendars.js';
-import { createEventsRoute, type EventsStore } from './routes/events.js';
+import { createEventsRoute, isLoopbackRequest, type EventsStore } from './routes/events.js';
 import { createFamilyRoute, type FamilyStore } from './routes/family.js';
 import { createCarRoute, createDriversRoute, createPairRoute, createPresenceRoute } from './routes/pair.js';
 import { createPairingRoute } from './routes/pairing.js';
@@ -26,7 +26,10 @@ export type AppOptions = {
   now?: () => Date;
   /** /events를 같은 기기(127.0.0.1)에서만 받는다. HOST=0.0.0.0으로 열 때 켠다(환경 변수 EVENTS_LOOPBACK_ONLY=1). */
   eventsLoopbackOnly?: boolean;
-  /** 같은 기기 요청인지 판정하는 함수. 테스트에서만 바꾼다. */
+  /**
+   * 같은 기기 요청인지 판정하는 함수(기본은 node 서버의 연결 주소가 루프백인지). `/events`의 개발용 초기화와 옛 `/pairing/*`의
+   * 코드 발급·초기화(자리가 있는 차)가 쓴다. 프록시 뒤에서는 모든 요청이 루프백으로 보이니 배포할 때 바꿔야 한다. 테스트에서도 바꾼다.
+   */
   isLoopback?: (c: Context) => boolean;
   /** 미리 묶어 둔 가족(fixtures/family/members.json). 다른 목 데이터처럼 서버 시작 코드가 읽어 넘긴다. */
   familyMembers: FamilyMember[];
@@ -37,10 +40,18 @@ export type AppOptions = {
   /** 코드 시도 횟수를 세는 요청 주소. 기본은 연결 주소이고, 프록시 뒤에서는 바꿔야 한다. 테스트에서도 바꾼다. */
   clientAddress?: (c: Context) => string;
   /**
-   * 자리 지정(폰 토큰·driver) 없이 읽는 요청(자리를 모르는 옛 차 앱)이 가장 최근에 연결한 자리를 본다. 연결된 자리가 없으면 기본 자리다.
+   * 자리를 모르는 옛 차 앱 호환 읽기: 식별(토큰·기기 id·driver)이 없는 읽기는 **자리가 있는 차가 정확히 하나일 때만** 그 차의
+   * '지난번 고른 자리(없으면 가장 최근에 연결한 자리)'를 보고 그 밖에는 기본 자리다. 차 토큰만 있고 driver가 없는 읽기는 그 차 안에서만 같은 규칙.
    * 기본값은 켬이고, 차 앱이 driver를 보내게 되면 끈다.
    */
   legacyDriverFallback?: boolean;
+  /**
+   * 일정을 받은 적 없는 실제 자리(연결된 자리·연결 전 버킷)도 픽스처(목 일정)로 떨어뜨린다. 기본은 꺼짐(실제 자리는 0건).
+   * 목 캘린더로 도는 폰 E2E·PT 시연 서버(`FIXTURE_SEATS=1`)에서만 켠다.
+   */
+  fixtureSeats?: boolean;
+  /** 연결 전 버킷 수·TTL, 서버 전체 일정 저장 용량 상한(바이트). 기본값은 seatData.ts. 테스트에서 바꾼다. */
+  capacity?: { maxBuckets?: number; bucketTtlMs?: number; maxTotalEventBytes?: number };
 };
 
 export const createApp = ({
@@ -52,29 +63,33 @@ export const createApp = ({
   now = () => new Date(),
   events,
   eventsLoopbackOnly = false,
-  isLoopback,
+  isLoopback = isLoopbackRequest,
   familyMembers,
   familyStore,
   seats = createSeatStore(now),
   clientAddress = connectionAddress,
   legacyDriverFallback = true,
+  fixtureSeats = false,
+  capacity,
 }: AppOptions) => {
-  // 일정·선택·자주 가는 곳·가족 요청·보정·채비는 운전자 자리마다 따로 쌓인다. 토큰 없는 요청은 기본 자리를 쓴다(픽스처·데모 경로).
+  // 일정·선택·자주 가는 곳·가족 요청·보정·채비는 운전자 자리마다 따로 쌓인다. 토큰 없이 기기 id만 있는 폰은 그 기기의 연결 전 버킷을,
+  // 식별이 전혀 없는 요청은 기본 자리를 쓴다(픽스처·데모·차량 E2E 경로).
   const registry = createSeatDataRegistry({
     now,
     fixtureIds: new Set(fixture.schedules.map((s) => s.id)),
     defaults: { events, selection: store, favorites, family: familyStore },
+    ...capacity,
   });
   seats.subscribe((event) => registry.apply(event));
-  const guard = createSeatGuard(seats, registry, { legacyDriverFallback });
+  const guard = createSeatGuard(seats, registry, { legacyDriverFallback, fixtureSeats });
   return new Hono()
     .get('/health', (c) => c.json({ ok: true as const }))
     .route('/calendars', createCalendarsRoute(calendars, guard))
     .route('/places', createPlacesRoute(places, guard))
     .route('/events', createEventsRoute(guard, { now, isLoopback, loopbackOnly: eventsLoopbackOnly, onReceived: (seatId) => seats.markEvents(seatId) }))
     .route('/family', createFamilyRoute(familyMembers, guard))
-    .route('/pairing', createPairingRoute(seats, { clientAddress }))
-    .route('/pair', createPairRoute(seats, { now, clientAddress }))
+    .route('/pairing', createPairingRoute(seats, { clientAddress, isLoopback }))
+    .route('/pair', createPairRoute(seats, { now, clientAddress, isLoopback }))
     .route('/drivers', createDriversRoute(seats))
     .route('/presence', createPresenceRoute(seats))
     .route('/car', createCarRoute(seats))

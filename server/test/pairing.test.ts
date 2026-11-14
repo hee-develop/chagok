@@ -6,7 +6,7 @@ let clockMs = Date.parse('2026-11-14T09:00:00+09:00');
 const makeApp = (random?: () => number) => {
   clockMs = Date.parse('2026-11-14T09:00:00+09:00');
   const now = () => new Date(clockMs);
-  return newApp({ now, seats: createSeatStore(now, random) });
+  return newApp({ now, seats: createSeatStore(now, random), isLoopback: () => true });
 };
 type App = ReturnType<typeof makeApp>;
 const post = (app: App, path: string, body: unknown) =>
@@ -27,9 +27,9 @@ describe('차–폰 연결(옛 /pairing 경로, 차 id만으로)', () => {
     clockMs += 60_000;
     const claimed = await post(app, '/pairing/claim', { code: issued.code });
     expect(claimed.status).toBe(200);
-    // 옛 필드({ carId, pairedAt })는 그대로이고 자리·토큰 필드가 더해졌다.
+    // 옛 필드 pairedAt은 그대로이고 자리·토큰 필드가 더해졌다. 폰에는 차 id(carId)를 주지 않는다.
     expect(await claimed.json()).toEqual({
-      carId: 'car-1', pairedAt: '2026-11-14T00:01:00.000Z', seatId: expect.any(String), name: '내 폰', phoneToken: expect.stringMatching(/^[0-9a-f]{64}$/),
+      pairedAt: '2026-11-14T00:01:00.000Z', seatId: expect.any(String), name: '내 폰', phoneToken: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     expect(await status(app)).toEqual({ paired: true, pairedAt: '2026-11-14T00:01:00.000Z', codeActive: false });
     // 쓴 코드는 다시 쓸 수 없다.
@@ -49,15 +49,17 @@ describe('차–폰 연결(옛 /pairing 경로, 차 id만으로)', () => {
   });
 
   it('만료된 코드와 새 코드를 받아 버려진 코드는 404이고 연결되지 않는다', async () => {
-    const app = makeApp();
+    const codes = [0.111111, 0.222222, 0.333333];
+    const app = makeApp(() => codes.shift() ?? 0.5);
     const first = await issue(app);
     clockMs += CODE_TTL_MS;
     expect((await status(app)).codeActive).toBe(false);
     expect((await post(app, '/pairing/claim', { code: first.code })).status).toBe(404);
     const second = await issue(app);
     const third = await issue(app);
-    expect((await post(app, '/pairing/claim', { code: second.code })).status).toBe(second.code === third.code ? 200 : 404);
-    expect((await post(app, '/pairing/claim', { code: third.code })).status).toBe(second.code === third.code ? 404 : 200);
+    expect(second.code).not.toBe(third.code);
+    expect((await post(app, '/pairing/claim', { code: second.code })).status).toBe(404);
+    expect((await post(app, '/pairing/claim', { code: third.code })).status).toBe(200);
   });
 
   it('살아 있는 다른 차의 코드와 겹치지 않게 낸다', async () => {

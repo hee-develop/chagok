@@ -2,9 +2,10 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
-import { bearerOf, connectionAddress } from '../seatScope.js';
+import { bearerOf, connectionAddress, deviceOf, DEVICE_HEADER } from '../seatScope.js';
 import type { SeatStore } from '../seats.js';
 import { accessCar, claimFailure, qrContent, type PairRouteOptions } from './pair.js';
+import { isLoopbackRequest } from './events.js';
 
 const CODE_PATTERN = /^\d{6}$/;
 const MAX_BODY_NAME_LENGTH = 100;
@@ -21,7 +22,7 @@ const validCarId = (v: unknown): v is string => typeof v === 'string' && v.trim(
  * - 응답에는 새 필드(carToken·seatId·name·phoneToken)가 더해졌다. 옛 필드는 그대로다.
  */
 // RPC 타입 추론을 위해 체이닝을 유지한다. 검증기는 받은 본문 모양 그대로를 돌려준다(폰 RPC 타입이 이 모양을 쓴다).
-export const createPairingRoute = (seats: SeatStore, { clientAddress = connectionAddress }: PairRouteOptions = {}) => {
+export const createPairingRoute = (seats: SeatStore, { clientAddress = connectionAddress, isLoopback = isLoopbackRequest }: PairRouteOptions = {}) => {
   const status = (carId: string) => {
     const list = seats.seatsOf(carId);
     const latest = list.map((s) => s.pairedAt).sort().at(-1) ?? null;
@@ -38,7 +39,7 @@ export const createPairingRoute = (seats: SeatStore, { clientAddress = connectio
         return { carId: v.carId };
       }),
       (c) => {
-        const access = accessCar(seats, c, c.req.valid('json').carId, true);
+        const access = accessCar(seats, c, c.req.valid('json').carId, true, { clientAddress, isLoopback });
         if (access instanceof Response) return access;
         const result = seats.issueCode(access.car.carId, { kind: 'new' });
         if (!result.ok) return c.json({ error: '이 차에 연결할 수 있는 폰 수를 넘었습니다', reason: 'seat-limit' as const }, 409);
@@ -65,19 +66,30 @@ export const createPairingRoute = (seats: SeatStore, { clientAddress = connectio
       }),
       (c) => {
         const { code, name } = c.req.valid('json');
+        const device = deviceOf(c);
+        if (device.kind === 'bad') return c.json({ error: `${DEVICE_HEADER} 헤더가 올바르지 않습니다`, reason: 'bad-device' as const }, 400);
         const auth = bearerOf(c);
-        const result = seats.claim({ code, name, source: clientAddress(c), phoneToken: auth.kind === 'token' ? auth.token : null });
+        const result = seats.claim({
+          code, name, source: clientAddress(c), phoneToken: auth.kind === 'token' ? auth.token : null, deviceId: device.kind === 'id' ? device.id : null,
+        });
         if (!result.ok) {
           const failure = claimFailure(result);
           return c.json(failure.body, failure.status, failure.status === 429 ? { 'Retry-After': String(failure.body.retryAfterSeconds) } : {});
         }
-        const { seat, carId, phoneToken } = result;
-        return c.json({ carId, pairedAt: seat.pairedAt, seatId: seat.seatId, name: seat.name, phoneToken }, 200);
+        const { seat, phoneToken } = result;
+        return c.json({ pairedAt: seat.pairedAt, seatId: seat.seatId, name: seat.name, phoneToken }, 200);
       })
     // 데모 초기화: 그 차의 연결(모든 자리)과 서버 데이터를 지운다. 새 API의 DELETE /car와 같다.
+    // 자리가 있는 차는 그 차의 토큰이 있거나 같은 기기(루프백) 요청일 때만 지운다(carId만 아는 다른 기기가 남의 연결을 끊지 못하게).
     .delete('/cars/:carId', (c) => {
       const carId = c.req.param('carId');
       if (!validCarId(carId)) return c.json({ error: 'carId가 올바르지 않습니다' }, 400);
+      if (seats.seatsOf(carId).length > 0) {
+        const auth = bearerOf(c);
+        if (auth.kind === 'bad') return c.json({ error: 'Authorization 형식이 올바르지 않습니다', reason: 'unauthorized' as const }, 401);
+        const own = auth.kind === 'token' && seats.carByToken(auth.token)?.carId === carId;
+        if (!own && !isLoopback(c)) return c.json({ error: '연결된 폰이 있는 차는 차 토큰이 필요합니다', reason: 'unauthorized' as const }, 401);
+      }
       seats.resetCar(carId);
       return c.json(status(carId), 200);
     });

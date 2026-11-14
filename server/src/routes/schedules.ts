@@ -7,7 +7,7 @@ import { MINUTE_MS, parseAt, seoulDay } from '../time.js';
 import { effectiveSelectedIds } from './calendars.js';
 import { detectNoTravel, type NoTravelReason } from '../noTravel.js';
 import type { SeatData } from '../seatData.js';
-import type { SeatEnv, SeatGuard } from '../seatScope.js';
+import type { SeatEnv, SeatGuard, SeatScope } from '../seatScope.js';
 
 type PlaceChange = { placeId: string | null } | { noTravel: true };
 
@@ -79,9 +79,11 @@ export const createSchedulesRoute = (
     return namedPlaces.find((n) => n.name.length >= 2 && (text.includes(n.name) || n.name.includes(text)))?.p;
   };
   // 일정별 보정·채비는 자리 데이터(SeatData)에 있다. 폰 일정이 바뀌어 사라진 일정의 것은 거기서 버린다.
-  const rows = (d: SeatData, anchor: Date): Row[] => {
-    const phone = d.events.get();
+  const rows = (sc: SeatScope, anchor: Date): Row[] => {
+    const phone = sc.data.events.get();
     if (phone === null) {
+      // 일정을 받은 적 없는 자리: 기본 자리(픽스처·데모 경로)만 픽스처이고, 실제 자리(연결된 자리·연결 전 버킷)는 0건이다.
+      if (!sc.fixture) return [];
       return fixture.schedules.map((s) => ({
         id: s.id,
         calendarId: s.calendarId,
@@ -119,8 +121,9 @@ export const createSchedulesRoute = (
    * 고른 캘린더로 거른다. 선택의 출처(source)와 일정의 출처가 같을 때만 적용한다:
    * 폰 일정은 기기 캘린더 id로 저장한 선택(device)만, 픽스처는 목 캘린더 id 선택(mock)만 쓴다. 출처가 다르면 거르지 않거나(폰) 기본 선택(픽스처).
    */
-  const selectedSchedules = (d: SeatData, anchor: Date) => {
-    const all = rows(d, anchor);
+  const selectedSchedules = (sc: SeatScope, anchor: Date) => {
+    const d = sc.data;
+    const all = rows(sc, anchor);
     if (d.events.get() !== null) {
       const saved = d.selection.get();
       if (saved === null || saved.source !== 'device') return all;
@@ -158,16 +161,17 @@ export const createSchedulesRoute = (
   });
   /** 픽스처가 고정 기준 시각을 두면(PT 시연) 픽스처 일정은 늘 그 시각 기준이다. 폰 일정은 실제 시각이라 상관없다. */
   const fixedAnchor = fixture.anchor === undefined ? null : parseAt(fixture.anchor);
-  const anchorOf = (d: SeatData, at: string | undefined) =>
-    fixedAnchor !== null && d.events.get() === null ? fixedAnchor : at === undefined ? now() : parseAt(at)!;
+  const anchorOf = (sc: SeatScope, at: string | undefined) =>
+    fixedAnchor !== null && sc.fixture && sc.data.events.get() === null ? fixedAnchor : at === undefined ? now() : parseAt(at)!;
   const times = (s: Row) => ({ start: new Date(s.start).toISOString(), end: new Date(s.end).toISOString() });
   return new Hono<SeatEnv>()
     .get('/today', guard.read, anchorValidator, (c) => {
-      const d = c.var.seat.data;
-      const anchor = anchorOf(d, c.req.valid('query').at);
+      const sc = c.var.seat;
+      const d = sc.data;
+      const anchor = anchorOf(sc, c.req.valid('query').at);
       return c.json({
         anchor: anchor.toISOString(),
-        schedules: selectedSchedules(d, anchor).filter((s) => !view(d, s).noTravel && isToday(s, anchor)).map((s) => {
+        schedules: selectedSchedules(sc, anchor).filter((s) => !view(d, s).noTravel && isToday(s, anchor)).map((s) => {
           const { noTravel: _, noTravelReason: _reason, ...place } = view(d, s);
           return {
             ...place, title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, care: d.cares.get(s.id) ?? null, attendees: s.attendees,
@@ -177,11 +181,12 @@ export const createSchedulesRoute = (
       }, 200);
     })
     .get('/places', guard.read, anchorValidator, (c) => {
-      const d = c.var.seat.data;
-      const anchor = anchorOf(d, c.req.valid('query').at);
+      const sc = c.var.seat;
+      const d = sc.data;
+      const anchor = anchorOf(sc, c.req.valid('query').at);
       return c.json({
         anchor: anchor.toISOString(),
-        schedules: selectedSchedules(d, anchor).filter((s) => !s.allDay).sort((a, b) => a.start - b.start)
+        schedules: selectedSchedules(sc, anchor).filter((s) => !s.allDay).sort((a, b) => a.start - b.start)
           .map((s) => {
             const v = view(d, s);
             const known = v.place || v.noTravel ? undefined : s.candidate;
@@ -205,8 +210,9 @@ export const createSchedulesRoute = (
         }
         return c.json({ error: '알려진 placeId 또는 noTravel: true 하나가 필요합니다' }, 400);
       }), (c) => {
-        const d = c.var.seat.data;
-        const schedule = selectedSchedules(d, anchorOf(d, undefined)).find((s) => s.id === c.req.param('id'));
+        const sc = c.var.seat;
+        const d = sc.data;
+        const schedule = selectedSchedules(sc, anchorOf(sc, undefined)).find((s) => s.id === c.req.param('id'));
         if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
         if (schedule.allDay) return c.json({ error: '종일 일정은 이동 대상이 아닙니다' }, 409);
         const change = c.req.valid('json');
@@ -227,8 +233,9 @@ export const createSchedulesRoute = (
         if (care.length > MAX_CARE_LENGTH) return c.json({ error: `care는 ${MAX_CARE_LENGTH}자 이하여야 합니다` }, 400);
         return { care: care === '' ? null : care };
       }), (c) => {
-        const d = c.var.seat.data;
-        const schedule = selectedSchedules(d, anchorOf(d, undefined)).find((s) => s.id === c.req.param('id'));
+        const sc = c.var.seat;
+        const d = sc.data;
+        const schedule = selectedSchedules(sc, anchorOf(sc, undefined)).find((s) => s.id === c.req.param('id'));
         if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
         const { care } = c.req.valid('json');
         if (care === null) d.cares.delete(schedule.id);
@@ -246,8 +253,9 @@ export const createSchedulesRoute = (
         // RPC 타입 추론이 이 반환값을 본문 모양으로 쓰므로 받은 모양({ memberId }) 그대로 돌려준다.
         return { memberId: value.memberId };
       }), (c) => {
-        const d = c.var.seat.data;
-        const schedule = selectedSchedules(d, anchorOf(d, undefined)).find((s) => s.id === c.req.param('id'));
+        const sc = c.var.seat;
+        const d = sc.data;
+        const schedule = selectedSchedules(sc, anchorOf(sc, undefined)).find((s) => s.id === c.req.param('id'));
         if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
         if (schedule.allDay) return c.json({ error: '종일 일정은 보낼 수 없습니다' }, 409);
         const member = family.members.find((m) => m.id === c.req.valid('json').memberId)!;
