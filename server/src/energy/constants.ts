@@ -83,13 +83,34 @@ export const EV_MAX_PAGE_BYTES = 24 * 1024 * 1024;
 export const EV_CACHE_TTL_MS = 5 * 60_000;
 /** 받기에 실패했을 때 오래된 데이터로 계속 답하는 한도. 이보다 오래된 시도 데이터는 버린다(상태가 너무 낡는다). */
 export const EV_MAX_STALE_MS = 30 * 60_000;
-/** 받기에 실패한 시도를 다시 시도하기 전 대기. */
+/**
+ * 받기에 실패한 시도를 다시 시도하기 전 대기. 연속으로 실패하면 두 배씩 늘려(30초, 60초, 120초…) 상한까지 간다. 성공하면 처음으로 돌아간다.
+ * 키가 막혔거나 한도를 넘은 채로 30초마다 다시 부르는 것을 피한다.
+ */
 export const EV_FAILURE_BACKOFF_MS = 30_000;
+export const EV_FAILURE_BACKOFF_MAX_MS = 10 * 60_000;
 /** 시도 데이터를 한꺼번에 메모리에 두는 충전기 수 상한(가장 오래 안 쓴 시도부터 버린다). */
 export const EV_MAX_CACHED_CHARGERS = 300_000;
-/** 시도 하나를 받는 전체 제한 시간(ms)과 서버 전체에서 동시에 받는 시도 수. */
+/**
+ * 시도 데이터를 한꺼번에 메모리에 두는 추정 바이트 상한. 충전기 객체 하나를 `EV_CHARGER_OBJECT_BYTES`로, 글자는 처음 둔 것만 글자당 2바이트로 센
+ * 윗값이다(실측은 docs/energy.md). 충전기 수 상한과 둘 중 먼저 닿는 쪽으로 가장 오래 안 쓴 시도부터 버린다. 시도 하나가 혼자 이 값을 넘으면 그것만 둔다.
+ */
+export const EV_MAX_CACHED_BYTES = 128 * 1024 * 1024;
+/**
+ * 충전기 객체 하나(필드 11개)의 추정 바이트. 글자는 따로 센다. 필드 11개 객체는 실측 약 153바이트(위경도 숫자 상자 포함)이고
+ * 배열 칸과 여유를 더해 200으로 둔다(공식 예시 모양 15만 대를 받아 재 보니 충전기당 약 270바이트, 글자 포함).
+ */
+export const EV_CHARGER_OBJECT_BYTES = 200;
+/** 시도 하나를 받는 전체 제한 시간(ms), 서버 전체에서 동시에 받는 시도 수, 서버 전체에서 응답 원문을 동시에 들고 있는 쪽 수. */
 export const EV_LOAD_TIMEOUT_MS = 120_000;
-export const EV_MAX_CONCURRENT_LOADS = 2;
+export const EV_MAX_CONCURRENT_LOADS = 3;
+export const EV_MAX_CONCURRENT_PAGES = 2;
+/**
+ * 받을 시도를 고르는 여유 거리(m, 가안). 가장 가까운 앵커까지의 거리 + 이 값 안에 앵커가 있는 시도는 모두 받는다(최대 `EV_REGIONS_MAX_PER_QUERY`곳).
+ * 앵커는 시도 중심 도시 몇 곳뿐이라 시도 가장자리(예: 충남 금산, 경북 경산)는 이웃 시도 앵커가 더 가깝다. 그 차이를 덮는 값이다.
+ */
+export const EV_REGION_MARGIN_METERS = 30_000;
+export const EV_REGIONS_MAX_PER_QUERY = 3;
 
 /** XML 한 문서의 글자 수 상한(읽기 도구 방어선). */
 export const MAX_XML_CHARS = 32 * 1024 * 1024;

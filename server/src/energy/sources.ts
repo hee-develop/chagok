@@ -1,5 +1,6 @@
 import { createEvChargerSource } from './evCharger.js';
-import { createFixtureChargerSource, createFixtureFuelSource, createFixtureRestStopSource, loadEnergyFixtures } from './fixtureSources.js';
+import { loadEnergyFixtures } from './fixtureFiles.js';
+import { createFixtureChargerSource, createFixtureFuelSource, createFixtureRestStopSource } from './fixtureSources.js';
 import { createOpinetSource } from './opinet.js';
 import type { EnergySources } from './types.js';
 

@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import type { DayFixture, FamilyMember, MockCalendar, PlacesCatalog } from './fixture-types.js';
 import { createCalendarsRoute, type SelectionStore } from './routes/calendars.js';
-import { createFixtureEnergySources } from './energy/fixtureSources.js';
+import { createEmptyEnergySources } from './energy/fixtureSources.js';
 import type { EnergySources } from './energy/types.js';
 import { createEnergyRoute } from './routes/energy.js';
 import { createEventsRoute, isLoopbackRequest, type EventsStore } from './routes/events.js';
@@ -55,7 +55,10 @@ export type AppOptions = {
   fixtureSeats?: boolean;
   /** 연결 전 버킷 수·TTL·생성 속도 제한과 일정 저장 용량 예산(연결된 자리/버킷 따로, 버킷 하나의 상한). 기본값은 seatData.ts. 테스트에서 바꾼다. */
   capacity?: Omit<NonNullable<Parameters<typeof createSeatDataRegistry>[0]>, 'now' | 'fixtureIds' | 'defaults'>;
-  /** 에너지 후보 어댑터(충전소·주유소·휴게소). 없으면 `fixtures/energy/` 목이다. 환경 변수로 실제 API를 고르는 것은 서버 시작 코드(`index.ts`)만 한다. */
+  /**
+   * 에너지 후보 어댑터(충전소·주유소·휴게소). 없으면 후보가 늘 없는 목이다(`source: "fixture"`, `stage: "none"`). 파일을 읽지 않아야 이 파일이
+   * node 타입 없이 타입체크되므로, `fixtures/energy/` 목과 환경 변수로 고르는 실제 API는 서버 시작 코드(`index.ts`)와 테스트가 넘긴다.
+   */
   energy?: EnergySources;
   /** 에너지 후보 외부 조회 실패를 알린다. 없으면 한 줄 경고. 테스트에서 바꾼다. */
   onEnergyError?: (error: unknown) => void;
@@ -84,7 +87,7 @@ export const createApp = ({
   legacyDriverFallback = true,
   fixtureSeats = false,
   capacity,
-  energy = createFixtureEnergySources(),
+  energy = createEmptyEnergySources(),
   onEnergyError,
   energyTimeoutMs,
   energyRateLimit,

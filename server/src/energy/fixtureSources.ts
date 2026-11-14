@@ -1,11 +1,7 @@
-/// <reference types="node" />
-// app.ts가 기본값으로 이 파일을 쓰고, 폰 앱은 AppType을 가져오며 이 파일까지 타입체크한다. 폰의 tsconfig는 node 타입을 싣지 않아 여기서 직접 싣는다.
-import { readFileSync } from 'node:fs';
+// 이 파일은 app.ts의 import 그래프 안에 있다(폰 앱이 AppType을 가져오며 함께 타입체크한다). 폰의 tsconfig는 node 타입을 싣지 않으므로
+// fs·process 같은 node 전용 코드는 여기에 두지 않는다. 파일을 읽는 코드는 fixtureFiles.ts(서버 시작 코드·테스트만 가져온다).
 import { haversineMeters } from './geo.js';
 import type { Charger, ChargerSource, ChargerSpeed, ChargerState, EnergySources, FuelStation, FuelStationSource, RestStop, RestStopSource } from './types.js';
-
-/** 저장소 루트 fixtures/energy/. 이 파일(server/src/energy) 기준 상대 경로로 푼다. */
-export const ENERGY_FIXTURES_URL = new URL('../../../fixtures/energy/', import.meta.url);
 
 export type FixtureFuelStation = Omit<FuelStation, 'price'> & { prices: { gasoline: number; diesel: number } };
 export type EnergyFixtures = { chargers: Charger[]; fuelStations: FixtureFuelStation[]; restStops: RestStop[] };
@@ -74,22 +70,6 @@ export function parseRestStopFixture(value: unknown): RestStop[] {
   });
 }
 
-const readJson = (name: string, base: URL): unknown => {
-  try {
-    return JSON.parse(readFileSync(new URL(name, base), 'utf8'));
-  } catch (e) {
-    throw new Error(`에너지 픽스처를 읽을 수 없습니다(${name}): ${(e as Error).message}`);
-  }
-};
-
-export function loadEnergyFixtures(base: URL = ENERGY_FIXTURES_URL): EnergyFixtures {
-  return {
-    chargers: parseChargerFixture(readJson('chargers.json', base)),
-    fuelStations: parseFuelFixture(readJson('fuel-stations.json', base)),
-    restStops: parseRestStopFixture(readJson('rest-stops.json', base)),
-  };
-}
-
 export const createFixtureChargerSource = (chargers: Charger[]): ChargerSource => ({
   kind: 'fixture',
   findNear: async (center, radiusMeters) => chargers.filter((c) => haversineMeters(center, c) <= radiusMeters),
@@ -105,11 +85,14 @@ export const createFixtureFuelSource = (stations: FixtureFuelStation[]): FuelSta
 
 export const createFixtureRestStopSource = (restStops: RestStop[]): RestStopSource => ({ list: () => restStops });
 
-/** `fixtures/energy/` 목으로 만든 세 포트. `createApp`의 기본값이다. */
-export function createFixtureEnergySources(fixtures: EnergyFixtures = loadEnergyFixtures()): EnergySources {
+/** 목 데이터로 만든 세 포트. */
+export function createFixtureEnergySources(fixtures: EnergyFixtures): EnergySources {
   return {
     chargers: createFixtureChargerSource(fixtures.chargers),
     fuelStations: createFixtureFuelSource(fixtures.fuelStations),
     restStops: createFixtureRestStopSource(fixtures.restStops),
   };
 }
+
+/** 후보가 늘 없는 세 포트. `createApp`의 기본값이다(파일을 읽지 않으므로 옵션 없이 불러도 깨지지 않는다). */
+export const createEmptyEnergySources = (): EnergySources => createFixtureEnergySources({ chargers: [], fuelStations: [], restStops: [] });

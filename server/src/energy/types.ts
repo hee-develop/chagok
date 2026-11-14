@@ -35,13 +35,21 @@ export type FuelStation = {
 
 export type RestStop = { id: string; name: string; lat: number; lng: number; hasFood: boolean };
 
+/** 충전소 조회가 결과 말고 돌려주는 정보. 호출자가 빈 객체를 넘기면 포트 구현이 채운다(안 채우면 해당 없음). */
+export type NearInfo = {
+  /** 이웃 시도처럼 '있으면 더 좋은' 조회가 실패해 결과에서 일부가 빠졌을 수 있다. */
+  partial?: boolean;
+  /** 새로 받지 못해 `EV_CACHE_TTL_MS`보다 낡은 캐시로 답했을 때, 그 가운데 가장 낡은 데이터를 받은 시각(ms). */
+  staleSince?: number;
+};
+
 /**
  * 환경부 전기차 충전소 포트. 실패하면 throw한다(서비스가 `unavailable`로 바꾼다).
- * `signal`이 중단되면 기다리던 조회를 그만둔다(요청 전체 제한 시간이 지났을 때).
+ * `signal`이 중단되면 기다리던 조회를 그만둔다(요청 전체 제한 시간이 지났을 때). `info`는 결과의 품질(일부 빠짐·낡음)을 돌려받는 자리다.
  */
 export interface ChargerSource {
   readonly kind: 'fixture' | 'live';
-  findNear(center: LatLng, radiusMeters: number, signal?: AbortSignal): Promise<Charger[]>;
+  findNear(center: LatLng, radiusMeters: number, signal?: AbortSignal, info?: NearInfo): Promise<Charger[]>;
 }
 
 /** 오피넷 주유소 포트. 실패하면 throw한다. `signal`이 중단되면 나가던 호출을 멈춘다. */

@@ -28,6 +28,7 @@ export async function readTextCapped(res: Response, maxBytes: number): Promise<s
     all.set(c, at);
     at += c.byteLength;
   }
+  chunks.length = 0; // 조각을 먼저 놓아 디코딩할 때 같은 바이트를 두 벌 들고 있지 않게 한다
   return new TextDecoder().decode(all);
 }
 

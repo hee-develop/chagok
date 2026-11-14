@@ -3,9 +3,55 @@ import type { LatLng } from './types.js';
 const EARTH_RADIUS_METERS = 6_371_000;
 const RAD = Math.PI / 180;
 
-/** 한반도와 그 둘레. 밖에서는 KATEC 변환도, 국내 충전소·주유소 조회도 의미가 없어 외부 호출을 하지 않는다. */
-const KOREA_BOUNDS = { latMin: 32.5, latMax: 39.5, lngMin: 123.5, lngMax: 132.5 };
-export const inKorea = (p: LatLng): boolean => p.lat >= KOREA_BOUNDS.latMin && p.lat <= KOREA_BOUNDS.latMax && p.lng >= KOREA_BOUNDS.lngMin && p.lng <= KOREA_BOUNDS.lngMax;
+/**
+ * 남한 영토 근사(가안). 밖의 좌표(북한·일본·중국 등)는 환경부·오피넷이 다루는 국내 충전소·주유소가 없고 KATEC 변환도 의미가 없어
+ * 외부 호출을 하지 않는다. 본토는 휴전선 남쪽·해안선 바깥 여백을 이은 다각형, 섬은 따로 둔 상자다(위도, 경도 순).
+ * 휴전선은 정확한 선이 아니라 몇 km 안의 근사이므로 선 바로 북쪽 몇 km는 안으로 들어올 수 있고(외부 호출이 한 번 더 나갈 뿐이다),
+ * 이어도·가거초 같은 해상 구조물은 뺐다. 서해 5도는 NLL이 아니라 섬 둘레 상자다.
+ */
+const MAINLAND: readonly (readonly [number, number])[] = [
+  [33.0, 125.9],
+  [33.95, 124.9],
+  [36.9, 124.9],
+  [37.45, 125.9],
+  [37.85, 126.2],
+  [37.85, 126.6],
+  [37.98, 126.7],
+  [38.05, 126.9],
+  [38.25, 127.05],
+  [38.34, 127.3],
+  [38.36, 127.8],
+  [38.35, 128.15],
+  [38.62, 128.37],
+  [38.65, 128.45],
+  [38.0, 128.9],
+  [37.0, 129.5],
+  [36.0, 129.7],
+  [35.45, 129.5],
+  [35.0, 129.25],
+  [34.0, 128.3],
+  [33.0, 127.1],
+];
+/** 섬 상자 [위도 최소, 위도 최대, 경도 최소, 경도 최대]: 백령·대청·소청, 연평·우도, 울릉·독도. */
+const ISLANDS: readonly (readonly [number, number, number, number])[] = [
+  [37.7, 38.05, 124.55, 124.95],
+  [37.55, 37.75, 125.55, 125.85],
+  [37.1, 37.6, 130.7, 132.0],
+];
+
+function inPolygon(p: LatLng, polygon: readonly (readonly [number, number])[]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [latI, lngI] = polygon[i];
+    const [latJ, lngJ] = polygon[j];
+    if (lngI > p.lng !== lngJ > p.lng && p.lat < ((latJ - latI) * (p.lng - lngI)) / (lngJ - lngI) + latI) inside = !inside;
+  }
+  return inside;
+}
+
+/** 남한 영토(근사) 안인지. 밖이면 국내 충전소·주유소 조회를 하지 않는다. */
+export const inSouthKorea = (p: LatLng): boolean =>
+  Number.isFinite(p.lat) && Number.isFinite(p.lng) && (inPolygon(p, MAINLAND) || ISLANDS.some(([la0, la1, ln0, ln1]) => p.lat >= la0 && p.lat <= la1 && p.lng >= ln0 && p.lng <= ln1));
 
 /** 두 점 사이 대원 거리(m). */
 export function haversineMeters(a: LatLng, b: LatLng): number {

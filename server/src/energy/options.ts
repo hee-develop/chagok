@@ -14,7 +14,7 @@ import {
 } from './constants.js';
 import { distanceToSegment, haversineMeters, pointAlong } from './geo.js';
 import { MINUTE_MS, seoulDay, seoulDayStart } from '../time.js';
-import type { Charger, ChargerSpeed, EnergySources, FuelKind, FuelStation, LatLng, PumpFuel } from './types.js';
+import type { Charger, ChargerSpeed, EnergySources, FuelKind, FuelStation, LatLng, NearInfo, PumpFuel } from './types.js';
 
 export type EnergyRequest = {
   fuel: FuelKind;
@@ -66,10 +66,16 @@ export type EnergyOptions = {
    */
   mealBundle: boolean;
   /**
-   * true면 일부 지점·휴게소 조회만 실패해 받은 결과로 답한 것이다. 후보가 더 있을 수 있고, 비어 있어도(`stage: "none"`) 후보가 없다고
+   * true면 일부 지점·휴게소 조회, 또는 경계 근처의 이웃 시도 받기만 실패해 받은 결과로 답한 것이다. 후보가 더 있을 수 있고, 비어 있어도(`stage: "none"`) 후보가 없다고
    * 단정할 수 없다. 전부 실패하면 partial이 아니라 `source: "unavailable"`이다.
    */
   partial: boolean;
+  /**
+   * true면 충전기 상태를 새로 받지 못해 5분보다 낡은 데이터(최대 30분)로 답한 것이다. `asOf`가 그 데이터를 받은 시각(ISO8601, UTC)이다.
+   * 빈 충전기 수가 그만큼 낡았을 수 있다. 새로 받은 데이터거나 목·주유소면 `stale: false`, `asOf: null`.
+   */
+  stale: boolean;
+  asOf: string | null;
   candidates: Candidate[];
 };
 
@@ -173,15 +179,34 @@ function tally() {
 
 type Ctx = { signal: AbortSignal; report: (error: unknown) => void };
 
-const empty = (fuel: FuelKind, source: EnergyOptions['source'], partial = false): EnergyOptions => ({ fuel, source, stage: 'none', mealBundle: false, partial, candidates: [] });
+const FRESH = { stale: false, asOf: null } as const;
+const empty = (fuel: FuelKind, source: EnergyOptions['source'], partial = false, freshness: Pick<EnergyOptions, 'stale' | 'asOf'> = FRESH): EnergyOptions => ({
+  fuel,
+  source,
+  stage: 'none',
+  mealBundle: false,
+  partial,
+  ...freshness,
+  candidates: [],
+});
 
 async function evOptions(req: EnergyRequest, sources: EnergySources, ctx: Ctx): Promise<EnergyOptions> {
   const source = sources.chargers.kind;
   const lookups = tally();
+  // 충전소 조회마다 돌려받는 품질 정보(이웃 시도 조회 실패, 낡은 캐시)를 응답 하나로 모은다.
+  const quality: { partial: boolean; staleSince: number | undefined } = { partial: false, staleSince: undefined };
+  const findNear = async (center: LatLng, radius: number) => {
+    const info: NearInfo = {};
+    const list = await sources.chargers.findNear(center, radius, ctx.signal, info);
+    if (info.partial) quality.partial = true;
+    if (info.staleSince !== undefined) quality.staleSince = Math.min(quality.staleSince ?? info.staleSince, info.staleSince);
+    return list;
+  };
+  const freshness = (): Pick<EnergyOptions, 'stale' | 'asOf'> => (quality.staleSince === undefined ? FRESH : { stale: true, asOf: new Date(quality.staleSince).toISOString() });
 
   if (req.stayMinutes !== null && req.stayMinutes >= LONG_STAY_MINUTES) {
     try {
-      const near = await sources.chargers.findNear(req.destination, SLOW_CHARGER_RADIUS_METERS, ctx.signal);
+      const near = await findNear(req.destination, SLOW_CHARGER_RADIUS_METERS);
       lookups.ok();
       const candidates = summarize(near, 'slow')
         .filter((s) => s.available > 0)
@@ -203,7 +228,7 @@ async function evOptions(req: EnergyRequest, sources: EnergySources, ctx: Ctx): 
           brand: null,
           hasFood: null,
         }));
-      if (candidates.length > 0) return { fuel: req.fuel, source, stage: 'destination', mealBundle: false, partial: false, candidates };
+      if (candidates.length > 0) return { fuel: req.fuel, source, stage: 'destination', mealBundle: false, partial: quality.partial, ...freshness(), candidates };
     } catch (e) {
       // 목적지 조회만 실패했으면 경로상 휴게소 조회로 넘어간다(그것도 전부 실패하면 unavailable).
       lookups.fail(e);
@@ -218,7 +243,7 @@ async function evOptions(req: EnergyRequest, sources: EnergySources, ctx: Ctx): 
     .slice(0, MAX_REST_STOPS_LOOKUP);
 
   const found = await mapSettled(stops, 4, ctx.signal, async ({ stop, seg }) => {
-    const near = await sources.chargers.findNear(stop, REST_STOP_CHARGER_RADIUS_METERS, ctx.signal);
+    const near = await findNear(stop, REST_STOP_CHARGER_RADIUS_METERS);
     const best = summarize(near, 'fast')
       .map((s) => ({ s, status: statusOf(s) }))
       .filter((x): x is { s: StationSummary; status: 'available' | 'busy' | 'unknown' } => x.status !== 'unavailable')
@@ -250,8 +275,9 @@ async function evOptions(req: EnergyRequest, sources: EnergySources, ctx: Ctx): 
     lookups.ok();
     if (r.value && !unique.has(r.value.id)) unique.set(r.value.id, r.value);
   }
-  const partial = lookups.partial();
-  if (partial) ctx.report(lookups.firstError);
+  const failedLookups = lookups.partial();
+  if (failedLookups) ctx.report(lookups.firstError);
+  const partial = failedLookups || quality.partial;
 
   const mealTime = isMealTimeSeoul(req.at);
   const all = [...unique.values()];
@@ -268,8 +294,8 @@ async function evOptions(req: EnergyRequest, sources: EnergySources, ctx: Ctx): 
       a.id.localeCompare(b.id),
   );
   const candidates = all.slice(0, MAX_CANDIDATES);
-  if (candidates.length === 0) return empty(req.fuel, source, partial);
-  return { fuel: req.fuel, source, stage: 'route', mealBundle: mealTime && candidates[0].hasFood === true, partial, candidates };
+  if (candidates.length === 0) return empty(req.fuel, source, partial, freshness());
+  return { fuel: req.fuel, source, stage: 'route', mealBundle: mealTime && candidates[0].hasFood === true, partial, ...freshness(), candidates };
 }
 
 async function fuelOptions(req: EnergyRequest, sources: EnergySources, ctx: Ctx): Promise<EnergyOptions> {
@@ -315,7 +341,7 @@ async function fuelOptions(req: EnergyRequest, sources: EnergySources, ctx: Ctx)
       hasFood: null,
     }));
   if (candidates.length === 0) return empty(req.fuel, source, partial);
-  return { fuel: req.fuel, source, stage: 'route', mealBundle: false, partial, candidates };
+  return { fuel: req.fuel, source, stage: 'route', mealBundle: false, partial, ...FRESH, candidates };
 }
 
 export type FindOptions = { onError?: (error: unknown) => void; totalTimeoutMs?: number };

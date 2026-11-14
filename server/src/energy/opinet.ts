@@ -9,8 +9,9 @@ import {
   OPINET_MAX_RESPONSE_BYTES,
 } from './constants.js';
 import { createGate, joinFlight, type Flight } from './flight.js';
-import { inKorea, katecToWgs84, wgs84ToKatec } from './geo.js';
+import { inSouthKorea, katecToWgs84, wgs84ToKatec } from './geo.js';
 import { readTextCapped, withTimeout } from './http.js';
+import { detach } from './strings.js';
 import type { FuelStation, FuelStationSource, LatLng, PumpFuel } from './types.js';
 import { xmlRecords } from './xml.js';
 
@@ -31,17 +32,23 @@ export const OPINET_AROUND_URL = 'https://www.opinet.co.kr/api/aroundAll.do';
 
 const PRODUCT_CODE: Record<PumpFuel, string> = { gasoline: 'B027', diesel: 'D047' };
 
-/** aroundAll.do XML 응답을 주유소 목록으로. 가격·좌표가 숫자가 아닌 항목은 거른다. */
+const OIL_FIELDS = ['UNI_ID', 'POLL_DIV_CD', 'POLL_DIV_CO', 'OS_NM', 'PRICE', 'GIS_X_COOR', 'GIS_Y_COOR'] as const;
+
+/**
+ * aroundAll.do XML 응답을 주유소 목록으로. 가격·좌표가 숫자가 아닌 항목은 거른다.
+ * 결과는 캐시에 5분 동안 남으므로 글자는 응답 원문을 붙잡지 않게 복사해 담는다.
+ */
 export function parseAroundXml(xml: string): FuelStation[] {
   const out: FuelStation[] = [];
-  for (const r of xmlRecords(xml, 'OIL')) {
+  for (const r of xmlRecords(xml, 'OIL', OIL_FIELDS)) {
     const price = Number(r.PRICE);
     const x = Number(r.GIS_X_COOR);
     const y = Number(r.GIS_Y_COOR);
     if (!r.UNI_ID || !r.OS_NM || r.PRICE === undefined || r.GIS_X_COOR === undefined || r.GIS_Y_COOR === undefined) continue;
     if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(x) || !Number.isFinite(y)) continue;
     const { lat, lng } = katecToWgs84(x, y);
-    out.push({ id: r.UNI_ID, name: r.OS_NM, brand: r.POLL_DIV_CD || r.POLL_DIV_CO || null, lat, lng, price });
+    const brand = r.POLL_DIV_CD || r.POLL_DIV_CO;
+    out.push({ id: detach(r.UNI_ID), name: detach(r.OS_NM), brand: brand ? detach(brand) : null, lat, lng, price });
   }
   return out;
 }
@@ -110,7 +117,7 @@ export function createOpinetSource({
   return {
     kind: 'live',
     async findNear(center, radiusMeters, fuel, signal) {
-      if (!inKorea(center)) return [];
+      if (!inSouthKorea(center)) return [];
       const grid = { lat: snap(center.lat), lng: snap(center.lng) };
       const radius = Math.min(OPINET_MAX_RADIUS_METERS, Math.max(1, Math.round(radiusMeters)));
       const key = `${fuel}|${grid.lat.toFixed(3)}|${grid.lng.toFixed(3)}|${radius}`;

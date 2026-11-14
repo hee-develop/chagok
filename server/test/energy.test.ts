@@ -9,9 +9,11 @@ import {
   parseRestStopFixture,
 } from '../src/energy/fixtureSources.js';
 import { isMealTimeSeoul, type EnergyOptions } from '../src/energy/options.js';
-import type { Charger, ChargerSource, EnergySources, FuelStation, FuelStationSource, RestStop } from '../src/energy/types.js';
+import { createRateLimiter } from '../src/energy/rateLimit.js';
+import type { Charger, ChargerSource, EnergySources, FuelStation, FuelStationSource, NearInfo, RestStop } from '../src/energy/types.js';
 import { MAX_BODY_BYTES } from '../src/limits.js';
-import { energyFixtures, fixtureEnergy, newApp } from './helpers.js';
+import { createApp } from '../src/app.js';
+import { calendars, catalog, energyFixtures, familyMembers, fixture, fixtureEnergy, newApp } from './helpers.js';
 
 const GWANGJU = { lat: 35.1595, lng: 126.8526 }; // 광주 육전집
 const KIA = { lat: 35.1681, lng: 126.8888 }; // 챔피언스필드
@@ -251,7 +253,7 @@ describe('POST /energy/options 전기차', () => {
 
   it('후보가 없으면 stage none과 빈 목록이다(source는 fixture)', async () => {
     const r = await ok(appOf(sourcesOf({})), { fuel: 'ev', origin: ORIGIN, destination: DEST, stayMinutes: 300 });
-    expect(r).toEqual({ fuel: 'ev', source: 'fixture', stage: 'none', mealBundle: false, partial: false, candidates: [] });
+    expect(r).toEqual({ fuel: 'ev', source: 'fixture', stage: 'none', mealBundle: false, partial: false, stale: false, asOf: null, candidates: [] });
   });
 });
 
@@ -343,7 +345,7 @@ describe('외부 어댑터 실패', () => {
     const onError = vi.fn();
     const app = appOf({ ...fixtureEnergy, chargers: failing() }, { onEnergyError: onError });
     const r = await ok(app, { fuel: 'ev', origin: GWANGJU, destination: KIA, stayMinutes: 180 });
-    expect(r).toEqual({ fuel: 'ev', source: 'unavailable', stage: 'none', mealBundle: false, partial: false, candidates: [] });
+    expect(r).toEqual({ fuel: 'ev', source: 'unavailable', stage: 'none', mealBundle: false, partial: false, stale: false, asOf: null, candidates: [] });
     expect(onError).toHaveBeenCalledTimes(1);
     // 실패한 뒤에도 서버는 다음 요청에 정상으로 답한다.
     const again = await ok(newApp(), { fuel: 'ev', origin: GWANGJU, destination: KIA, stayMinutes: 180 });
@@ -354,7 +356,7 @@ describe('외부 어댑터 실패', () => {
     const onError = vi.fn();
     const app = appOf({ ...fixtureEnergy, fuelStations: failing() }, { onEnergyError: onError });
     const r = await ok(app, { fuel: 'diesel', origin: GWANGJU, destination: KIA });
-    expect(r).toEqual({ fuel: 'diesel', source: 'unavailable', stage: 'none', mealBundle: false, partial: false, candidates: [] });
+    expect(r).toEqual({ fuel: 'diesel', source: 'unavailable', stage: 'none', mealBundle: false, partial: false, stale: false, asOf: null, candidates: [] });
     expect(onError).toHaveBeenCalledTimes(1);
   });
 
@@ -639,9 +641,109 @@ describe('POST /energy/options 속도 제한', () => {
 });
 
 describe('기본 에너지 소스', () => {
-  it('createApp에 energy를 주지 않으면 픽스처 목으로 답한다', async () => {
+  it('createApp에 energy를 주지 않으면 파일을 읽지 않고 후보가 늘 없는 목으로 답한다(옵션 없이 불러도 깨지지 않는다)', async () => {
+    const app = createApp({ fixture, calendars, places: catalog, familyMembers });
+    for (const body of [
+      { fuel: 'gasoline', origin: GWANGJU, destination: KIA },
+      { fuel: 'ev', origin: GWANGJU, destination: KIA, stayMinutes: 180 },
+    ]) {
+      const res = await post(app, body);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ source: 'fixture', stage: 'none', partial: false, stale: false, asOf: null, candidates: [] });
+    }
+  });
+
+  it('테스트 도우미와 서버 시작 코드는 픽스처 목을 넘긴다', async () => {
     const r = await ok(newApp(), { fuel: 'gasoline', origin: GWANGJU, destination: KIA });
     expect(r.source).toBe('fixture');
     expect(r.candidates.length).toBeGreaterThan(0);
+  });
+});
+
+describe('충전소 조회의 품질 정보(partial·stale)', () => {
+  const near = { fuel: 'ev', origin: GWANGJU, destination: KIA, stayMinutes: 180, at: AFTERNOON } as const;
+  /** 픽스처 충전소를 돌려주면서 info를 채우는 포트. */
+  const withInfo = (info: NearInfo): ChargerSource => ({
+    kind: 'live',
+    findNear: async (center, radius, _signal, out) => {
+      Object.assign(out ?? {}, info);
+      return fixtureEnergy.chargers.findNear(center, radius);
+    },
+  });
+
+  it('새로 받은 데이터면 stale false·asOf null이다', async () => {
+    const r = await ok(appOf({ ...fixtureEnergy, chargers: withInfo({}) }), near);
+    expect(r).toMatchObject({ source: 'live', stage: 'destination', partial: false, stale: false, asOf: null });
+  });
+
+  it('낡은 캐시로 답하면 stale true와 그 데이터를 받은 시각(asOf, ISO)을 싣는다', async () => {
+    const receivedAt = Date.parse('2026-11-06T02:40:00Z');
+    const r = await ok(appOf({ ...fixtureEnergy, chargers: withInfo({ staleSince: receivedAt }) }), near);
+    expect(r).toMatchObject({ stage: 'destination', stale: true, asOf: '2026-11-06T02:40:00.000Z' });
+    expect(r.candidates.length).toBeGreaterThan(0);
+  });
+
+  it('이웃 시도 받기가 실패했으면 후보가 있어도 partial true다', async () => {
+    const r = await ok(appOf({ ...fixtureEnergy, chargers: withInfo({ partial: true }) }), near);
+    expect(r).toMatchObject({ stage: 'destination', partial: true });
+    expect(r.candidates.length).toBeGreaterThan(0);
+  });
+
+  it('경로상 휴게소 조회에서도 품질 정보를 모은다(가장 낡은 시각, 하나라도 partial이면 partial)', async () => {
+    let n = 0;
+    const chargers: ChargerSource = {
+      kind: 'live',
+      findNear: async (center, radius, _signal, out) => {
+        n += 1;
+        if (out) {
+          out.staleSince = 1_000_000 * n; // 호출마다 다른 시각
+          if (n === 2) out.partial = true;
+        }
+        return fixtureEnergy.chargers.findNear(center, radius);
+      },
+    };
+    const r = await ok(appOf({ ...fixtureEnergy, chargers }), { fuel: 'ev', origin: GWANGJU, destination: { lat: 37.5665, lng: 126.978 }, at: AFTERNOON });
+    expect(n).toBeGreaterThan(1);
+    expect(r).toMatchObject({ stale: true, asOf: new Date(1_000_000).toISOString(), partial: true });
+  });
+
+  it('주유소 응답은 항상 stale false·asOf null이다', async () => {
+    const r = await ok(newApp(), { fuel: 'diesel', origin: GWANGJU, destination: KIA });
+    expect(r).toMatchObject({ stale: false, asOf: null });
+  });
+});
+
+describe('속도 제한 표가 찼을 때', () => {
+  const limiter = (maxKeys: number) => {
+    let t = 0;
+    return { rl: createRateLimiter({ limit: 1, windowMs: 60_000, maxKeys, now: () => t }), advance: (d: number) => (t += d) };
+  };
+
+  it('새 주소를 막지 않고 가장 오래된 주소를 밀어낸다', () => {
+    const { rl, advance } = limiter(3);
+    for (const k of ['a', 'b', 'c']) {
+      expect(rl.check(k)).toEqual({ ok: true });
+      advance(1_000);
+    }
+    expect(rl.check('d')).toEqual({ ok: true }); // 표가 찼지만 새 주소를 받는다(가장 오래된 a를 밀어냄)
+    expect(rl.check('b').ok).toBe(false); // 밀리지 않은 주소는 횟수를 그대로 가진다
+    expect(rl.check('c').ok).toBe(false);
+    expect(rl.check('a')).toEqual({ ok: true }); // 밀려난 주소는 횟수를 잃었다(속도 제한이 느슨해지는 대가)
+  });
+
+  it('만료된 항목이 있으면 그것부터 지운다', () => {
+    const { rl, advance } = limiter(2);
+    rl.check('a');
+    advance(30_000);
+    rl.check('b');
+    advance(31_000); // a의 창만 끝났다
+    expect(rl.check('c')).toEqual({ ok: true });
+    expect(rl.check('b').ok).toBe(false); // 만료된 a가 지워졌고 b는 남아 있다
+  });
+
+  it('주소를 계속 바꿔도 표 크기는 상한을 넘지 않고 정상 주소의 새 요청은 막히지 않는다', () => {
+    const { rl } = limiter(100);
+    for (let i = 0; i < 10_000; i++) rl.check(`attacker-${i}`);
+    expect(rl.check('legit')).toEqual({ ok: true });
   });
 });

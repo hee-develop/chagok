@@ -5,8 +5,9 @@ import { haversineMeters, katecToWgs84, wgs84ToKatec } from '../src/energy/geo.j
 import { createOpinetSource, parseAroundXml } from '../src/energy/opinet.js';
 import { findEnergyOptions } from '../src/energy/options.js';
 import { createEnergySources } from '../src/energy/sources.js';
-import type { EnergySources } from '../src/energy/types.js';
+import type { EnergySources, NearInfo } from '../src/energy/types.js';
 import { MAX_XML_CHARS } from '../src/energy/constants.js';
+import { createInterner, detach } from '../src/energy/strings.js';
 import { xmlRecords, xmlValue } from '../src/energy/xml.js';
 import { newApp } from './helpers.js';
 
@@ -20,7 +21,11 @@ const fakeFetch = (respond: (url: string) => Response | Promise<Response>) => {
   });
   return { fn: fn as unknown as typeof fetch, urls, mock: fn };
 };
+/** 시도 코드(zcode)별로 답하는 fetch. 정해 두지 않은 시도는 빈 쪽을 준다. */
+const zcodeFetchOf = (pages: Record<string, string>) => (url: string) => xmlResponse(pages[new URL(url).searchParams.get('zcode') ?? ''] ?? pageXml([]));
 const xmlResponse = (body: string, status = 200) => new Response(body, { status, headers: { 'content-type': 'application/xml' } });
+const zcodeOf = (url: string) => new URL(url).searchParams.get('zcode') ?? '';
+const zcodeFetch = (pages: Record<string, string>) => fakeFetch(zcodeFetchOf(pages));
 
 describe('KATEC 변환(정밀도 미검증: 왕복 일관성과 문서 예시와의 대략적 일치만 확인)', () => {
   // 공식 기준점(KATEC 좌표와 위경도 쌍)을 찾지 못했다. KATEC은 EPSG 코드가 없는 비공식 좌표계다(docs/energy.md).
@@ -471,16 +476,15 @@ describe('환경부 충전소 어댑터', () => {
     expect(used).not.toContain('45'); // 가이드 v1.25 표에 없는 옛 전북 코드
   });
 
-  it('인천 근처 조회는 인천(zcode 28) 한 곳만 가이드의 변수(dataType=XML 포함)로 부르고 반경으로 거른다', async () => {
-    const { fn, urls } = fakeFetch(() => xmlResponse(pageXml([itemXml({}), itemXml({ statId: 'far', lat: '37.58', lng: '126.7' })])));
+  it('인천 근처 조회는 인천(28)과 여유 거리 안의 서울(11)·경기(41)를 가이드의 변수(dataType=XML 포함)로 부르고 반경으로 거른다', async () => {
+    const { fn, urls } = zcodeFetch({ '28': pageXml([itemXml({}), itemXml({ statId: 'far', lat: '37.58', lng: '126.7' })]) });
     const source = createEvChargerSource({ serviceKey: 'SECRET-KEY', fetchImpl: fn });
     const found = await source.findNear(INCHEON, 500);
     expect(found.map((c) => c.stationId)).toEqual(['EX000001']);
-    expect(urls).toHaveLength(1);
-    const url = new URL(urls[0]);
+    expect(urls.map(zcodeOf).sort()).toEqual(['11', '28', '41']);
+    const url = new URL(urls.find((u) => zcodeOf(u) === '28')!);
     expect(`${url.origin}${url.pathname}`).toBe('https://apis.data.go.kr/B552584/EvCharger/getChargerInfo');
     expect(url.searchParams.get('serviceKey')).toBe('SECRET-KEY');
-    expect(url.searchParams.get('zcode')).toBe('28');
     expect(url.searchParams.get('dataType')).toBe('XML');
     expect(url.searchParams.get('pageNo')).toBe('1');
     expect(url.searchParams.get('numOfRows')).toBe('9999');
@@ -495,30 +499,32 @@ describe('환경부 충전소 어댑터', () => {
 
   it('받은 시도 데이터는 5분 동안 다시 받지 않는다', async () => {
     let clock = 1_000_000;
-    const { fn, mock } = fakeFetch(() => xmlResponse(pageXml([itemXml({})])));
+    const { fn, mock } = zcodeFetch({ '28': pageXml([itemXml({})]) });
     const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn, now: () => clock });
     await source.findNear(INCHEON, 500);
     await source.findNear(INCHEON, 500);
     clock += 4 * 60_000;
     await source.findNear(INCHEON, 500);
-    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock).toHaveBeenCalledTimes(3); // 인천·서울·경기 한 번씩
     clock += 2 * 60_000;
     await source.findNear(INCHEON, 500);
-    expect(mock).toHaveBeenCalledTimes(2);
+    expect(mock).toHaveBeenCalledTimes(6);
   });
 
   it('동시에 같은 시도를 부르면 한 번만 받는다', async () => {
-    const { fn, mock } = fakeFetch(() => xmlResponse(pageXml([itemXml({})])));
+    const { fn, mock } = zcodeFetch({ '28': pageXml([itemXml({})]) });
     const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn });
     await Promise.all([1, 2, 3].map(() => source.findNear(INCHEON, 500)));
-    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock).toHaveBeenCalledTimes(3); // 시도마다 한 번
   });
 
   it('totalCount가 9999를 넘으면 나머지 쪽도 받는다', async () => {
-    const { fn, urls } = fakeFetch((url) => xmlResponse(pageXml([itemXml({ statId: `p${new URL(url).searchParams.get('pageNo')}` })], 25_000)));
+    const { fn, urls } = fakeFetch((url) =>
+      zcodeOf(url) === '28' ? xmlResponse(pageXml([itemXml({ statId: `p${new URL(url).searchParams.get('pageNo')}` })], 25_000)) : xmlResponse(pageXml([])),
+    );
     const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn });
     const found = await source.findNear(INCHEON, 500);
-    expect(urls.map((u) => new URL(u).searchParams.get('pageNo'))).toEqual(['1', '2', '3']);
+    expect(urls.filter((u) => zcodeOf(u) === '28').map((u) => new URL(u).searchParams.get('pageNo'))).toEqual(['1', '2', '3']);
     expect(found.map((c) => c.stationId).sort()).toEqual(['p1', 'p2', 'p3']);
   });
 
@@ -577,30 +583,37 @@ describe('환경부 충전소 어댑터', () => {
   it('받기가 실패해 쉬는 동안에도 30분 안의 오래된 캐시가 있으면 그것으로 답한다', async () => {
     let clock = 1_000_000;
     let healthy = true;
-    const { fn, mock } = fakeFetch(() => (healthy ? xmlResponse(pageXml([itemXml({})])) : xmlResponse('x', 503)));
+    const { fn, mock } = fakeFetch((url) => (!healthy ? xmlResponse('x', 503) : xmlResponse(zcodeOf(url) === '28' ? pageXml([itemXml({})]) : pageXml([]))));
     const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn, now: () => clock });
-    expect((await source.findNear(INCHEON, 500)).map((c) => c.stationId)).toEqual(['EX000001']);
+    const fresh: NearInfo = {};
+    expect((await source.findNear(INCHEON, 500, undefined, fresh)).map((c) => c.stationId)).toEqual(['EX000001']);
+    expect(fresh).toEqual({}); // 방금 받은 데이터는 낡지 않았고 빠진 시도도 없다
+    const receivedAt = clock;
     healthy = false;
     clock += 6 * 60_000; // 캐시 만료 → 새로 받다 실패하지만 오래된 것으로 답한다
+    const stale: NearInfo = {};
+    expect((await source.findNear(INCHEON, 500, undefined, stale)).map((c) => c.stationId)).toEqual(['EX000001']);
+    expect(stale).toEqual({ staleSince: receivedAt });
+    expect(mock).toHaveBeenCalledTimes(6);
+    clock += 10_000; // 쉬는 동안: 다시 부르지 않고 오래된 것으로 답한다
     expect((await source.findNear(INCHEON, 500)).map((c) => c.stationId)).toEqual(['EX000001']);
-    expect(mock).toHaveBeenCalledTimes(2);
-    clock += 10_000; // 30초 쉬는 동안: 다시 부르지 않고 오래된 것으로 답한다
-    expect((await source.findNear(INCHEON, 500)).map((c) => c.stationId)).toEqual(['EX000001']);
-    expect(mock).toHaveBeenCalledTimes(2);
+    expect(mock).toHaveBeenCalledTimes(6);
     clock += 30 * 60_000; // 30분이 넘으면 낡은 데이터는 버린다
     await expect(source.findNear(INCHEON, 500)).rejects.toThrow();
   });
 
   it('메모리에 두는 충전기 수 상한을 넘으면 가장 오래 안 쓴 시도부터 버린다', async () => {
-    const { fn, mock } = fakeFetch(() => xmlResponse(pageXml([itemXml({ lat: '35.18', lng: '129.07' }), itemXml({ chgerId: '02', lat: '35.18', lng: '129.07' })])));
+    const two = pageXml([itemXml({ lat: '35.18', lng: '129.07' }), itemXml({ chgerId: '02', lat: '35.18', lng: '129.07' })]);
+    const { fn, urls } = zcodeFetch({ '11': two, '26': two });
     const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn, maxCachedChargers: 3 });
-    await source.findNear(SEOUL, 500); // 서울 2대
-    await source.findNear(BUSAN, 500); // 부산 2대 → 합계 4 > 3, 서울이 밀려난다
-    expect(mock).toHaveBeenCalledTimes(2);
+    const callsOf = (z: string) => urls.filter((u) => zcodeOf(u) === z).length;
+    await source.findNear(SEOUL, 500); // 서울 2대(경기·인천은 0대)
+    await source.findNear(BUSAN, 500); // 부산 2대 → 합계 4 > 3, 가장 오래 안 쓴 시도(서울·경기·인천 중 서울)부터 밀려난다
+    expect([callsOf('11'), callsOf('26')]).toEqual([1, 1]);
     await source.findNear(BUSAN, 500);
-    expect(mock).toHaveBeenCalledTimes(2);
+    expect(callsOf('26')).toBe(1);
     await source.findNear(SEOUL, 500);
-    expect(mock).toHaveBeenCalledTimes(3);
+    expect(callsOf('11')).toBe(2);
   });
 
   it('서버 전체 동시 받기 수를 넘으면 새 시도 받기를 시작하지 않고 실패한다', async () => {
@@ -620,18 +633,18 @@ describe('환경부 충전소 어댑터', () => {
 
   it('응답이 늦으면 호출자는 기다리다 실패하고, 받기는 이어져 다음 호출은 캐시를 쓴다', async () => {
     let release!: (r: Response) => void;
-    let first = true;
-    const { fn, mock } = fakeFetch(() => {
-      if (!first) return xmlResponse(pageXml([itemXml({})]));
-      first = false;
-      return new Promise<Response>((resolve) => (release = resolve));
+    const { fn, mock } = fakeFetch((url) => {
+      if (zcodeOf(url) !== '28') return xmlResponse(pageXml([]));
+      if (release === undefined) return new Promise<Response>((resolve) => (release = resolve));
+      return xmlResponse(pageXml([itemXml({})]));
     });
     const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn, waitMs: 20 });
     await expect(source.findNear(INCHEON, 500)).rejects.toThrow('늦습니다');
     release(xmlResponse(pageXml([itemXml({})])));
     await new Promise((r) => setTimeout(r, 10));
+    const calls = mock.mock.calls.length;
     expect((await source.findNear(INCHEON, 500)).map((c) => c.stationId)).toEqual(['EX000001']);
-    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock).toHaveBeenCalledTimes(calls); // 이어진 받기가 캐시를 채워 다시 받지 않는다
   });
 
   it('호출자의 signal이 중단되면 기다리던 조회를 그만둔다', async () => {
@@ -664,6 +677,232 @@ describe('환경부 충전소 어댑터', () => {
     const r = await findEnergyOptions({ fuel: 'ev', origin: { lat: 37.45, lng: 126.6 }, destination: INCHEON, stayMinutes: 180, at: new Date() }, sources);
     expect(r).toMatchObject({ source: 'live', stage: 'destination' });
     expect(r.candidates.map((c) => [c.id, c.charger?.powerKw])).toEqual([['EX000001', 7]]);
+  });
+});
+
+describe('XML 읽기: 속성·필드 선택', () => {
+  it('레코드와 필드 태그에 속성이 있어도 읽는다(<item id="1">)', () => {
+    const xml = '<items><item id="1"><statId>A</statId></item><item id="2" type=\'x\'><statNm lang="ko">충전소</statNm><note/></item></items>';
+    expect(xmlRecords(xml, 'item')).toEqual([{ statId: 'A' }, { statNm: '충전소', note: '' }]);
+    expect(xmlRecords('<OIL\n id="1"><PRICE unit="won">1700</PRICE></OIL>', 'OIL')).toEqual([{ PRICE: '1700' }]);
+  });
+
+  it('자기 닫힘 레코드는 빈 레코드, 이름이 더 긴 태그(<items>·<item2>)는 레코드로 보지 않는다', () => {
+    expect(xmlRecords('<r><item/><item id="1"/><item><a>1</a></item></r>', 'item')).toEqual([{}, {}, { a: '1' }]);
+    expect(xmlRecords('<r><items><item2><a>1</a></item2></items></r>', 'item')).toEqual([]);
+    expect(xmlRecords('<r><item2><a>1</a></item2><item><a>2</a></item></r>', 'item')).toEqual([{ a: '2' }]);
+  });
+
+  it('fields를 주면 그 이름의 요소만 담는다', () => {
+    const xml = '<r><item><a>1</a><b>2</b><c><![CDATA[3]]></c><d/></item></r>';
+    expect(xmlRecords(xml, 'item', ['a', 'c', 'd'])).toEqual([{ a: '1', c: '3', d: '' }]);
+    expect(xmlRecords(xml, 'item', [])).toEqual([{}]);
+  });
+
+  it('속성이 붙은 악성 입력도 선형 시간에 끝난다', () => {
+    const inTime = (run: () => unknown) => {
+      const started = performance.now();
+      run();
+      expect(performance.now() - started).toBeLessThan(1500);
+    };
+    inTime(() => expect(xmlRecords('<item '.repeat(300_000), 'item')).toEqual([]));
+    inTime(() => expect(xmlRecords('<item x="1">'.repeat(300_000), 'item')).toEqual([]));
+    inTime(() => xmlRecords(`<item>${'<a x="'.repeat(300_000)}</item>`, 'item'));
+    inTime(() => xmlRecords(`<item>${'<a '.repeat(300_000)}>x</a></item>`, 'item'));
+    inTime(() => expect(xmlRecords('<item id="1"><a>1</a></item>'.repeat(50_000), 'item')).toHaveLength(50_000));
+  });
+
+  it('오피넷·환경부 파서도 속성이 있는 레코드를 읽는다', () => {
+    expect(parseAroundXml('<RESULT><OIL id="1"><UNI_ID>X1</UNI_ID><OS_NM>주유소</OS_NM><PRICE>1700</PRICE><GIS_X_COOR>314681.8</GIS_X_COOR><GIS_Y_COOR>544837</GIS_Y_COOR></OIL></RESULT>')).toHaveLength(1);
+    expect(parseChargerInfoXml(pageXml([itemXml({}).replace('<item>', '<item id="1">')])).chargers).toHaveLength(1);
+  });
+});
+
+describe('파싱한 글자 복사(원문을 붙잡지 않음)', () => {
+  it('detach·interner는 같은 값을 돌려주고, interner는 같은 글자를 한 번만 센다', () => {
+    const big = `<a>${'가'.repeat(100)}</a>`;
+    const piece = big.slice(3, 103);
+    expect(detach(piece)).toBe(piece);
+    expect(detach('')).toBe('');
+    expect(detach('a"b\\c\n\ud83d\ude00')).toBe('a"b\\c\n\ud83d\ude00');
+    const intern = createInterner();
+    expect(intern.bytes).toBe(0);
+    expect(intern(piece)).toBe(piece);
+    const once = intern.bytes;
+    expect(once).toBe(16 + 2 * 100);
+    expect(intern(big.slice(3, 103))).toBe(piece);
+    expect(intern.bytes).toBe(once);
+    intern('다른 글자');
+    expect(intern.bytes).toBeGreaterThan(once);
+  });
+
+  it('같은 시도의 쪽을 같은 interner로 읽으면 같은 충전소의 글자를 한 번만 센다(충전기 객체는 따로)', () => {
+    const intern = createInterner();
+    parseChargerInfoXml(pageXml([itemXml({ chgerId: '01' }), itemXml({ chgerId: '02' })]), intern);
+    const afterFirst = intern.bytes;
+    parseChargerInfoXml(pageXml([itemXml({ chgerId: '01' }), itemXml({ chgerId: '02' })]), intern);
+    expect(intern.bytes).toBe(afterFirst);
+  });
+
+  it('충전기에는 쓰는 필드만 있고, 숫자는 숫자다', () => {
+    const [c] = parseChargerInfoXml(pageXml([itemXml({})])).chargers;
+    expect(Object.keys(c).sort()).toEqual(['address', 'chargerId', 'lat', 'lng', 'name', 'operator', 'parkingFree', 'powerKw', 'speed', 'state', 'stationId'].sort());
+    expect([typeof c.lat, typeof c.lng, typeof c.powerKw]).toEqual(['number', 'number', 'number']);
+  });
+});
+
+describe('환경부 충전소 어댑터: 메모리·부분 실패·실패 복구', () => {
+  const CHUNCHEON = { lat: 37.8813, lng: 127.7298 }; // 강원 한 곳만 고른다
+  const one = (id: string, lat = '37.88', lng = '127.73') => pageXml([itemXml({ statId: id, lat, lng })]);
+
+  it('추정 바이트 상한을 넘으면 충전기 수와 상관없이 가장 오래 안 쓴 시도부터 버린다', async () => {
+    const two = pageXml([itemXml({ lat: '35.18', lng: '129.07' }), itemXml({ chgerId: '02', lat: '35.18', lng: '129.07' })]);
+    const { fn, urls } = zcodeFetch({ '26': two, '48': two });
+    const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn, maxCachedBytes: 1 });
+    await source.findNear(BUSAN, 500); // 부산·경남 둘 다 받지만 상한이 1바이트라 마지막에 둔 하나만 남는다
+    expect(urls).toHaveLength(2);
+    await source.findNear(BUSAN, 500);
+    expect(urls).toHaveLength(3); // 밀려난 시도 하나만 다시 받는다
+  });
+
+  it('추정 바이트는 충전기 수와 글자 길이를 반영한다(상한이 넉넉하면 둘 다 둔다)', async () => {
+    const two = pageXml([itemXml({ lat: '35.18', lng: '129.07' }), itemXml({ chgerId: '02', lat: '35.18', lng: '129.07' })]);
+    const { fn, urls } = zcodeFetch({ '26': two, '48': two });
+    const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn, maxCachedBytes: 100_000 });
+    await source.findNear(BUSAN, 500);
+    await source.findNear(BUSAN, 500);
+    expect(urls).toHaveLength(2);
+  });
+
+  it('응답 원문을 동시에 들고 있는 쪽 수는 maxConcurrentPages를 넘지 않는다', async () => {
+    for (const limit of [1, 2]) {
+      let active = 0;
+      let peak = 0;
+      const { fn } = fakeFetch(async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await tick(3);
+        active -= 1;
+        return xmlResponse(pageXml([]));
+      });
+      // 광주·전남(코드 12·29·46)과 이웃 시도까지 한꺼번에 받아도 동시에 받는 쪽은 상한 이하다
+      await createEvChargerSource({ serviceKey: 'k', fetchImpl: fn, maxConcurrentPages: limit }).findNear({ lat: 35.3, lng: 127.3 }, 500);
+      expect(peak).toBe(limit);
+    }
+  });
+
+  it('쪽은 받는 즉시 읽어 충전기만 모은다(여러 쪽을 이어 받는다)', async () => {
+    const { fn, urls } = fakeFetch((url) => xmlResponse(pageXml([itemXml({ statId: `s${new URL(url).searchParams.get('pageNo')}`, lat: '37.88', lng: '127.73' })], 40_000)));
+    const found = await createEvChargerSource({ serviceKey: 'k', fetchImpl: fn, maxConcurrentPages: 1 }).findNear(CHUNCHEON, 500);
+    expect(urls).toHaveLength(5);
+    expect(found.map((c) => c.stationId).sort()).toEqual(['s1', 's2', 's3', 's4', 's5']);
+  });
+
+  it('이웃 시도 받기가 실패하면 가까운 시도 결과로 답하고 info.partial을 켠다', async () => {
+    const { fn } = fakeFetch((url) => (zcodeOf(url) === '28' ? xmlResponse(pageXml([itemXml({})])) : zcodeOf(url) === '11' ? xmlResponse('x', 503) : xmlResponse(pageXml([]))));
+    const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn });
+    const info: NearInfo = {};
+    expect((await source.findNear(INCHEON, 500, undefined, info)).map((c) => c.stationId)).toEqual(['EX000001']);
+    expect(info.partial).toBe(true);
+    expect(info.staleSince).toBeUndefined();
+  });
+
+  it('가장 가까운 시도 받기가 실패하면 이웃이 받아져도 던진다', async () => {
+    const { fn } = fakeFetch((url) => (zcodeOf(url) === '28' ? xmlResponse('x', 503) : xmlResponse(pageXml([itemXml({})]))));
+    await expect(createEvChargerSource({ serviceKey: 'k', fetchImpl: fn }).findNear(INCHEON, 500)).rejects.toThrow('HTTP 503');
+  });
+
+  it('서비스를 거치면 이웃 시도 실패가 partial: true로 나온다', async () => {
+    const { fn } = fakeFetch((url) => (zcodeOf(url) === '41' ? xmlResponse('x', 503) : zcodeOf(url) === '28' ? xmlResponse(pageXml([itemXml({ chgerType: '02', output: '7', powerType: '' })])) : xmlResponse(pageXml([]))));
+    const sources: EnergySources = { ...newAppSources(), chargers: createEvChargerSource({ serviceKey: 'k', fetchImpl: fn }) };
+    const r = await findEnergyOptions({ fuel: 'ev', origin: { lat: 37.45, lng: 126.6 }, destination: INCHEON, stayMinutes: 180, at: new Date() }, sources);
+    expect(r).toMatchObject({ source: 'live', stage: 'destination', partial: true, stale: false, asOf: null });
+  });
+
+  it('낡은 캐시로 답하면 서비스 응답에 stale과 asOf가 실린다', async () => {
+    let clock = Date.parse('2026-11-06T03:00:00Z');
+    let healthy = true;
+    const { fn } = fakeFetch((url) =>
+      !healthy ? xmlResponse('x', 503) : xmlResponse(zcodeOf(url) === '28' ? pageXml([itemXml({ chgerType: '02', output: '7', powerType: '' })]) : pageXml([])),
+    );
+    const chargers = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn, now: () => clock });
+    const sources: EnergySources = { ...newAppSources(), chargers };
+    const req = { fuel: 'ev', origin: { lat: 37.45, lng: 126.6 }, destination: INCHEON, stayMinutes: 180, at: new Date() } as const;
+    expect(await findEnergyOptions(req, sources)).toMatchObject({ stale: false, asOf: null });
+    healthy = false;
+    clock += 10 * 60_000; // 5분 캐시가 끝났고 새로 받기는 실패한다
+    expect(await findEnergyOptions(req, sources)).toMatchObject({ source: 'live', stage: 'destination', stale: true, asOf: '2026-11-06T03:00:00.000Z' });
+  });
+
+  it('연속으로 실패하면 쉬는 시간이 30초, 60초, 120초… 늘어나고 상한(10분)을 넘지 않으며, 성공하면 처음으로 돌아간다', async () => {
+    let clock = 10_000_000;
+    let healthy = false;
+    const { fn, mock } = fakeFetch(() => (healthy ? xmlResponse(one('ok')) : xmlResponse('x', 503)));
+    const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn, now: () => clock });
+    const attempt = async () => {
+      await source.findNear(CHUNCHEON, 500).catch(() => undefined);
+      return mock.mock.calls.length;
+    };
+    const waits: number[] = [];
+    let calls = await attempt(); // 첫 실패
+    expect(calls).toBe(1);
+    for (let i = 0; i < 8; i++) {
+      // 다음 시도가 나갈 때까지 1초씩 기다리며 걸린 시간을 잰다
+      const startedAt = clock;
+      let next = calls;
+      while (next === calls) {
+        clock += 1_000;
+        next = await attempt();
+      }
+      waits.push((clock - startedAt) / 1_000);
+      calls = next;
+    }
+    // 실패한 시각부터 잰 쉬는 시간: 30, 60, 120, 240, 480, 600(상한), 600, 600초
+    expect(waits).toEqual([30, 60, 120, 240, 480, 600, 600, 600]);
+    healthy = true;
+    clock += 601_000;
+    expect((await source.findNear(CHUNCHEON, 500)).map((c) => c.stationId)).toEqual(['ok']);
+    healthy = false;
+    clock += 6 * 60_000; // 캐시가 끝나 다시 받다 실패한다(처음 쉬는 시간으로 돌아갔다)
+    await source.findNear(CHUNCHEON, 500);
+    const afterFailure = mock.mock.calls.length;
+    clock += 31_000;
+    await source.findNear(CHUNCHEON, 500);
+    expect(mock.mock.calls.length).toBe(afterFailure + 1);
+  });
+
+  it('남한 영토 밖(북한·일본) 좌표는 호출하지 않고 빈 목록을 준다', async () => {
+    const { fn, mock } = fakeFetch(() => xmlResponse(pageXml([itemXml({})])));
+    const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: fn });
+    for (const p of [{ lat: 39.03, lng: 125.75 }, { lat: 37.97, lng: 126.55 }, { lat: 34.42, lng: 129.33 }, { lat: 33.59, lng: 130.4 }]) expect(await source.findNear(p, 500)).toEqual([]);
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it('큰 시도를 제한 시간(기본 120초) 안에 못 받으면 그 시도는 캐시되지 않고, 호출자는 실패로 답받고, 쉬는 시간 뒤에 처음부터 다시 받는다', async () => {
+    let clock = 5_000_000;
+    // 쪽마다 40ms가 걸리는 시도: 3쪽(totalCount 25000)이 필요해 제한 시간(50ms) 안에 끝나지 않는다. 중단 신호를 따른다.
+    const slowPages = vi.fn(
+      (input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          const pageNo = new URL(String(input)).searchParams.get('pageNo');
+          const timer = setTimeout(() => resolve(xmlResponse(pageXml([itemXml({ statId: `s${pageNo}`, lat: '37.88', lng: '127.73' })], 25_000))), 40);
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        }),
+    );
+    const source = createEvChargerSource({ serviceKey: 'k', fetchImpl: slowPages as unknown as typeof fetch, now: () => clock, waitMs: 10, loadTimeoutMs: 50 });
+    await expect(source.findNear(CHUNCHEON, 500)).rejects.toThrow('늦습니다'); // 호출자는 waitMs만 기다린다
+    await tick(150); // 받기가 제한 시간에 걸려 끝난다
+    const afterFirstLoad = slowPages.mock.calls.length;
+    await expect(source.findNear(CHUNCHEON, 500)).rejects.toThrow('쉬는 중'); // 부분 데이터는 캐시되지 않았고, 쉬는 시간 안에는 다시 받지 않는다
+    expect(slowPages.mock.calls.length).toBe(afterFirstLoad);
+    clock += 31_000;
+    await expect(source.findNear(CHUNCHEON, 500)).rejects.toThrow('늦습니다'); // 쉬는 시간이 지나면 처음부터(1쪽부터) 다시 받는다
+    expect(slowPages.mock.calls.length).toBe(afterFirstLoad + 1);
+    expect(new URL(String(slowPages.mock.lastCall![0])).searchParams.get('pageNo')).toBe('1');
+    await tick(150);
   });
 });
 
