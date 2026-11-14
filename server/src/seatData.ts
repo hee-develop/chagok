@@ -12,8 +12,8 @@ import { DEFAULT_SEAT_ID, type SeatEvent } from './seats.js';
 export type Override = { place: StoredPlace | null; noTravel: boolean };
 
 /**
- * 운전자 자리 하나가 가진 데이터. 일정·캘린더 선택·자주 가는 곳·가족 요청·일정별 보정과 채비·장소 기억이 자리별로 따로 쌓인다.
- * 장소 기억(`memory`)이 여기 있고, 앞으로 생길 도착 횟수·이동 없음 기억 저장소도 여기에 붙인다(자리를 지우면 함께 지워진다).
+ * 운전자 자리 하나가 가진 데이터. 일정·캘린더 선택·자주 가는 곳·가족 요청·일정별 보정과 채비·장소 기억·도착 횟수가 자리별로 따로 쌓인다.
+ * 앞으로 생길 이동 없음 기억 저장소도 여기에 붙인다(자리를 지우면 함께 지워진다).
  */
 export type SeatData = {
   events: EventsStore;
@@ -76,9 +76,10 @@ export type SeatDataRegistry = {
   remove(seatId: string): void;
   /**
    * 만료된 것을 지금 정리한다(정기 작업): 모든 자리(기본 자리 포함)와 연결 전 버킷의 날짜 지난 일정을 버리고(일정이 바뀌면 그 일정에 딸린 보정·채비도 따라 지워진다),
-   * TTL이 지난 연결 전 버킷과 오래된 버킷 생성 기록을 버린다. 지운 일정 수와 버린 버킷 수.
+   * TTL이 지난 연결 전 버킷과 오래된 버킷 생성 기록을 버린다. 일정이 날짜가 지나 지워질 때 그 일정에 붙은 가족 요청(`family`)과 낡은 도착 일정 id 기억(`arrivals`)도 함께 지운다.
+   * 지운 일정·가족 요청·도착 일정 id 기억 수와 버린 버킷 수.
    */
-  purgeExpired(): { eventsRemoved: number; bucketsDropped: number };
+  purgeExpired(): { eventsRemoved: number; bucketsDropped: number; familyRequestsRemoved: number; arrivalKeysForgotten: number };
   /** 자리 이벤트(생성·교체·삭제)를 데이터에 반영한다. 연결 상태를 가진 SeatStore를 구독시킨다. */
   apply(event: SeatEvent): void;
 };
@@ -271,8 +272,14 @@ export function createSeatDataRegistry({
     purgeExpired: () => {
       const bucketsDropped = purgeBuckets();
       let eventsRemoved = 0;
-      for (const d of [...bySeat.values(), ...[...buckets.values()].map((b) => b.data)]) eventsRemoved += d.events.purgeExpired();
-      return { eventsRemoved, bucketsDropped };
+      let familyRequestsRemoved = 0;
+      let arrivalKeysForgotten = 0;
+      for (const d of [...bySeat.values(), ...[...buckets.values()].map((b) => b.data)]) {
+        eventsRemoved += d.events.purgeExpired();
+        familyRequestsRemoved += d.family.purgeExpired();
+        arrivalKeysForgotten += d.arrivals.purgeExpired();
+      }
+      return { eventsRemoved, bucketsDropped, familyRequestsRemoved, arrivalKeysForgotten };
     },
     apply: (event) => {
       if (event.type === 'removed') {

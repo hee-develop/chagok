@@ -73,6 +73,7 @@ export type AppOptions = {
   /**
    * 자리 데이터 저장소. 없으면 인스턴스마다 새로 만든다(그때는 `events`·`store`·`favorites`·`familyStore`·`capacity`가 쓰인다).
    * 서버 시작 코드(`index.ts`)는 정기 정리 작업(`jobs.ts`)이 같은 저장소를 비우도록 밖에서 만들어 넘긴다.
+   * **넘기면 `events`·`store`·`favorites`·`familyStore`·`capacity`를 함께 줄 수 없다**(함께 주면 오류. 기본 자리 저장소·용량은 `createSeatDataRegistry`의 `defaults`·옵션으로 정한다).
    */
   seatData?: SeatDataRegistry;
   /** 연결 전 버킷 수·TTL·생성 속도 제한과 일정 저장 용량 예산(연결된 자리/버킷 따로, 버킷 하나의 상한). 기본값은 seatData.ts. 테스트에서 바꾼다. */
@@ -117,6 +118,13 @@ export const createApp = ({
   placeSearchRateLimit,
   placeMemoryRateLimit,
 }: AppOptions) => {
+  // `seatData`를 넘기면 기본 자리의 저장소·용량은 그 저장소가 이미 정했으므로, 같은 일을 하는 옵션을 함께 주면 조용히 무시되지 않게 오류로 알린다.
+  if (seatData !== undefined) {
+    const conflicting = Object.entries({ events, store, favorites, familyStore, capacity }).filter(([, v]) => v !== undefined).map(([k]) => k);
+    if (conflicting.length > 0) {
+      throw new Error(`createApp: seatData와 ${conflicting.join('·')}는 함께 쓸 수 없습니다(seatData를 만들 때 defaults·용량 옵션으로 넘기세요)`);
+    }
+  }
   // 일정·선택·자주 가는 곳·가족 요청·보정·채비는 운전자 자리마다 따로 쌓인다. 토큰 없이 기기 id만 있는 폰은 그 기기의 연결 전 버킷을,
   // 식별이 전혀 없는 요청은 기본 자리를 쓴다(픽스처·데모·차량 E2E 경로).
   const registry =

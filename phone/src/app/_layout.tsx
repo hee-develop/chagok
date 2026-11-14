@@ -10,6 +10,7 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useEventSync } from '../features/calendar-sync/useEventSync';
+import { bindLocalCarStateToSession } from '../features/pair-car/localState';
 import { useNotifications } from '../features/notifications/useNotifications';
 import { colors, FontsLoadedContext } from '../ui/theme';
 
@@ -18,6 +19,8 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   useEventSync();
   useNotifications();
+  // 서버가 401로 폰 토큰을 거절해 버릴 때(폰 바뀜·30일 정리·차곡 초기화)도 직접 끊기와 같은 범위의 로컬 상태를 비운다.
+  useEffect(() => bindLocalCarStateToSession(), []);
   const [loaded, error] = useFonts({
     IBMPlexSansKR_400Regular,
     IBMPlexSansKR_500Medium,

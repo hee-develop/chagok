@@ -2,6 +2,8 @@ import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import {
+  ARRIVAL_FUTURE_SKEW_MS,
+  ARRIVAL_PAST_LIMIT_MS,
   FREQUENT_ARRIVALS_OVER,
   MAX_PLACE_ADDRESS_LENGTH,
   MAX_PLACE_NAME_LENGTH,
@@ -14,12 +16,10 @@ import type { MockPlace, PlacesCatalog } from '../fixture-types.js';
 import { MAX_BODY_BYTES, MAX_ID_LENGTH } from '../limits.js';
 import { bearerOf, type SeatEnv, type SeatGuard } from '../seatScope.js';
 import type { SeatStore } from '../seats.js';
-import { DAY_MS, MINUTE_MS, parseAt } from '../time.js';
+import { parseAt } from '../time.js';
 
-/** `POST /arrivals`의 `at`은 서버 시각보다 이만큼(시계 오차) 넘게 미래일 수 없다(가안). */
-export const ARRIVAL_FUTURE_SKEW_MS = 10 * MINUTE_MS;
-/** `POST /arrivals`의 `at`은 서버 시각보다 이만큼 넘게 과거일 수 없다. 차가 오프라인일 때 모았다 보내는 여유(가안). */
-export const ARRIVAL_PAST_LIMIT_MS = 3 * DAY_MS;
+// `at`을 받는 범위는 도착 일정 id 기억의 보관 기간(`ARRIVAL_KEY_DAYS`)과 한 곳에서 정한다(`arrivals.ts`).
+export { ARRIVAL_FUTURE_SKEW_MS, ARRIVAL_PAST_LIMIT_MS };
 
 const tooLarge = bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => c.json({ error: `본문은 ${MAX_BODY_BYTES}바이트 이하여야 합니다` }, 413) });
 const unauthorized = (c: Context, error: string) => c.json({ error, reason: 'unauthorized' as const }, 401);

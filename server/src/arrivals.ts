@@ -1,5 +1,5 @@
 import type { MockPlace } from './fixture-types.js';
-import { formatSeoulDate, seoulDay } from './time.js';
+import { DAY_MS, MINUTE_MS, formatSeoulDate, seoulDay } from './time.js';
 
 /**
  * 장소 도착 횟수와 '자주 가는 곳' 후보 계산(정책서 6장 '도착', 8장 끝 문단, 11장 '도착 횟수', 12장 '자주 가는 곳 기준').
@@ -14,10 +14,17 @@ export const FREQUENT_ARRIVALS_OVER = 3;
 export const HOME_RADIUS_METERS = 300;
 /** 자리당 도착 횟수를 기억하는 장소 수 상한(가안). 넘으면 가장 오래 안 간 곳부터 지운다. */
 export const MAX_ARRIVAL_PLACES = 100;
-/** 같은 일정의 도착을 한 번만 세려고 기억해 두는 (날짜, 일정 id) 수 상한(가안). 넘으면 가장 오래된 것부터 잊는다. */
+/** `POST /arrivals`의 `at`은 서버 시각보다 이만큼(시계 오차) 넘게 미래일 수 없다(가안). */
+export const ARRIVAL_FUTURE_SKEW_MS = 10 * MINUTE_MS;
+/** `POST /arrivals`의 `at`은 서버 시각보다 이만큼 넘게 과거일 수 없다. 차가 오프라인일 때 모았다 보내는 여유(가안). */
+export const ARRIVAL_PAST_LIMIT_MS = 3 * DAY_MS;
+/** 같은 일정의 도착을 한 번만 세려고 기억해 두는 일정 id 수 상한(가안). 넘으면 가장 오래된 것부터 잊는다. */
 export const MAX_ARRIVAL_KEYS = 500;
-/** (날짜, 일정 id) 기억은 그 날짜가 이 일수만큼 지나면 버린다(정책서 11장 '일정 상태 — 그날까지'에 하루 여유를 더함). */
-export const ARRIVAL_KEY_DAYS = 2;
+/**
+ * 일정 id 기억은 **처음 센 `at`의 서울 날짜**가 이 일수만큼 지나면 버린다. `at`을 받는 범위(`ARRIVAL_PAST_LIMIT_MS`, 3일 전)에 서울 날짜 경계 하루를 더한 값이라,
+ * 3일 전 `at`으로 센 도착도 같은 `at`으로 다시 와 있는 동안은 중복으로 센다(기억이 받는 범위보다 일찍 사라지지 않는다).
+ */
+export const ARRIVAL_KEY_DAYS = Math.ceil(ARRIVAL_PAST_LIMIT_MS / DAY_MS) + 1;
 export const MAX_PLACE_NAME_LENGTH = 100;
 export const MAX_PLACE_ADDRESS_LENGTH = 200;
 
@@ -45,12 +52,12 @@ export type ArrivalInput = {
   address: string | null;
   lat: number;
   lng: number;
-  /** 있으면 그날(서울) 이 일정의 도착은 한 번만 센다. 없으면 부를 때마다 센다. */
+  /** 있으면 이 일정 id의 도착은 (기억이 살아 있는 동안) **`at`의 날짜가 달라도** 한 번만 센다. 없으면 부를 때마다 센다. */
   scheduleId: string | null;
   /** 도착한 시각(마지막 날짜를 정하는 데만 쓴다. 저장하지 않는다). */
   at: Date;
 };
-/** `counted`가 false면 같은 날 같은 일정의 도착이 이미 세어져 있어 횟수를 올리지 않은 것이다(그때 `place`는 처음 센 장소, 지워졌으면 null). */
+/** `counted`가 false면 같은 일정 id의 도착이 이미 세어져 있어 횟수를 올리지 않은 것이다(그때 `place`는 처음 센 장소, 지워졌으면 null). */
 export type ArrivalRecord = { counted: boolean; place: ArrivalPlace | null };
 
 export type ArrivalsStore = {
@@ -60,6 +67,10 @@ export type ArrivalsStore = {
   list(): ArrivalPlace[];
   /** 사용자가 장소 하나의 도착 횟수를 지운다. 있었으면 true. */
   remove(id: string): boolean;
+  /** 낡은 일정 id 기억을 지금 버린다(정기 작업 `purge-expired`). 버린 수. 도착 횟수 자체(장소·횟수)는 사용자가 지울 때까지 남긴다. */
+  purgeExpired(): number;
+  /** 개발·데모용 초기화: 장소별 도착 횟수와 일정 id 기억을 모두 비운다(기본 자리만 쓴다, `DELETE /events`). */
+  clear(): void;
 };
 
 const byRank = (a: ArrivalPlace, b: ArrivalPlace) =>
@@ -67,20 +78,37 @@ const byRank = (a: ArrivalPlace, b: ArrivalPlace) =>
 
 export function createArrivalsStore(now: () => Date = () => new Date()): ArrivalsStore {
   const places = new Map<string, ArrivalPlace>();
-  /** (서울 날짜 번호:일정 id) → { 날짜, 처음 센 장소 id }. 같은 일정의 도착을 두 번 세지 않으려는 기억이다. */
+  /** 일정 id → { 처음 센 `at`의 서울 날짜 번호, 처음 센 장소 id }. 같은 일정의 도착을 두 번 세지 않으려는 기억이다(`at`의 날짜가 달라도 한 번). */
   const counted = new Map<string, { day: number; placeId: string }>();
   let seq = 0;
 
+  /** 처음 센 날짜가 `ARRIVAL_KEY_DAYS`보다 오래된 기억과 상한을 넘는 오래된 기억을 버린다. 버린 수. */
   const forgetOldKeys = () => {
     const oldest = seoulDay(now().getTime()) - ARRIVAL_KEY_DAYS;
-    for (const [key, v] of counted) if (v.day < oldest) counted.delete(key);
-    while (counted.size > MAX_ARRIVAL_KEYS) counted.delete(counted.keys().next().value as string);
+    let forgotten = 0;
+    for (const [key, v] of counted) {
+      if (v.day >= oldest) continue;
+      counted.delete(key);
+      forgotten += 1;
+    }
+    while (counted.size > MAX_ARRIVAL_KEYS) {
+      counted.delete(counted.keys().next().value as string);
+      forgotten += 1;
+    }
+    return forgotten;
   };
-  /** 가장 오래 안 간 곳(마지막 날짜가 가장 이른 것, 같으면 횟수가 적은 것, 같으면 먼저 만든 것). */
+  /**
+   * 상한을 넘을 때 지울 곳. **자주 가는 곳 기준(`FREQUENT_ARRIVALS_OVER`)을 넘은 곳은 한 번만 간 곳(기준 이하)보다 나중에** 밀려난다:
+   * 기준 이하인 곳이 있으면 그중에서, 없을 때만 기준을 넘은 곳에서 고른다. 고르는 순서는 마지막 날짜가 이른 것, 같으면 횟수가 적은 것, 같으면 먼저 만든 것.
+   */
   const evictOne = () => {
+    const older = (a: ArrivalPlace, b: ArrivalPlace) => a.lastDate < b.lastDate || (a.lastDate === b.lastDate && a.count < b.count);
     let victim: ArrivalPlace | null = null;
     for (const p of places.values()) {
-      if (victim === null || p.lastDate < victim.lastDate || (p.lastDate === victim.lastDate && p.count < victim.count)) victim = p;
+      if (victim === null) victim = p;
+      else if (p.count > FREQUENT_ARRIVALS_OVER !== victim.count > FREQUENT_ARRIVALS_OVER) {
+        if (p.count <= FREQUENT_ARRIVALS_OVER) victim = p;
+      } else if (older(p, victim)) victim = p;
     }
     if (victim) places.delete(victim.id);
   };
@@ -90,7 +118,7 @@ export function createArrivalsStore(now: () => Date = () => new Date()): Arrival
       forgetOldKeys();
       const day = seoulDay(input.at.getTime());
       const date = formatSeoulDate(day);
-      const key = input.scheduleId === null ? null : `${day}:${input.scheduleId}`;
+      const key = input.scheduleId;
       if (key !== null) {
         const seen = counted.get(key);
         if (seen) return { counted: false, place: places.get(seen.placeId) ?? null };
@@ -121,6 +149,11 @@ export function createArrivalsStore(now: () => Date = () => new Date()): Arrival
     },
     list: () => [...places.values()].sort(byRank),
     remove: (id) => places.delete(id),
+    purgeExpired: forgetOldKeys,
+    clear: () => {
+      places.clear();
+      counted.clear();
+    },
   };
 }
 

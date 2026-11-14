@@ -20,7 +20,11 @@ jest.mock('../../../api/session', () => ({
 }));
 jest.mock('../deviceName', () => ({ getDeviceName: () => 'Pixel 9' }));
 const mockClearLocal = jest.fn();
-jest.mock('../localState', () => ({ clearLocalCarState: (...args: unknown[]) => mockClearLocal(...args) }));
+const mockQuiesce = jest.fn();
+jest.mock('../localState', () => ({
+  clearLocalCarState: (...args: unknown[]) => mockClearLocal(...args),
+  quiesceLocalCarState: (...args: unknown[]) => mockQuiesce(...args),
+}));
 
 beforeEach(() => {
   mockClaim.mockReset();
@@ -29,6 +33,8 @@ beforeEach(() => {
   mockSetToken.mockReset();
   mockClearToken.mockReset();
   mockClearLocal.mockReset();
+  mockQuiesce.mockReset();
+  mockQuiesce.mockReturnValue(jest.fn());
 });
 
 describe('pairingApi.claim', () => {
@@ -55,11 +61,13 @@ describe('pairingApi.claim', () => {
 describe('pairingApi.disconnect', () => {
   it('서버가 지우면 토큰을 버리고, 그 자리에 딸린 로컬 상태(알림함·폴링·일정 보내기 기억·거른 일정)를 비운다', async () => {
     const order: string[] = [];
+    mockQuiesce.mockImplementation(() => (order.push('quiesce'), () => void order.push('release')));
     mockDelete.mockImplementation(async () => (order.push('delete'), { status: 200 }));
     mockClearToken.mockImplementation(async () => void order.push('token'));
     mockClearLocal.mockImplementation(() => void order.push('local'));
     await pairingApi.disconnect(new AbortController().signal);
-    expect(order).toEqual(['delete', 'token', 'local']);
+    // 일정 보내기·폴링은 서버 DELETE와 토큰 삭제보다 먼저 멈춘다.
+    expect(order).toEqual(['quiesce', 'delete', 'token', 'local', 'release']);
     expect(mockClearToken).toHaveBeenCalledTimes(1);
     expect(mockClearLocal).toHaveBeenCalledTimes(1);
   });
@@ -71,11 +79,23 @@ describe('pairingApi.disconnect', () => {
     expect(mockClearLocal).toHaveBeenCalledTimes(1);
   });
 
-  it('서버 오류면 던지고 토큰은 남긴다(다시 시도할 수 있게)', async () => {
+  it('서버 오류면 던지고 토큰은 남긴다(다시 시도할 수 있게). 붙잡은 일정 보내기는 푼다', async () => {
+    const release = jest.fn();
+    mockQuiesce.mockReturnValue(release);
     mockDelete.mockResolvedValue({ status: 500 });
     await expect(pairingApi.disconnect(new AbortController().signal)).rejects.toMatchObject({ status: 500 });
     expect(mockClearToken).not.toHaveBeenCalled();
     expect(mockClearLocal).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('네트워크 오류로 던져도 붙잡은 일정 보내기는 푼다', async () => {
+    const release = jest.fn();
+    mockQuiesce.mockReturnValue(release);
+    mockDelete.mockRejectedValue(new Error('network'));
+    await expect(pairingApi.disconnect(new AbortController().signal)).rejects.toThrow('network');
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(mockClearToken).not.toHaveBeenCalled();
   });
 });
 

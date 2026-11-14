@@ -67,8 +67,15 @@ export type ResettableEventSync = EventSync & {
   /**
    * `stop()`에 더해 이 폰이 기억하던 것을 잊는다: 직전에 보낸 내용(같은 내용 생략 기준), 기억해 둔 캘린더 선택, 마지막 결과.
    * 차 연결을 끊은 뒤 다른 자리(다른 차)로 이어 붙을 때 옛 자리에서 하던 대로 선택·일정을 다시 보내지 않게 한다.
+   * reset 뒤에 취소돼 끝나는 옛 실행은 마지막 결과(`lastResult()`)를 다시 남기지 않는다(reset 직후 `null`이 유지된다).
    */
   reset(): void;
+  /**
+   * 일정 보내기를 붙잡아 둔다: 해제 함수를 부를 때까지 `run()`은 아무것도 보내지 않고 `cancelled`로 끝난다(여러 번 붙잡아도 되고 모두 풀려야 다시 돈다).
+   * 연결 끊기처럼 서버에서 자리를 지우는 동안 새 보내기가 시작돼, 토큰이 지워진 뒤 토큰 없이 다시 보내며 연결 전 버킷에 일정을 만들지 않게 하려는 것이다.
+   * 붙잡는 순간 진행 중인 요청도 취소한다.
+   */
+  hold(): () => void;
 };
 
 const devLog = (message: string) => {
@@ -108,6 +115,9 @@ export function createEventSync({
   let lastSent: { key: string; at: number } | null = null;
   let remembered: string[] | null = null;
   let last: SyncResult | null = null;
+  /** reset할 때마다 올린다. reset 전에 시작한 실행이 늦게 끝나도 `last`를 되살리지 않으려는 세대 번호. */
+  let epoch = 0;
+  let held = 0;
   const listeners = new Set<(result: SyncResult) => void>();
   const revisions = createRevisionClock();
 
@@ -194,10 +204,12 @@ export function createEventSync({
   const loop = async (): Promise<SyncResult> => {
     for (;;) {
       again = false;
-      last = await once();
+      const startedEpoch = epoch;
+      const result = await once();
+      if (startedEpoch === epoch) last = result; // reset 전에 시작한 실행의 결과는 남기지 않는다
       for (const listener of [...listeners]) {
         try {
-          listener(last);
+          listener(result);
         } catch {
           // 구독자가 던져도 동기화는 이어 간다.
         }
@@ -205,13 +217,14 @@ export function createEventSync({
       if (!again) {
         // 판단과 해제를 같은 동기 구간에서 해야 그 사이에 들어온 호출이 사라지지 않는다.
         running = null;
-        return last;
+        return result;
       }
     }
   };
 
   return {
     run() {
+      if (held > 0) return Promise.resolve<SyncResult>('cancelled');
       if (running) {
         again = true;
         return running;
@@ -231,6 +244,19 @@ export function createEventSync({
       lastSent = null;
       remembered = null;
       last = null;
+      epoch += 1;
+    },
+    hold() {
+      held += 1;
+      again = false;
+      current?.abort();
+      current = null;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        held -= 1;
+      };
     },
     rememberSelection(selectedIds) {
       remembered = [...selectedIds];

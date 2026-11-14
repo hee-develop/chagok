@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { afterDawn, dailyAtDawn, DAWN_HOUR, pruneSilentSeats, registerMaintenanceJobs, SILENT_SEAT_AFTER_MS } from '../src/jobs.js';
+import { afterDawn, dailyAtDawn, DAWN_HOUR, pruneSilentSeats, registerMaintenanceJobs, SILENT_PRUNE_GUARD_MIN_SEATS, SILENT_SEAT_AFTER_MS } from '../src/jobs.js';
 import { createNotifications } from '../src/notify/notifier.js';
 import { createScheduler } from '../src/scheduler.js';
 import { createSeatDataRegistry } from '../src/seatData.js';
@@ -73,6 +73,19 @@ describe('새벽 판정', () => {
     // 04:00에 꺼져 있다가 낮에 켜져도 그날 안에 따라잡는다.
     job.run(new Date(seoul('2026-11-14T15:00:00')));
     expect(runs).toHaveLength(4);
+  });
+
+  it('서버 시계가 뒤로 가면: 이미 돈 날짜에는 다시 돌지 않고, 이전 날짜로 가면 그 날짜는 아직 안 돈 날이라 한 번 돈다(작업은 반복해도 안전)', () => {
+    const runs: string[] = [];
+    const job = dailyAtDawn('t', (d) => void runs.push(d.toISOString()));
+    job.run(new Date(seoul('2026-11-14T05:00:00')));
+    job.run(new Date(seoul('2026-11-14T04:30:00'))); // 같은 날 안에서 뒤로: 다시 돌지 않는다
+    expect(runs).toHaveLength(1);
+    job.run(new Date(seoul('2026-11-13T23:00:00'))); // 전날로 뒤로: 그 날짜는 안 돈 날이라 한 번 돈다
+    job.run(new Date(seoul('2026-11-13T23:30:00')));
+    expect(runs).toHaveLength(2);
+    job.run(new Date(seoul('2026-11-13T03:00:00'))); // 새벽 전으로 가면 돌지 않는다
+    expect(runs).toHaveLength(2);
   });
 });
 
@@ -152,6 +165,40 @@ describe('purge-expired: 새벽 지난 일정 삭제', () => {
     await scheduler.tick();
     expect(logs).toHaveLength(1);
     expect(logs[0]).toContain('오래된 연결 전 버킷 1개');
+  });
+});
+
+describe('purge-expired: 가족 요청·도착 일정 기억', () => {
+  it('일정이 날짜가 지나 지워질 때 그 일정에 붙은 가족 요청도 함께 지우고, 낡은 도착 일정 id 기억을 버린다(도착 횟수는 남긴다)', async () => {
+    const { app, registry, scheduler, logs } = setup();
+    const car = await registerCar(app);
+    const a = await connectPhone(app, car, '폰A');
+    await fill(app, a.phoneToken);
+    for (const id of ['e1', 'e2']) expect((await call(app, 'POST', `/schedules/${id}/family-request`, { token: a.phoneToken, body: { memberId: 'family-mom' } })).status).toBe(200);
+    const arrive = (scheduleId: string, atIso: string) =>
+      call(app, 'POST', `/arrivals?driver=${a.seatId}`, { token: car.carToken, body: { scheduleId, place: { name: '광주 시립도서관', lat: 35.1329, lng: 126.9025 }, at: atIso } });
+    expect((await arrive('e1', '2026-11-11T09:00:00+09:00')).body.counted).toBe(true);
+    const d = registry.get(a.seatId);
+    expect(d.family.list().map((r) => r.scheduleId).sort()).toEqual(['e1', 'e2']);
+
+    // 11-12 새벽: e1(어제 11시 끝남)의 가족 요청만 지워진다. e2(내일 일정)는 남는다.
+    at('2026-11-12T04:00:00');
+    await scheduler.tick();
+    expect(d.family.list().map((r) => r.scheduleId)).toEqual(['e2']);
+    expect(logs.join('\n')).toContain('가족 요청 1건');
+    // 11-13 새벽: e2도 지난다.
+    at('2026-11-13T04:00:00');
+    await scheduler.tick();
+    expect(d.family.list()).toEqual([]);
+
+    // 도착 일정 id 기억: 처음 센 날짜(11-11)가 4일(ARRIVAL_KEY_DAYS) 넘게 지난 11-16 새벽에 버린다. 도착 횟수 자체는 남는다.
+    at('2026-11-15T04:00:00');
+    await scheduler.tick();
+    expect(logs.join('\n')).not.toContain('도착 일정 기억 1건');
+    at('2026-11-16T04:00:00');
+    await scheduler.tick();
+    expect(logs.join('\n')).toContain('도착 일정 기억 1건');
+    expect(d.arrivals.list()).toMatchObject([{ name: '광주 시립도서관', count: 1 }]);
   });
 });
 
@@ -238,7 +285,7 @@ describe('prune-silent-seats: 30일 무소식 자리 정리', () => {
     // 폰B는 그대로.
     expect(seats.seat(b.seatId)).not.toBeNull();
     expect(registry.get(b.seatId)).toBe(bData);
-    expect(bData.favorites.get().home).toBe('mock-home-apt');
+    expect(bData.favorites.get().home?.id).toBe('mock-home-apt'); // 자주 가는 곳은 장소 스냅숏(id를 가진다)
     expect(notifications.outbox.size(b.seatId)).toBe(1);
     expect((await call(app, 'GET', '/pair', { token: b.phoneToken })).status).toBe(200);
 
@@ -254,3 +301,80 @@ describe('prune-silent-seats: 30일 무소식 자리 정리', () => {
     expect((await call(app, 'GET', '/drivers', { token: car2.carToken })).status).toBe(200);
   });
 });
+
+describe('prune-silent-seats: 안전장치(서버 시계 이상)와 시계가 뒤로 간 경우', () => {
+  const pairedMs = (s: { pairedAt: string }) => Date.parse(s.pairedAt);
+  /** 차마다 자리 하나씩, n개. */
+  const connectMany = async (app: ReturnType<typeof setup>['app'], n: number) => {
+    const list: { seatId: string; phoneToken: string; pairedAt: string }[] = [];
+    for (let i = 0; i < n; i++) list.push(await connectPhone(app, await registerCar(app), `폰${i}`));
+    return list;
+  };
+  const sendEvents = async (app: ReturnType<typeof setup>['app'], token: string) => expect((await call(app, 'PUT', '/events', { token, body: { events: [] } })).status).toBe(200);
+
+  it(`지울 자리가 전체의 절반을 넘고 자리가 ${SILENT_PRUNE_GUARD_MIN_SEATS}개 이상이면 시계 이상으로 보고 건너뛴다(경고 한 줄, 아무것도 지우지 않음)`, async () => {
+    const { app, seats } = setup();
+    const list = await connectMany(app, 4);
+    const warns: string[] = [];
+    const later = new Date(pairedMs(list[0]!) + SILENT_SEAT_AFTER_MS + 1000);
+    // 4개 모두 무소식: 건너뜀
+    expect(pruneSilentSeats({ seats, now: later, warn: (m) => warns.push(m) })).toEqual([]);
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain('4/4');
+    expect(warns[0]).not.toContain(list[0]!.seatId); // 자리 id는 로그에 남기지 않는다
+    expect(seats.allSeats()).toHaveLength(4);
+    // 1개가 일정을 보내 3/4가 무소식: 여전히 절반 초과라 건너뜀
+    clockMs = later.getTime() - 1000;
+    await sendEvents(app, list[0]!.phoneToken);
+    expect(pruneSilentSeats({ seats, now: later, warn: (m) => warns.push(m) })).toEqual([]);
+    expect(warns).toHaveLength(2);
+    // 2개가 보내 2/4: 절반을 넘지 않으니 지운다(경고 없음)
+    await sendEvents(app, list[1]!.phoneToken);
+    expect(pruneSilentSeats({ seats, now: later, warn: (m) => warns.push(m) }).sort()).toEqual([list[2]!.seatId, list[3]!.seatId].sort());
+    expect(warns).toHaveLength(2);
+    expect(seats.allSeats()).toHaveLength(2);
+  });
+
+  it(`자리가 ${SILENT_PRUNE_GUARD_MIN_SEATS}개보다 적으면 모두 무소식이어도 지운다`, async () => {
+    const { app, seats } = setup();
+    const list = await connectMany(app, SILENT_PRUNE_GUARD_MIN_SEATS - 1);
+    const warns: string[] = [];
+    const removed = pruneSilentSeats({ seats, now: new Date(pairedMs(list[0]!) + SILENT_SEAT_AFTER_MS + 1000), warn: (m) => warns.push(m) });
+    expect(removed).toHaveLength(SILENT_PRUNE_GUARD_MIN_SEATS - 1);
+    expect(warns).toEqual([]);
+  });
+
+  it('정기 작업은 건너뛴 날 경고를 한 번만 남기고(그날 다시 판정해도 같은 경고를 쌓지 않음) 다음 날 조건이 풀리면 지운다', async () => {
+    const { app, seats } = setup();
+    const list = await connectMany(app, 4);
+    const warns: string[] = [];
+    const logs: string[] = [];
+    const sched = createScheduler({ now });
+    registerMaintenanceJobs({ scheduler: sched, seats, registry: createSeatDataRegistry({ now, fixtureIds: new Set() }), log: (m) => logs.push(m), warn: (m) => warns.push(m) });
+    clockMs = pairedMs(list[0]!) + SILENT_SEAT_AFTER_MS + 60_000;
+    at('2026-12-12T04:00:00');
+    await sched.tick();
+    clockMs += 60 * 60_000;
+    await sched.tick();
+    expect(warns).toHaveLength(1);
+    expect(seats.allSeats()).toHaveLength(4);
+    // 다음 날 새벽 전에 3개가 일정을 보내 1/4만 무소식이 되면 지운다.
+    at('2026-12-12T12:00:00');
+    for (const s of list.slice(0, 3)) await sendEvents(app, s.phoneToken);
+    at('2026-12-13T04:00:00');
+    await sched.tick();
+    expect(seats.allSeats()).toHaveLength(3);
+    expect(logs.join('\n')).toContain('자리 1개');
+  });
+
+  it('서버 시계가 뒤로 가면 더 적게 지우고(이미 지운 것은 되살리지 않는다) 던지지 않는다', async () => {
+    const { app, seats } = setup();
+    const list = await connectMany(app, 2);
+    const paired = pairedMs(list[0]!);
+    expect(pruneSilentSeats({ seats, now: new Date(paired - 5 * DAY_MS) })).toEqual([]); // 연결 시각보다 앞선 시계
+    expect(pruneSilentSeats({ seats, now: new Date(paired + SILENT_SEAT_AFTER_MS) }).sort()).toEqual(list.map((s) => s.seatId).sort());
+    expect(pruneSilentSeats({ seats, now: new Date(paired - 5 * DAY_MS) })).toEqual([]);
+    expect(seats.allSeats()).toEqual([]);
+  });
+});
+

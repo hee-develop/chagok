@@ -1,3 +1,4 @@
+import { session as appSession, type Session } from '../../api/session';
 import { appEventSync } from '../calendar-sync/eventSync';
 import { appFilteredEvents } from '../calendar-sync/filteredEvents';
 import { appInbox } from '../notifications/inbox';
@@ -21,6 +22,8 @@ export type LocalCarState = {
   stopPolling(): void;
   resetEventSync(): void;
   clearFilteredEvents(): void;
+  /** 일정 보내기를 붙잡는다(해제 함수를 돌려준다). 연결을 끊는 동안 새 보내기가 시작되지 않게 한다. */
+  holdEventSync(): () => void;
 };
 
 const appState: LocalCarState = {
@@ -28,7 +31,33 @@ const appState: LocalCarState = {
   stopPolling: () => appPoller.stop(),
   resetEventSync: () => appEventSync.reset(),
   clearFilteredEvents: () => appFilteredEvents.set([]),
+  holdEventSync: () => appEventSync.hold(),
 };
+
+/**
+ * 서버에서 자리를 지우기 **전에** 부른다(`pairingApi.disconnect`): 알림 폴링을 멈추고 일정 보내기를 멈춘 채 붙잡는다(`hold`) + 기억을 잊는다(`reset`).
+ * 끊는 동안 진행 중이던 일정 보내기가 서버의 401을 받고 토큰 없이 다시 보내 연결 전 버킷에 일정을 만드는 일이 없게 하려는 것이다.
+ * 돌려주는 해제 함수는 끊기가 끝나거나(토큰이 지워진 뒤) 실패해 이어서 연결된 채로 쓸 때 부른다.
+ */
+export function quiesceLocalCarState(state: LocalCarState = appState): () => void {
+  let release: () => void = () => undefined;
+  for (const step of [() => state.stopPolling(), () => (release = state.holdEventSync()), () => state.resetEventSync()]) {
+    try {
+      step();
+    } catch {
+      // 한 단계의 실패가 나머지를 막지 않는다.
+    }
+  }
+  return release;
+}
+
+/**
+ * 폰 토큰이 지워질 때마다(직접 끊기뿐 아니라 서버가 401로 거절해 토큰을 버리는 경우: 폰 바뀜·30일 정리·차곡 초기화) `clearLocalCarState`를 부른다.
+ * 그래서 어느 경로로 자리가 없어져도 비우는 범위가 직접 끊기와 같다. 앱 루트에서 한 번 연결하고 해제 함수를 돌려받는다.
+ */
+export function bindLocalCarStateToSession(target: Pick<Session, 'onTokenCleared'> = appSession, state: LocalCarState = appState): () => void {
+  return target.onTokenCleared(() => clearLocalCarState(state));
+}
 
 export function clearLocalCarState(state: LocalCarState = appState): void {
   for (const step of [() => state.stopPolling(), () => state.clearInbox(), () => state.resetEventSync(), () => state.clearFilteredEvents()]) {

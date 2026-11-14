@@ -3,6 +3,7 @@ import { validator } from 'hono/validator';
 import type { FamilyMember } from '../fixture-types.js';
 import { MAX_ID_LENGTH } from '../limits.js';
 import type { SeatEnv, SeatGuard } from '../seatScope.js';
+import { seoulDay, seoulDayStart } from '../time.js';
 
 /**
  * 가족에게 보낸 일정 요청. 보낼 때의 일정 내용(제목·시각·주소·채비)을 그대로 담는다.
@@ -30,6 +31,8 @@ export type FamilyStore = {
   list(): FamilyRequest[];
   forSchedule(scheduleId: string): FamilyRequest[];
   save(draft: FamilyRequestDraft): FamilyRequest;
+  /** 일정이 오늘(서울) 0시 전에 끝난 요청을 지금 버린다(정기 작업 `purge-expired`. 일정이 날짜가 지나 지워질 때 그 일정에 붙은 가족 요청도 함께 지운다). 버린 수. */
+  purgeExpired(): number;
 };
 
 export function createFamilyStore(now: () => Date = () => new Date()): FamilyStore {
@@ -43,6 +46,19 @@ export function createFamilyStore(now: () => Date = () => new Date()): FamilySto
       const saved: FamilyRequest = { ...draft, id, status: 'delivered', sentAt: now().toISOString() };
       requests.set(id, saved);
       return saved;
+    },
+    purgeExpired: () => {
+      const todayStart = seoulDayStart(seoulDay(now().getTime()));
+      let removed = 0;
+      for (const [id, r] of requests) {
+        // 끝 시각을 읽을 수 없으면(이상한 값) 지우지 않고 둔다.
+        const end = Date.parse(r.end);
+        if (Number.isFinite(end) && end < todayStart) {
+          requests.delete(id);
+          removed += 1;
+        }
+      }
+      return removed;
     },
   };
 }

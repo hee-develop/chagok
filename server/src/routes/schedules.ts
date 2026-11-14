@@ -226,7 +226,8 @@ export const createSchedulesRoute = (
             ...place, ...memoryFlag(d, s), ...(memorySuggestion ? { suggestion: memorySuggestion } : {}), title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, care: d.cares.get(s.id) ?? null, attendees: s.attendees,
           };
         }),
-        favorites: favoritesWithArrivals(favoritePlaces(d), d.arrivals.list()),
+        // 도착 횟수는 명시 식별(폰 토큰·차 토큰 + driver)로 정해진 자리에서만 반영한다. 옛 호환 읽기(식별 없음·차 토큰만)와 기본 자리(데모·E2E)는 등록한 곳만 준다.
+        favorites: sc.explicit ? favoritesWithArrivals(favoritePlaces(d), d.arrivals.list()) : favoritePlaces(d),
       }, 200);
     })
     .get('/places', guard.read, anchorValidator, (c) => {
