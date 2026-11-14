@@ -62,6 +62,15 @@ object Rules {
     /** 집 하차 카드에 올리는 픽업 물건의 최대 개수. 큰 문구가 두 줄 안에 들게 하려는 표시 한도다. */
     const val HOME_ITEMS_MAX = 3
 
+    /**
+     * 장소 칸이 빈 일정이 대상이 되는 때: 시작 이만큼 전부터(정책서 12장 '장소 묻는 때', 가안). 그 전에는 대상에서 건너뛰고 다음 일정을 본다.
+     * 출발 제안이 목적지를 다시 묻는 여유([ASK_DESTINATION_LEAD], 60분)와 같은 값이라 그대로 쓴다.
+     */
+    val PLACE_BLANK_LEAD: Duration = ASK_DESTINATION_LEAD
+
+    /** 일정 장소가 지금 차 위치에서 이 거리(미터) 안이면 '이미 그곳'이라 대상에서 뺀다(정책서 12장 '이미 그곳 반경', 가안). */
+    const val ALREADY_THERE_RADIUS_METERS = 300.0
+
     val DEPARTURE_BUFFER: Duration = Duration.ofMinutes(10)
     const val CHATTER_OVER_WORDS = 4
 

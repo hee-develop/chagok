@@ -23,6 +23,8 @@ sealed interface Question {
         val suggested: Schedule? = null,
         val departBy: Instant? = null,
         val favorites: List<Favorite> = emptyList(),
+        /** 후보에 함께 넣는 장소 있는 종일 일정(6장 종일 일정). 대상 일정 장소 다음, 자주 가는 곳 앞에 온다. */
+        val allDay: List<Schedule> = emptyList(),
         val only: Int? = null,
     ) : Question {
         /**
@@ -32,8 +34,8 @@ sealed interface Question {
         val all: List<DestinationOption>
             get() = when (reason) {
                 AskReason.PLENTY_OF_TIME -> listOfNotNull(suggested?.takeIf { it.place != null }?.let { DestinationOption.OfSchedule(it) }) +
-                    favorites.map { DestinationOption.OfFavorite(it) }
-                AskReason.NO_SCHEDULE -> favorites.map { DestinationOption.OfFavorite(it) }
+                    allDay.map { DestinationOption.OfAllDay(it) } + favorites.map { DestinationOption.OfFavorite(it) }
+                AskReason.NO_SCHEDULE -> allDay.map { DestinationOption.OfAllDay(it) } + favorites.map { DestinationOption.OfFavorite(it) }
                 AskReason.PLACE_UNKNOWN -> emptyList()
             }
 
@@ -66,6 +68,11 @@ sealed interface DestinationOption {
 
     /** 대상 일정의 장소(여유 많음의 1번 후보). */
     data class OfSchedule(val schedule: Schedule) : DestinationOption {
+        override val place: Place get() = checkNotNull(schedule.place)
+    }
+
+    /** 장소가 있는 종일 일정의 장소. 길안내는 하지만 그 일정을 도착으로 기록하지는 않는다(종일 일정은 길안내 대상이 아니다). */
+    data class OfAllDay(val schedule: Schedule) : DestinationOption {
         override val place: Place get() = checkNotNull(schedule.place)
     }
 
@@ -160,6 +167,8 @@ object BoardingDecider {
      *   모르면 0으로 보고 늦음의 하한만 판단한다(`now - start > LATE_THRESHOLD`면 늦게 탐).
      *   60분 여유 판단(PLENTY_OF_TIME)은 소요 시간을 알 때만 한다.
      * @param favorites 자주 가는 곳(집 → 회사 → 추가한 순서). 일정 없음·여유 많음의 목적지 묻기 후보로 붙인다.
+     * @param here 지금 차 위치(믿을 만한 최근 측위가 있을 때만, 없으면 null). 일정 장소가 [Rules.ALREADY_THERE_RADIUS_METERS] 안이면 대상에서 빼고,
+     *   지금 집이면([Rules.HOME_RADIUS_METERS]) 후보에서 집을 뺀다. null이면 두 판정을 건너뛴다.
      */
     fun decide(
         now: Instant,
@@ -168,11 +177,12 @@ object BoardingDecider {
         planIsFallback: Boolean,
         travelTime: Duration?,
         favorites: List<Favorite> = emptyList(),
+        here: LatLng? = null,
     ): BoardingDecision {
         if (kind == BoardingKind.QUICK_STOP) return BoardingDecision.StaySilent
 
         val current = plan?.skipOverdue(now)
-        val target = current?.target()
+        val target = current?.boardingTarget(now, here)
         val briefing = Briefing(
             level = if (kind == BoardingKind.FIRST) Briefing.Level.FULL else Briefing.Level.ONE_LINE,
             target = target,
@@ -182,27 +192,57 @@ object BoardingDecider {
             memo = MemoNote.forBoarding(kind == BoardingKind.FIRST, current, target),
             fromFallback = plan != null && planIsFallback,
         )
-        return BoardingDecision.Card(briefing, question(now, target, travelTime, favorites))
+        return BoardingDecision.Card(briefing, question(now, target, travelTime, favorites, current?.allDayWithPlace(now).orEmpty(), here))
     }
 
-    private fun question(now: Instant, target: Schedule?, travelTime: Duration?, favorites: List<Favorite>): Question {
+    private fun question(
+        now: Instant,
+        target: Schedule?,
+        travelTime: Duration?,
+        allFavorites: List<Favorite>,
+        allDay: List<Schedule>,
+        here: LatLng?,
+    ): Question {
+        // 지금 집이면 집은 후보에서 뺀다(8장).
+        val favorites = allFavorites.filterNot { it.kind == FavoriteKind.HOME && here != null && here.distanceTo(it.place.position) <= Rules.HOME_RADIUS_METERS }
         if (target == null) {
-            return Question.AskDestination(AskReason.NO_SCHEDULE, favorites = favorites.take(Rules.MAX_DESTINATION_CANDIDATES))
+            val (days, favs) = destinationLists(null, allDay, favorites)
+            return Question.AskDestination(AskReason.NO_SCHEDULE, favorites = favs, allDay = days)
         }
         if (target.place == null) return Question.AskDestination(AskReason.PLACE_UNKNOWN, target)
         // 소요 시간을 모르면 0으로 보고 늦음의 하한만 본다. 여유(60분) 판단은 소요 시간을 알 때만 한다.
         if (travelTime != null) {
             val departBy = target.start - travelTime - Rules.DEPARTURE_BUFFER
             if (Duration.between(now, departBy) > Rules.ASK_DESTINATION_LEAD) {
-                // 일정 장소와 같은 곳은 자주 가는 곳에서 빼고, 일정 장소 한 자리를 남겨 둔다.
-                val others = favorites.filterNot { samePlace(it.place, target.place) }.take(Rules.MAX_DESTINATION_CANDIDATES - 1)
-                return Question.AskDestination(AskReason.PLENTY_OF_TIME, target, departBy, others)
+                // 일정 장소와 같은 곳은 종일 일정·자주 가는 곳에서 빼고, 일정 장소 한 자리를 남겨 둔다.
+                val (days, others) = destinationLists(target, allDay, favorites)
+                return Question.AskDestination(AskReason.PLENTY_OF_TIME, target, departBy, others, days)
             }
         }
         val arrival = travelTime?.let { now + it }
         val lateBy = Duration.between(target.start, now + (travelTime ?: Duration.ZERO))
         if (lateBy > Rules.LATE_THRESHOLD) return Question.DepartLate(target, lateBy, arrival)
         return Question.Depart(target, arrival)
+    }
+
+    /**
+     * 목적지 후보를 [Rules.MAX_DESTINATION_CANDIDATES]개 안으로 모은다. 순서는 대상 일정 장소 → 장소 있는 종일 일정 → 자주 가는 곳이고,
+     * 앞에서 이미 고른 곳과 같은 장소(이름이나 좌표)는 뒤에서 뺀다. 대상 일정은 [suggested]가 있을 때 한 자리를 쓴다.
+     */
+    private fun destinationLists(suggested: Schedule?, allDay: List<Schedule>, favorites: List<Favorite>): Pair<List<Schedule>, List<Favorite>> {
+        var room = Rules.MAX_DESTINATION_CANDIDATES - if (suggested != null) 1 else 0
+        val taken = mutableListOf<Place>()
+        suggested?.place?.let { taken += it }
+        val days = mutableListOf<Schedule>()
+        for (schedule in allDay) {
+            val place = schedule.place ?: continue
+            if (days.size >= room || taken.any { samePlace(it, place) }) continue
+            days += schedule
+            taken += place
+        }
+        room -= days.size
+        val favs = favorites.filterNot { fav -> taken.any { samePlace(it, fav.place) } }.take(room)
+        return days to favs
     }
 
     /** 이름이나 좌표가 같으면 같은 곳으로 본다(일정 장소와 자주 가는 곳은 출처가 달라 이름 표기가 다를 수 있다). */

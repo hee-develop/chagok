@@ -205,22 +205,6 @@ class DriveSessionScheduleTest {
         assertTrue(session.handle(Event.ScheduleLoaded(4)).none { it is Effect.RefreshSchedules })
     }
 
-    @Test fun `일정 안내 기록은 스냅샷에 담겨 프로세스를 다시 시작해도 이어진다`() {
-        givenNoSchedule()
-        session.handle(Event.AppEntered)
-        val shown = refreshCycle(1)
-        val saved = shown.filterIsInstance<Effect.Save>().last().snapshot
-        assertEquals(java.time.LocalDate.of(2026, 12, 3), saved.noticeDate)
-
-        // 같은 날 새 세션(프로세스 재시작)에서는 안내하지 않는다.
-        val restarted = DriveSession(clock, source, saved)
-        restarted.handle(Event.GearChanged(Gear.PARK))
-        restarted.handle(Event.AppEntered)
-        restarted.handle(Event.ScheduleLoading(1))
-        val out = restarted.handle(Event.ScheduleLoaded(1))
-        assertTrue(out.none { it is Effect.Speak || it is Effect.ShowCard })
-    }
-
     @Test fun `다시 받아도 사본뿐이면 사본 문구로 브리핑하고 같은 탑승에서 또 받지 않는다`() {
         source.origin = ScheduleOrigin.STORED
         assertTrue(session.handle(Event.Boarded).has<Effect.RefreshSchedules>())
@@ -243,74 +227,53 @@ class DriveSessionScheduleTest {
         source.origin = ScheduleOrigin.NONE
     }
 
-    @Test fun `일정을 못 받았고 사본도 없으면 탑승을 소진하지 않고 안내만 보인다`() {
+    @Test fun `일정을 못 받았고 사본도 없으면 일정 없음으로 보고 어디로 갈까요를 묻는다`() {
         givenNoSchedule()
         assertTrue(session.handle(Event.Boarded).has<Effect.RefreshSchedules>())
         val out = refreshCycle()
-        val notice = out.one<Effect.ShowCard>().card
-        assertEquals(Phrases.scheduleUnavailableCard(), notice)
+        val card = out.one<Effect.ShowCard>().card
+        // 정책서 5장 4번: 사본도 없으면 '일정 없음'으로 간다(별도 안내 카드 없음). 사본이 아니므로 "일정을 새로 못 받음" 한 줄도 없다.
+        assertEquals(Phrases.ASK_DESTINATION, card.voice)
+        assertNull(card.footnote)
+        assertEquals(Phrases.JUST_GO, card.secondary)
         assertTrue(out.has<Effect.Speak>())
-        // 탑승 기록은 남기지 않는다(안내 날짜만 저장된다).
-        assertTrue(out.filterIsInstance<Effect.Save>().all { it.snapshot.log.lastBoardedOn == null })
         assertTrue(out.none { it is Effect.RequestTravelTime })
+        // 질문을 낸 탑승이라 탑승 기록을 남긴다.
+        assertEquals(java.time.LocalDate.of(2026, 12, 3), out.filterIsInstance<Effect.Save>().last().snapshot.log.lastBoardedOn)
     }
 
-    @Test fun `일정 안내 카드는 보조 버튼 닫기로만 접고 주 버튼과 음성은 무시한다`() {
-        givenNoSchedule()
-        session.handle(Event.Boarded)
-        refreshCycle(1)
-        assertEquals(emptyList<Effect>(), session.handle(Event.PrimaryPressed))
-        assertEquals(emptyList<Effect>(), session.handle(Event.Heard("응")))
-        val closed = session.handle(Event.SecondaryPressed)
-        assertTrue(closed.has<Effect.StopVoice>())
-        assertEquals(Effect.CollapseCard(false), closed.one<Effect.CollapseCard>())
-    }
-
-    @Test fun `일정 안내는 그날 한 번만 말하고 이후 앱 진입은 조용하다`() {
+    @Test fun `사본 없음의 어디로 갈까요는 그냥 갈게로 접고 이후 앱 진입은 조용하다`() {
         givenNoSchedule()
         session.handle(Event.AppEntered)
-        assertTrue(refreshCycle(1).has<Effect.Speak>())
-        // 안내를 닫고 내비 화면에서 돌아오듯 앱에 다시 들어온다. 받기는 다시 시도하지만 말하거나 띄우지 않는다.
-        session.handle(Event.SecondaryPressed)
-        val again = session.handle(Event.AppEntered)
-        assertTrue(again.has<Effect.RefreshSchedules>())
-        val after = refreshCycle(2)
-        assertTrue(after.none { it is Effect.Speak || it is Effect.ShowCard })
-        assertTrue(session.handle(Event.AppEntered).none { it is Effect.Speak || it is Effect.ShowCard })
+        refreshCycle(1)
+        val closed = session.handle(Event.SecondaryPressed)
+        assertEquals(Effect.CollapseCard(false), closed.one<Effect.CollapseCard>())
+        // 내비 화면에서 돌아오듯 앱에 다시 들어와도 탑승이 아니라 아무 말도 하지 않는다(그날 첫 진입은 이미 썼다).
+        assertTrue(session.handle(Event.AppEntered).none { it is Effect.Speak || it is Effect.ShowCard || it is Effect.RefreshSchedules })
     }
 
-    @Test fun `다음 날에는 일정 안내를 다시 한다`() {
+    @Test fun `사본이 있고 서버가 못 받으면 사본으로 브리핑하며 한 줄이 붙고 사본이 없으면 붙지 않는다`() {
+        source.origin = ScheduleOrigin.STORED
+        session.handle(Event.Boarded)
+        val withCopy = refreshCycle()
+        val copyCard = session.handle(Event.TravelTimeResult(withCopy.one<Effect.RequestTravelTime>().requestId, null)).one<Effect.ShowCard>().card
+        assertEquals(Phrases.STALE_SCHEDULE, copyCard.footnote)
+
+        // 사본이 없으면 일정 없음 카드이고 그 한 줄이 없다.
+        givenNoSchedule()
+        session.handle(Event.Reset)
+        session.handle(Event.Boarded)
+        assertNull(refreshCycle(2).one<Effect.ShowCard>().card.footnote)
+    }
+
+    @Test fun `사본 없음으로 일정 없음 카드를 띄운 날 다음 날에는 다시 첫 탑승으로 묻는다`() {
         givenNoSchedule()
         session.handle(Event.Boarded)
         refreshCycle(1)
         session.handle(Event.SecondaryPressed)
         clock.now += Duration.ofDays(1)
         session.handle(Event.Boarded)
-        assertTrue(refreshCycle(2).has<Effect.Speak>())
-    }
-
-    @Test fun `일정 안내 카드가 떠 있는 동안 받기가 성공하면 브리핑으로 바뀐다`() {
-        givenNoSchedule()
-        session.handle(Event.Boarded)
-        refreshCycle(1)
-
-        session.handle(Event.ScheduleLoading(2))
-        source.schedules = listOf(meeting)
-        source.origin = ScheduleOrigin.FRESH
-        val out = session.handle(Event.ScheduleLoaded(2))
-        assertEquals(Effect.CollapseCard(instant = true), out.one<Effect.CollapseCard>())
-        assertEquals(gangnam, out.one<Effect.RequestTravelTime>().place)
-    }
-
-    @Test fun `안내를 한 날 받기가 성공한 뒤 앱에 들어오면 정상 탑승 규칙대로 브리핑한다`() {
-        givenNoSchedule()
-        session.handle(Event.AppEntered)
-        refreshCycle(1)
-        session.handle(Event.SecondaryPressed)
-
-        source.schedules = listOf(meeting)
-        source.origin = ScheduleOrigin.FRESH
-        assertTrue(session.handle(Event.AppEntered).has<Effect.RequestTravelTime>())
+        assertEquals(Phrases.ASK_DESTINATION, refreshCycle(2).one<Effect.ShowCard>().card.voice)
     }
 
     @Test fun `서버가 일정 없음으로 답하면 목적지를 묻고 받기 실패 안내와 다르다`() {

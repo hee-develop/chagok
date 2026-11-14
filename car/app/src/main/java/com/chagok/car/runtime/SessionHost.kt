@@ -216,10 +216,14 @@ class SessionHost(
         main.post {
             // P단에 넣는 순간 시스템이 아는 최근 위치를 먼저 세션에 넣는다(차곡이 뒤에 있어 주기 갱신을 못 받았어도 판정할 수 있게).
             // 이 위치가 낡았거나 이번 주행 전 것이면 세션이 쓰지 않고 내비에 현재 위치를 묻는다.
-            if (event is Event.GearChanged && event.gear == Gear.PARK) location.refreshNow(::dispatch)
+            // 탑승 판단 신호(앱 진입·시동 ON)에도 같은 읽기를 해 '이미 그곳'(일정 장소 300m 안)·'지금 집이면 집 빼기' 판정에 지금 위치가 쓰이게 한다(5장). 낡았으면 세션이 쓰지 않는다.
+            if (event is Event.GearChanged && event.gear == Gear.PARK || event.isBoardingSignal()) location.refreshNow(::dispatch)
             dispatch(event)
         }
     }
+
+    private fun Event.isBoardingSignal() =
+        this is Event.AppEntered || this is Event.Boarded || (this is Event.IgnitionChanged && ignition == com.chagok.car.domain.Ignition.ON)
 
     /** 데모 초기화. [at]을 주면 데모 시계를 그 시각으로 맞추고 일정 기준 시각도 그 시각으로 한다. */
     fun resetDemo(at: Instant? = null) {

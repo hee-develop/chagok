@@ -21,14 +21,18 @@ class SnapshotCodecTest {
             ),
             statuses = mapOf("a" to ScheduleStatus.ARRIVED, "b" to ScheduleStatus.SKIPPED, "c" to ScheduleStatus.LATE),
             date = LocalDate.of(2026, 12, 3),
-            noticeDate = LocalDate.of(2026, 12, 3),
         )
         assertEquals(snapshot, SnapshotCodec.decode(SnapshotCodec.encode(snapshot)))
     }
 
-    @Test fun `안내 날짜가 없는 이전 저장분도 복원한다`() {
+    @Test fun `이전 저장분의 안내 날짜 칸은 무시하고 나머지를 복원한다`() {
         val old = """{"date":"2026-12-03","statuses":{},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false}}"""
-        assertEquals(Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3), null), SnapshotCodec.decode(old))
+        assertEquals(Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3)), SnapshotCodec.decode(old))
+        // 일정 안내 카드를 없앤 뒤에도 그 전에 저장한 noticeDate 칸이 있어도 깨지지 않는다.
+        assertEquals(
+            Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3)),
+            SnapshotCodec.decode(old.dropLast(1) + ""","noticeDate":"2026-12-03"}"""),
+        )
     }
 
     @Test fun `하차 카드 대기도 저장하고 복원한다`() {

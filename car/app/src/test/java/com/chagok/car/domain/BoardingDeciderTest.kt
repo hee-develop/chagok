@@ -19,7 +19,8 @@ class BoardingDeciderTest {
         fallback: Boolean = false,
         travel: Duration? = thirtyMin,
         favorites: List<Favorite> = emptyList(),
-    ) = BoardingDecider.decide(at(now), kind, plan, fallback, travel, favorites)
+        here: LatLng? = null,
+    ) = BoardingDecider.decide(at(now), kind, plan, fallback, travel, favorites, here)
 
     private fun card(decision: BoardingDecision) = decision as BoardingDecision.Card
 
@@ -171,5 +172,99 @@ class BoardingDeciderTest {
         val plan = DayPlan(listOf(withCare(meeting, "계약서"), withCare(lunch, "우산")))
         assertEquals(MemoNote.Care(listOf(CareItem(meeting.title, "계약서"))), card(decide("09:00", kind = BoardingKind.AGAIN, plan = plan)).briefing.memo)
         assertEquals(MemoNote.None, card(decide("09:00", kind = BoardingKind.AGAIN, plan = DayPlan(listOf(meeting, withCare(lunch, "우산"))))).briefing.memo)
+    }
+
+    // ---- 대상 일정 고르기 보강(5장): 빈 장소 60분, 이미 그곳 300m ----
+
+    @Test fun `장소 칸이 빈 일정은 시작 60분 전부터만 대상이고 그 전에는 다음 일정을 본다`() {
+        val blank = schedule("n", "10:00", "11:00", place = null)
+        val plan = DayPlan(listOf(blank, lunch))
+        // 61분 전: 건너뛰고 점심(장소 있음)이 대상. 장소 묻기가 아니라 출발 제안이다.
+        val early = card(decide("08:59", plan = plan, travel = null))
+        assertEquals(lunch, early.briefing.target)
+        assertTrue(early.question is Question.Depart)
+        // 정확히 60분 전: 대상이 되어 장소를 묻는다.
+        val onTime = card(decide("09:00", plan = plan, travel = null))
+        assertEquals(blank, onTime.briefing.target)
+        assertEquals(Question.AskDestination(AskReason.PLACE_UNKNOWN, blank), onTime.question)
+        // 오늘 일정 수·타일은 건너뛴 일정도 센다(아직 끝나지 않은 오늘 일정).
+        assertEquals(2, early.briefing.remainingToday)
+    }
+
+    @Test fun `장소 칸이 빈 일정뿐이고 아직 60분보다 이르면 일정 없음과 같다`() {
+        val blank = schedule("n", "10:00", "11:00", place = null)
+        val q = card(decide("08:00", plan = DayPlan(listOf(blank)))).question
+        assertEquals(AskReason.NO_SCHEDULE, (q as Question.AskDestination).reason)
+    }
+
+    /** [meters] 미터쯤 북쪽. 위도 1도는 약 111,195m다. */
+    private fun northOf(position: LatLng, meters: Double) = LatLng(position.lat + meters / 111_194.9, position.lng)
+
+    @Test fun `일정 장소가 지금 차 위치 300m 안이면 이미 그곳이라 대상에서 빼고 다음 일정을 본다`() {
+        val atOffice = schedule("m2", "09:30", "10:30", place = OFFICE)
+        val elsewhere = Place("서울시청", LatLng(37.5663, 126.9779))
+        val next = schedule("x", "11:00", "12:00", place = elsewhere)
+        val plan = DayPlan(listOf(atOffice, next))
+        val inside = northOf(OFFICE.position, 299.0)
+        val outside = northOf(OFFICE.position, 301.0)
+        assertTrue(OFFICE.position.distanceTo(inside) < Rules.ALREADY_THERE_RADIUS_METERS)
+        assertTrue(OFFICE.position.distanceTo(outside) > Rules.ALREADY_THERE_RADIUS_METERS)
+
+        assertEquals(next, card(decide("09:00", plan = plan, here = inside)).briefing.target)
+        assertEquals(atOffice, card(decide("09:00", plan = plan, here = outside)).briefing.target)
+        // 위치를 모르면 이 판정을 건너뛴다.
+        assertEquals(atOffice, card(decide("09:00", plan = plan, here = null)).briefing.target)
+    }
+
+    @Test fun `대상 후보가 모두 이미 그곳이면 일정 없음이다`() {
+        val plan = DayPlan(listOf(schedule("m2", "09:30", "10:30", place = OFFICE)))
+        val q = card(decide("09:00", plan = plan, here = OFFICE.position)).question as Question.AskDestination
+        assertEquals(AskReason.NO_SCHEDULE, q.reason)
+    }
+
+    // ---- 종일 일정 장소 후보, 지금 집이면 집 빼기(6·8장) ----
+
+    private val stadium = Place("광주-기아 챔피언스필드", LatLng(35.1681, 126.8888))
+    private fun allDayAt(place: Place?, title: String = "광주 직관") = Schedule("d-$title", title, at("00:00"), at("23:59"), place = place, allDay = true)
+
+    @Test fun `장소 있는 종일 일정은 일정 없음의 후보에 자주 가는 곳보다 앞서 들어간다`() {
+        val plan = DayPlan(listOf(allDayAt(stadium)))
+        val q = card(decide("09:00", plan = plan, favorites = all)).question as Question.AskDestination
+        assertEquals(listOf(stadium, home.place, work.place), q.candidates)
+        assertEquals(listOf(allDayAt(stadium)), q.allDay)
+        // 장소 없는 종일 일정은 후보에 넣지 않는다.
+        val noPlace = card(decide("09:00", plan = DayPlan(listOf(allDayAt(null))), favorites = all)).question as Question.AskDestination
+        assertEquals(listOf(home.place, work.place, station.place), noPlace.candidates)
+    }
+
+    @Test fun `여유가 많으면 일정 장소 다음에 종일 일정 장소 그다음 자주 가는 곳이고 같은 곳은 한 번만 넣는다`() {
+        val sameAsFavorite = Favorite(FavoriteKind.OTHER, Place("다른 이름", stadium.position))
+        val plan = DayPlan(listOf(allDayAt(stadium), meeting, lunch))
+        val q = card(decide("08:19", plan = plan, favorites = listOf(sameAsFavorite, home, station))).question as Question.AskDestination
+        assertEquals(AskReason.PLENTY_OF_TIME, q.reason)
+        // 일정 장소(OFFICE) 1 + 종일(stadium) 1 + 자주 가는 곳 1(좌표가 같은 곳은 뺌, 최대 3개)
+        assertEquals(listOf(OFFICE, stadium, home.place), q.candidates)
+        // 대상 일정 장소와 같은 종일 일정은 한 번만
+        val dup = card(decide("08:19", plan = DayPlan(listOf(allDayAt(OFFICE), meeting)), favorites = listOf(home))).question as Question.AskDestination
+        assertEquals(listOf(OFFICE, home.place), dup.candidates)
+    }
+
+    @Test fun `끝난 종일 일정이나 도착 처리된 종일 일정은 후보에 넣지 않는다`() {
+        val ended = allDayAt(stadium).copy(end = at("08:00"))
+        val q = card(decide("09:00", plan = DayPlan(listOf(ended)), favorites = listOf(home))).question as Question.AskDestination
+        assertEquals(listOf(home.place), q.candidates)
+    }
+
+    @Test fun `지금 집이면 집은 후보에서 뺀다`() {
+        val atHome = northOf(home.place.position, 100.0)
+        val q = card(decide("09:00", plan = null, favorites = all, here = atHome)).question as Question.AskDestination
+        assertEquals(listOf(work.place, station.place, library.place), q.candidates)
+        // 집 반경 밖이거나 위치를 모르면 그대로 집이 1번이다.
+        val away = northOf(home.place.position, 400.0)
+        assertEquals(home.place, (card(decide("09:00", plan = null, favorites = all, here = away)).question as Question.AskDestination).candidates.first())
+        assertEquals(home.place, (card(decide("09:00", plan = null, favorites = all, here = null)).question as Question.AskDestination).candidates.first())
+        // 여유 많음의 후보에서도 뺀다.
+        val plenty = card(decide("08:19", favorites = all, here = atHome)).question as Question.AskDestination
+        assertEquals(listOf(OFFICE, station.place, library.place).take(3), plenty.candidates)
     }
 }

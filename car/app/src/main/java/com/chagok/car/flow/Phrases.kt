@@ -59,9 +59,6 @@ object Phrases {
     const val HOLD = "잠깐만"
     const val JUST_GO = "그냥 갈게"
 
-    /** 일정 안내 카드의 버튼 */
-    const val CLOSE = "닫기"
-
     // 버튼 줄 오른쪽 끝 음성 힌트 두 줄
     const val HINT_SAY_YES = "“응”이라고 말해도 돼요"
     const val HINT_SAY_JUST_GO = "“그냥 갈게”라고 말해도 돼요"
@@ -75,6 +72,9 @@ object Phrases {
     // 목적지 묻기 후보 타일 머리. 일정 없음은 자주 가는 곳만, 여유 많음은 일정 장소와 자주 가는 곳을 함께 보인다.
     const val FAVORITES_LABEL = "자주 가는 곳"
     const val CANDIDATES_LABEL = "갈 곳"
+
+    /** 장소 있는 종일 일정이 후보로 올 때 후보 줄의 둘째 글 앞머리: "종일 광주 직관" */
+    const val ALL_DAY = "종일"
 
     // 자주 가는 곳 중 집·회사를 부르는 이름
     const val HOME = "집"
@@ -92,9 +92,6 @@ object Phrases {
 
     /** 위치 권한을 거부했거나 대략 위치(COARSE)만 허용한 경우 같은 안내. 위치 판정만 빠지고 나머지는 그대로다. */
     const val PERMISSION_DENIED = "위치 권한이 없어 위치로 도착을 알 수 없어요. 설정에서 정확한 위치를 허용하면 쓸 수 있어요."
-
-    // 일정 안내 카드
-    const val SCHEDULE_UNAVAILABLE = "일정을 불러오지 못했어요. 연결을 확인해 주세요."
 
     private const val RIEUL = 8
 
@@ -261,12 +258,14 @@ object Phrases {
     /** 후보를 부르는 이름: 대상 일정은 장소 이름, 자주 가는 곳은 [favoriteName]. */
     private fun optionName(option: DestinationOption): String = when (option) {
         is DestinationOption.OfSchedule -> option.place.name
+        is DestinationOption.OfAllDay -> option.place.name
         is DestinationOption.OfFavorite -> favoriteName(option.favorite)
     }
 
     /** 후보 줄: 이름과 둘째 글(대상 일정은 "13:00 육전집 점심", 자주 가는 곳은 [favoriteDetail]). */
     private fun optionRow(option: DestinationOption, zone: ZoneId): CandidateRow = when (option) {
         is DestinationOption.OfSchedule -> CandidateRow(optionName(option), "${time(option.schedule, zone)} ${option.schedule.title}")
+        is DestinationOption.OfAllDay -> CandidateRow(optionName(option), "$ALL_DAY ${option.schedule.title}")
         is DestinationOption.OfFavorite -> CandidateRow(optionName(option), favoriteDetail(option.favorite))
     }
 
@@ -334,7 +333,8 @@ object Phrases {
             q.reason == AskReason.PLENTY_OF_TIME -> askDestinationPlenty(checkNotNull(q.suggested), checkNotNull(q.departBy), zone)
             else -> ASK_DESTINATION
         }
-        val label = if (q.reason == AskReason.NO_SCHEDULE) FAVORITES_LABEL else CANDIDATES_LABEL
+        // 자주 가는 곳만이면 '자주 가는 곳', 일정 장소·종일 일정 장소가 섞이면 '갈 곳'
+        val label = if (q.all.all { it is DestinationOption.OfFavorite }) FAVORITES_LABEL else CANDIDATES_LABEL
         // 여유 많음에서 자주 가는 곳이 붙지 않았으면 일정 장소 타일 하나, 아니면 후보 목록
         val tile = if (q.reason == AskReason.PLENTY_OF_TIME && !alternative && options.size == 1) {
             val row = optionRow(first, zone)
@@ -503,7 +503,6 @@ object Phrases {
         return if (count <= max) title else title.substring(0, cut).trimEnd() + "…"
     }
 
-    /** 일정을 불러오지 못했을 때 보이는 카드. 닫기 하나. */
     /**
      * 휴대폰과 연결하기 전 카드. QR과 숫자 6자리를 보이고 말하지 않는다. 버튼은 없다(연결되면 접힌다).
      * 숫자는 세 자리씩 띄워 읽기 쉽게 한다.
@@ -515,13 +514,6 @@ object Phrases {
         tiles = listOf(TileView.Pairing(qr = qr, code = if (code.length == 6) "${code.take(3)} ${code.drop(3)}" else code)),
     )
 
-    fun scheduleUnavailableCard() = CardContent(
-        status = STATUS_BEFORE_DEPARTURE,
-        voice = SCHEDULE_UNAVAILABLE,
-        secondary = CLOSE,
-        hints = listOf(HINT_AUTO_FOLD),
-    )
-
     /**
      * 출발 제안 카드의 타일. 첫 탑승은 오늘 일정(최대 3줄, 첫 번째만 다음 일정) + 채비(짧은 메모·앱 채비),
      * 재탑승(대상 일정 한 줄, 5장)은 채비만 둔다.
@@ -530,7 +522,7 @@ object Phrases {
         val tiles = mutableListOf<TileView>()
         if (briefing.level == Briefing.Level.FULL) {
             val rows = briefing.upcoming.take(MAX_TILE_ROWS)
-                .mapIndexed { i, s -> TileRow(time(s, zone), s.title, next = i == 0) }
+                .map { s -> TileRow(time(s, zone), s.title, next = s.id == briefing.target?.id) }
             if (rows.isNotEmpty()) tiles += TileView.Schedules(rows)
         }
         when (val memo = briefing.memo) {

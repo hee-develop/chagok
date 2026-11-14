@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 차량 앱 E2E(Maestro): debug 앱을 설치하고 서버를 띄운 뒤 flow를 돌리고 서버를 내린다.
-# flow는 e2e/maestro/car/ 아래 pairing.yaml, boarding-briefing.yaml, depart-route.yaml, arrival-next.yaml, home-exit.yaml, fake-navi.yaml(가짜 길안내, debug 전용), reask.yaml(무응답 30초 → 다시 묻기) 순서로 돈다.
+# flow는 e2e/maestro/car/ 아래 pairing.yaml, boarding-briefing.yaml, depart-route.yaml, arrival-next.yaml, home-exit.yaml, fake-navi.yaml(가짜 길안내, debug 전용), reask.yaml(무응답 30초 → 다시 묻기), target.yaml(이미 그곳) 순서로 돈다.
 # 환경 변수 E2E_FLOWS로 일부만 돌릴 수 있다.
 # 위치 권한(ACCESS_FINE_LOCATION·COARSE)은 설치 직후 adb로 미리 허용해 권한 설명 카드가 flow를 가리지 않게 한다(앱이 도는 사용자 기준).
 # home-exit flow는 안에서 연결을 새로 만들고(차 화면 번호를 폰 대신 서버에 보냄) 그 폰 토큰으로 서버 자주 가는 곳의 집(mock-home-apt)을 등록·해제한다.
@@ -118,7 +118,7 @@ curl -fs "http://127.0.0.1:$PORT/health" >/dev/null || { echo "서버가 뜨지 
 echo "== Maestro 실행 (스크린샷: $SHOTS)"
 cd "$ROOT"
 # E2E_FLOWS="reask overlap"처럼 flow 이름을 공백으로 주면 그것만 돈다(기본은 전부). 새 flow 하나를 확인할 때 쓴다.
-for flow in ${E2E_FLOWS:-pairing boarding-briefing depart-route arrival-next home-exit fake-navi reask}; do
+for flow in ${E2E_FLOWS:-pairing boarding-briefing depart-route arrival-next home-exit fake-navi reask target}; do
   echo "-- $flow"
   "$MAESTRO" test "e2e/maestro/car/$flow.yaml" \
     --device "$ANDROID_SERIAL" \
