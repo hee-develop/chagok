@@ -28,6 +28,8 @@ export type NotifyInput = {
   body: string;
   data?: Record<string, string>;
   dedupeKey?: string;
+  /** 이 알림이 알림함에 머무는 시간(ms). 없으면 알림함 기본값(3일). 도착 예정 알림처럼 시각이 든 알림을 짧게 두는 데 쓴다. */
+  ttlMs?: number;
 };
 
 export type NotifyResult =
@@ -39,8 +41,13 @@ export type NotifyResult =
  * 환경 변수로 켜면 FCM 같은 실제 푸시 구현이 같은 포트를 하나 더 채운다(`fcm.ts`).
  */
 export type PushSender = {
-  /** 한 자리(폰)에 알림 하나를 보낸다. 던지지 않고(실패는 구현이 삼킨다) 끝난 뒤 resolve한다. */
-  send(seatId: string, notification: AppNotification): void | Promise<void>;
+  /**
+   * 한 자리(폰)에 알림 하나를 보낸다. 던지지 않고(실패는 구현이 삼킨다) 끝난 뒤 resolve한다.
+   * `options.ttlMs`는 알림함이 쓰는 보관 시간이다(다른 구현은 무시해도 된다).
+   */
+  send(seatId: string, notification: AppNotification, options?: { ttlMs?: number }): void | Promise<void>;
+  /** 이 종류의 알림 중 조건에 맞는 것을 모든 자리에서 지운다(알림이 가리키는 일이 사라졌을 때). 알림함처럼 쌓아 두는 구현만 채운다. */
+  drop?(kind: NotificationKind, predicate: (notification: AppNotification) => boolean): void;
   /** 그 자리가 지워지거나 폰이 바뀌었다: 그 자리에 쌓아 둔 것(큐·푸시 토큰)을 버린다. */
   forget?(seatId: string): void;
 };

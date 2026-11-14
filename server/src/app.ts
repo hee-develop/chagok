@@ -148,7 +148,7 @@ export const createApp = ({
     allowMemoryWrite: (c: Context) => memoryLimiter.take(clientAddress(c)),
   };
   // 가족 묶기·요청 API의 자리 정하기는 옛 차 앱 호환 읽기·기본 자리를 쓰지 않는 따로 둔 엄격한 가드다.
-  const familyGuard = createFamilyGuard(seats);
+  const familyGuard = createFamilyGuard(seats, familyRequests);
   return new Hono()
     .get('/health', (c) => c.json({ ok: true as const }))
     .route('/calendars', createCalendarsRoute(calendars, guard))

@@ -6,6 +6,7 @@ import {
   MAX_REQUEST_MEMO_LENGTH,
   MAX_REQUEST_PERSON_LENGTH,
   MAX_REQUEST_PLACE_LENGTH,
+  PAST_AT_LEEWAY_MS,
 } from './limits.js';
 
 export const CATEGORIES = ['care', 'stop', 'appointment', 'ride'] as const;
@@ -104,7 +105,7 @@ const formatDay = (day: number) => new Date(day * 86_400_000).toISOString().slic
  * `POST /requests` 본문을 검증한다. 모양이 틀리면 한국어 오류 문구(400), 맞으면 정리한 값.
  * - `category`: care | stop | appointment | ride. 카테고리마다 쓸 수 있는 항목이 정해져 있고 그 밖의 항목은 거절한다.
  * - `recipient`: `{ memberId }`(가족 한 사람) 또는 `{ carRef }`('우리 차').
- * - 날짜: care·stop은 `date`(`YYYY-MM-DD`, 생략하면 오늘), appointment·ride는 `at`(오프셋이 있는 ISO8601)의 서울 날짜. 오늘·내일만 받는다.
+ * - 날짜: care·stop은 `date`(`YYYY-MM-DD`, 생략하면 오늘), appointment·ride는 `at`(오프셋이 있는 ISO8601)의 서울 날짜. 오늘·내일만 받고, `at`이 `PAST_AT_LEEWAY_MS`(10분)보다 더 지난 시각이면 거절한다.
  */
 export function parseCreateBody(raw: unknown, now: Date): CreateBody | { error: string } {
   if (!isObject(raw)) return { error: '본문은 객체여야 합니다' };
@@ -143,6 +144,7 @@ export function parseCreateBody(raw: unknown, now: Date): CreateBody | { error: 
     if (typeof value !== 'string') return { error: 'at은 오프셋이 있는 ISO8601 시각 문자열이어야 합니다' };
     const parsed = parseAt(value);
     if (parsed === null) return { error: 'at은 오프셋이 있는 ISO8601 시각이어야 합니다' };
+    if (parsed.getTime() < now.getTime() - PAST_AT_LEEWAY_MS) return { error: '이미 지난 시각입니다. 지금 이후의 시각으로 보내 주세요' };
     return { at: parsed.toISOString(), day: seoulDay(parsed.getTime()) };
   };
 
@@ -214,29 +216,40 @@ export type RequestRecord = {
   status: Status;
   /** 도착 5분 전을 공유해 보냈는가(도착 예정 공유가 켜져 있을 때만 참). 시각은 저장하지 않는다. */
   etaSoon: boolean;
+  /** 서버가 요청을 받은 시각. 바뀐 시각(전이 시각)은 저장하지 않는다(상태만 둔다). */
   createdAt: string;
-  updatedAt: string;
-  completedAt: string | null;
 };
 
-/** 요청 저장소(메모리). 날짜가 지난 요청과 완료 보관 시간이 지난 요청은 `alive`가 아니라 읽기에서 보이지 않고 `purge`가 지운다. */
+/** 요청 저장소(메모리). 날짜가 지난 요청은 `alive`가 아니라 읽기에서 보이지 않고 `purge`가 지운다(완료·거절된 요청도 날짜가 지날 때까지 둔다). */
 export function createRequestStore() {
   const records = new Map<string, RequestRecord>();
+  const perFamily = new Map<string, number>();
+  const forget = (record: RequestRecord) => {
+    const left = (perFamily.get(record.familyId) ?? 1) - 1;
+    if (left <= 0) perFamily.delete(record.familyId);
+    else perFamily.set(record.familyId, left);
+  };
   return {
-    add: (record: RequestRecord) => void records.set(record.id, record),
+    add: (record: RequestRecord) => {
+      if (!records.has(record.id)) perFamily.set(record.familyId, (perFamily.get(record.familyId) ?? 0) + 1);
+      records.set(record.id, record);
+    },
     get: (id: string) => records.get(id) ?? null,
     all: () => [...records.values()],
-    remove: (id: string) => records.delete(id),
-    removeWhere: (predicate: (record: RequestRecord) => boolean) => {
-      let removed = 0;
+    /** 조건에 맞는 요청을 지우고 지운 요청의 id들을 돌려준다. */
+    removeWhere: (predicate: (record: RequestRecord) => boolean): string[] => {
+      const removed: string[] = [];
       for (const [id, record] of records) {
         if (predicate(record)) {
           records.delete(id);
-          removed += 1;
+          forget(record);
+          removed.push(id);
         }
       }
       return removed;
     },
+    /** 그 가족이 가진 요청 수(보이지 않는 것 포함). */
+    countOfFamily: (familyId: string) => perFamily.get(familyId) ?? 0,
     size: () => records.size,
   };
 }

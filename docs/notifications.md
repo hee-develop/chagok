@@ -14,6 +14,7 @@
 - 포트 `PushSender`(`server/src/notify/types.ts`): `send(seatId, notification)`, `forget(seatId)`. 알림 하나는 모든 보내는 곳에 간다. 기본 구현 `Outbox`는 읽기·지우기용으로 `list`·`ack`·`dropKind(seatId, kind)`(그 종류만 모두 지움)·`size`도 가진다.
 - `Notifier.notify(seatId, input)`(`notifier.ts`)가 **다른 묶음이 쓰는 서버 내부 함수**다. id·시각을 붙이고 중복 억제 키를 보고 `PushSender`에 나눠 준다. 결과는 `{ ok: true, id }` 또는 `{ ok: false, reason: 'duplicate' | 'invalid' }`이고, 보내는 곳이 던져도(비동기 포함) `notify`는 끝난다.
 - `createApp({ notifications })`: 알림 묶음(`createNotifications({ now, extraSenders })` → `{ notifier, outbox }`)을 받는다. 없으면 인스턴스마다 만든다. 서버 프로세스(`index.ts`)는 `createNotificationRuntime`으로 알림 묶음과 스케줄러를 한 번에 만들어 같은 `notifier`를 앱과 정기 작업이 나눠 쓴다.
+- `notifier.retract(kind, predicate)`(`PushSender.drop`)는 이 종류의 알림 중 조건에 맞는 것을 **모든 자리의 알림함**에서 지운다(가족 요청이 지워질 때 그 요청의 `family-status`). 중복 억제 키는 남긴다.
 - 자리가 지워지거나(연결 끊기·차 초기화) 폰이 바뀌면(replace) `notifier.forget(seatId)`로 **그 자리의 알림함·중복 억제 기록·푸시 토큰을 버린다**. 옛 폰이 읽지 않은 알림은 새 폰에 넘기지 않는다. 새 자리를 만들 때(claim)는 아무것도 지우지 않는다.
 
 ## 알림 모양과 종류
@@ -42,6 +43,7 @@
 | --- | --- | --- |
 | `MAX_QUEUE_PER_SEAT` | 50 | 자리 하나의 큐. 넘으면 가장 오래된 것부터 버림 |
 | `NOTIFICATION_TTL_MS` | 3일 | 읽어 가지 않아도 이만큼 지나면 읽을 때 버림 |
+| `ttlMs`(`notify` 입력, 선택) | 없으면 위 3일 | 알림 하나만 알림함에 더 짧게 두는 값. 도착 예정 알림(`family-status`의 5분 전·도착)이 1시간(`ETA_NOTIFICATION_TTL_MS`)을 준다. 다른 `PushSender`는 무시해도 된다 |
 | `MAX_LIST_SIZE` | 50 | `GET /notifications` 한 번에 주는 수(오래된 것부터) |
 | `DEDUPE_TTL_MS` | 2일 | 같은 `dedupeKey`를 다시 만들지 않는 시간. **읽거나 지운 뒤에도** 유지 |
 | `MAX_DEDUPE_KEYS_PER_SEAT` | 100 | 자리 하나가 기억하는 키 수(넘으면 가장 오래된 키부터 잊음) |

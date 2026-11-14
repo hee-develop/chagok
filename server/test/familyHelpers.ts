@@ -9,24 +9,25 @@ export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
 export const DAY = 24 * HOUR;
 
-/** 기기 id(22~64자)를 이름으로 만든다. */
+/** 기기 id(22~64자)를 이름으로 만든다. 가족 신원에는 쓰이지 않는다(연결 전 일정 버킷용 헤더). */
 export const dev = (name: string) => `dev-${name}`.padEnd(24, '0');
 
-export const fresh = (options: { legacyDriverFallback?: boolean } = {}) => {
+export const fresh = (options: { legacyDriverFallback?: boolean; maxFamilies?: number } = {}) => {
   const clock = { ms: T0 };
   const now = () => new Date(clock.ms);
   const seats = createSeatStore(now);
   const notifications = createNotifications({ now });
-  const familyRequests = createFamilyRequests({ now, seats, notifier: notifications.notifier });
-  const app = newApp({ now, seats, notifications, familyRequests, clientAddress: (c) => c.req.header('x-test-ip') ?? 'test', ...options });
+  const familyRequests = createFamilyRequests({ now, seats, notifier: notifications.notifier, ...(options.maxFamilies === undefined ? {} : { maxFamilies: options.maxFamilies }) });
+  const app = newApp({ now, seats, notifications, familyRequests, clientAddress: (c) => c.req.header('x-test-ip') ?? 'test', ...(options.legacyDriverFallback === undefined ? {} : { legacyDriverFallback: options.legacyDriverFallback }) });
   return { app, clock, seats, ...notifications, familyRequests };
 };
 export type Fresh = ReturnType<typeof fresh>;
 
-export type Opts = { token?: string; body?: unknown; device?: string; ip?: string };
-export const call = async (t: Pick<Fresh, 'app'>, method: string, path: string, { token, body, device, ip }: Opts = {}) => {
+export type Opts = { token?: string; body?: unknown; device?: string; ip?: string; member?: string };
+export const call = async (t: Pick<Fresh, 'app'>, method: string, path: string, { token, body, device, ip, member }: Opts = {}) => {
   const headers: Record<string, string> = {};
   if (token) headers.authorization = `Bearer ${token}`;
+  if (member) headers['x-chagok-member'] = member;
   if (device) headers['x-chagok-device'] = device;
   if (ip) headers['x-test-ip'] = ip;
   if (body !== undefined) headers['content-type'] = 'application/json';
@@ -51,8 +52,10 @@ export const connect = async (t: Fresh, name: string, o: { device?: string; carT
   return { carToken, carId, seatId: claimed.body.seatId as string, phoneToken: claimed.body.phoneToken as string };
 };
 
-/** 폰(토큰과 기기 id) 호출 모양. */
-export const as = (who: { phoneToken?: string; device?: string }) => ({ token: who.phoneToken, device: who.device });
+/** 폰 호출 모양: 구성원 비밀값(`X-Chagok-Member`)과 폰 토큰(있으면). 둘이 같이 오는 요청이 자리를 구성원에게 묶는다. */
+export const as = (who: { phoneToken?: string; memberToken?: string }) => ({ token: who.phoneToken, member: who.memberToken });
+/** 구성원 비밀값만(연결을 끊은 뒤처럼 폰 토큰이 없는 폰). */
+export const memberOnly = (who: { memberToken?: string }) => ({ member: who.memberToken });
 
 export const inbox = (t: Fresh, seatId: string) => t.outbox.list(seatId);
 

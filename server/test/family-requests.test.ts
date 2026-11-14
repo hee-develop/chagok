@@ -11,33 +11,33 @@ import {
 } from '../src/family/requests.js';
 import { createScheduler } from '../src/scheduler.js';
 import { FAMILY_REQUESTS_EXPIRE_JOB, registerFamilyRequestJobs } from '../src/family/jobs.js';
-import { COMPLETED_RETENTION_MS, MAX_REQUESTS_PER_MEMBER } from '../src/family/limits.js';
+import { MAX_REQUESTS_PER_MEMBER } from '../src/family/limits.js';
 import {
-  appointmentBody, as, bodyOf, call, careBody, connect, dev, fresh, inbox, rideBody, stopBody, DAY, MINUTE, T0, type Fresh,
+  appointmentBody, as, bodyOf, call, careBody, connect, fresh, inbox, memberOnly, rideBody, stopBody, DAY, MINUTE, T0, type Fresh,
 } from './familyHelpers.js';
 
-type Phone = { phoneToken?: string; device: string; seatId?: string; carToken?: string; memberId?: string };
+type Phone = { phoneToken?: string; memberToken: string; seatId?: string; carToken?: string; memberId?: string };
 
 /**
- * 가족: 엄마(차1 자리), 아빠(차1의 다른 자리), 아들(차2 자리), 삼촌(차에 연결 안 한 폰, 기기 id만).
- * 가족은 차와 따로 묶이므로 가족 코드는 기기 id로 넣고 차 연결은 따로 한다.
+ * 가족: 엄마(차1 자리), 아빠(차1의 다른 자리), 아들(차2 자리), 삼촌(차에 연결 안 한 폰, 구성원 비밀값만).
+ * 가족은 차와 따로 묶이므로 가족 만들기·참여는 차 연결과 따로 한다(연결한 폰은 폰 토큰을 같이 보내 자리를 묶는다).
  */
 const setup = async () => {
   const t = fresh();
-  const mom = { ...(await connect(t, '엄마폰', { device: dev('mom') })), device: dev('mom') } as Phone;
-  const dad = { ...(await connect(t, '아빠폰', { device: dev('dad'), carToken: mom.carToken })), device: dev('dad') } as Phone;
-  const kid = { ...(await connect(t, '아들폰', { device: dev('kid') })), device: dev('kid') } as Phone;
-  const uncle = { device: dev('uncle') } as Phone;
-  const { code } = (await call(t, 'POST', '/family/invite', { ...as(mom), body: { name: '엄마' } })).body;
-  for (const [who, name] of [[dad, '아빠'], [kid, '아들'], [uncle, '삼촌']] as const) {
-    expect((await call(t, 'POST', '/family/join', { ...as(who), body: { code, name } })).status).toBe(200);
-  }
+  const momPhone = await connect(t, '엄마폰');
+  const dadPhone = await connect(t, '아빠폰', { carToken: momPhone.carToken });
+  const kidPhone = await connect(t, '아들폰');
+  const made = (await call(t, 'POST', '/family/invite', { token: momPhone.phoneToken, body: { name: '엄마' } })).body;
+  const mom = { ...momPhone, memberToken: made.memberToken as string, memberId: made.family.me.memberId as string } as Phone;
+  const joinAs = async (name: string, phone?: { phoneToken: string }) => {
+    const res = await call(t, 'POST', '/family/join', { token: phone?.phoneToken, body: { code: made.code, name } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    return { memberToken: res.body.memberToken as string, memberId: res.body.family.me.memberId as string };
+  };
+  const dad = { ...dadPhone, ...(await joinAs('아빠', dadPhone)) } as Phone;
+  const kid = { ...kidPhone, ...(await joinAs('아들', kidPhone)) } as Phone;
+  const uncle = (await joinAs('삼촌')) as Phone;
   const family = (await call(t, 'GET', '/family', as(mom))).body.family;
-  const id = (name: string) => family.members.find((m: any) => m.name === name).memberId as string;
-  mom.memberId = id('엄마');
-  dad.memberId = id('아빠');
-  kid.memberId = id('아들');
-  uncle.memberId = id('삼촌');
   const carRef = (who: Phone) => family.cars.find((c: any) => c.memberIds.includes(who.memberId)).carRef as string;
   return { t, mom, dad, kid, uncle, family, carRef };
 };
@@ -143,7 +143,8 @@ describe('POST /requests: 요청 4종 만들기와 검증', () => {
 
   it('받는 사람 검증: 자기 자신·다른 가족·없는 사람·차가 아닌 가리킴값은 400, 가족이 없으면 409', async () => {
     const s = await setup();
-    const other = await call(s.t, 'POST', '/family/invite', { device: dev('stranger'), body: { name: '남' } });
+    const strangerCar = await connect(s.t, '남의폰');
+    const other = await call(s.t, 'POST', '/family/invite', { token: strangerCar.phoneToken, body: { name: '남' } });
     const stranger = other.body.family.members[0].memberId as string;
     const post = (from: Phone, recipient: unknown) => phoneCall(s.t, from, 'POST', '/requests', careBody(recipient));
     expect((await post(s.mom, { memberId: s.mom.memberId })).body.reason).toBe('self');
@@ -151,15 +152,14 @@ describe('POST /requests: 요청 4종 만들기와 검증', () => {
     expect((await post(s.mom, { memberId: 'nobody' })).body.reason).toBe('unknown-recipient');
     expect((await post(s.mom, { carRef: 'car-nope' })).body.reason).toBe('unknown-car');
     // 다른 가족의 차를 가리키는 값으로는 보낼 수 없다
-    const strangerCar = await connect(s.t, '남의폰', { device: dev('stranger') });
-    const strangerFamily = (await call(s.t, 'GET', '/family', { token: strangerCar.phoneToken })).body.family;
-    expect((await post(s.mom, { carRef: strangerFamily.cars[0].carRef })).body.reason).toBe('unknown-car');
-    const noFamily = await phoneCall(s.t, { device: dev('lonely') } as Phone, 'POST', '/requests', careBody({ memberId: s.mom.memberId }));
+    expect((await post(s.mom, { carRef: other.body.family.cars[0].carRef })).body.reason).toBe('unknown-car');
+    const lonely = await connect(s.t, '혼자폰'); // 폰 토큰만 있고 구성원에게 묶이지 않음
+    const noFamily = await phoneCall(s.t, { phoneToken: lonely.phoneToken } as Phone, 'POST', '/requests', careBody({ memberId: s.mom.memberId }));
     expect(noFamily.status).toBe(409);
     expect(noFamily.body.reason).toBe('not-in-family');
   });
 
-  it('차에 연결하지 않은 폰(기기 id만)도 보낼 수 있고, 한 사람이 동시에 보낼 수 있는 요청 수에 상한이 있다', async () => {
+  it('차에 연결하지 않은 폰(구성원 비밀값만)도 보낼 수 있고, 한 사람이 동시에 보낼 수 있는 요청 수에 상한이 있다', async () => {
     const s = await setup();
     for (let i = 0; i < MAX_REQUESTS_PER_MEMBER; i++) await send(s, s.uncle, careBody({ memberId: s.mom.memberId }));
     const over = await phoneCall(s.t, s.uncle, 'POST', '/requests', careBody({ memberId: s.mom.memberId }));
@@ -190,7 +190,11 @@ describe('전달 규칙', () => {
     expect(received.map((r: any) => r.id)).toEqual([toUncle.id]);
     expect(received[0].from.name).toBe('엄마');
     // 삼촌이 나중에 차에 연결하면 그 자리로 간다
-    const unclePhone = { ...(await connect(s.t, '삼촌폰', { device: s.uncle.device })), device: s.uncle.device } as Phone;
+    // (삼촌의 비밀값과 새 폰 토큰이 같이 오는 요청에서 자리가 삼촌에게 묶인다)
+    const phone = await connect(s.t, '삼촌폰');
+    const unclePhone = { ...s.uncle, ...phone } as Phone;
+    expect(await carList(s, unclePhone, unclePhone)).toEqual([]);
+    expect((await phoneCall(s.t, unclePhone, 'GET', '/requests')).body.received[0].reachable).toBe(true);
     expect((await carList(s, unclePhone, unclePhone)).map((r) => r.id)).toEqual([toUncle.id]);
   });
 
@@ -336,7 +340,7 @@ describe('PATCH·eta의 권한과 자리 격리', () => {
     for (const [car, seat] of [[s.mom, s.mom], [s.kid, s.kid], [s.mom, s.dad]] as const) {
       if (car === s.mom && seat === s.dad) continue; // 받는 사람 자리
       const res = await patch(s, car, seat, req.id, 'delivered');
-      expect(res.status, `${seat.device}`).toBe(404);
+      expect(res.status, `${seat.seatId}`).toBe(404);
       expect(res.body.reason).toBe('not-found');
     }
     expect((await patch(s, s.mom, s.dad, req.id, 'delivered')).status).toBe(200);
@@ -355,8 +359,9 @@ describe('PATCH·eta의 권한과 자리 격리', () => {
   it('다른 가족의 요청은 읽지도 바꾸지도 못한다', async () => {
     const s = await setup();
     const req = await send(s, s.dad, careBody({ memberId: s.mom.memberId }));
-    const stranger = { ...(await connect(s.t, '남의폰', { device: dev('stranger') })), device: dev('stranger') } as Phone;
-    await call(s.t, 'POST', '/family/invite', { ...as(stranger), body: { name: '남' } });
+    const strangerPhone = await connect(s.t, '남의폰');
+    const strangerMade = await call(s.t, 'POST', '/family/invite', { token: strangerPhone.phoneToken, body: { name: '남' } });
+    const stranger = { ...strangerPhone, memberToken: strangerMade.body.memberToken } as Phone;
     expect((await phoneCall(s.t, stranger, 'GET', '/requests')).body).toMatchObject({ sent: [], received: [] });
     expect(await carList(s, stranger, stranger)).toEqual([]);
     expect((await patch(s, stranger, stranger, req.id, 'delivered')).status).toBe(404);
@@ -370,12 +375,15 @@ describe('PATCH·eta의 권한과 자리 격리', () => {
     const body = { status: 'delivered' };
     expect((await call(s.t, 'PATCH', `${url}?driver=${s.mom.seatId}`, { body })).status).toBe(401);
     expect((await call(s.t, 'PATCH', `${url}?driver=${s.mom.seatId}`, { token: s.mom.phoneToken, body })).status).toBe(401);
+    expect((await call(s.t, 'PATCH', `${url}?driver=${s.mom.seatId}`, { member: s.mom.memberToken, body })).status).toBe(401);
     expect((await call(s.t, 'PATCH', `${url}?driver=${s.mom.seatId}`, { token: 'f'.repeat(64), body })).status).toBe(401);
     const noDriver = await call(s.t, 'PATCH', url, { token: s.mom.carToken, body });
     expect(noDriver.status).toBe(400);
     expect(noDriver.body.reason).toBe('driver-required');
-    expect((await call(s.t, 'PATCH', `${url}?driver=`, { token: s.mom.carToken, body })).status).toBe(400);
-    expect((await call(s.t, 'PATCH', `${url}?driver=a&driver=b`, { token: s.mom.carToken, body })).status).toBe(400);
+    // driver 판정은 자리 정하기 가드(seatScope.ts)와 같다: 빈 값·그 차의 자리가 아닌 값은 403, 같은 이름이 여럿이면 첫 값
+    expect((await call(s.t, 'PATCH', `${url}?driver=`, { token: s.mom.carToken, body })).status).toBe(403);
+    expect((await call(s.t, 'PATCH', `${url}?driver=a&driver=${s.mom.seatId}`, { token: s.mom.carToken, body })).status).toBe(403);
+    expect((await call(s.t, 'PATCH', `${url}?driver=${s.mom.seatId}&driver=a`, { token: s.mom.carToken, body })).status).toBe(200);
     const foreign = await call(s.t, 'PATCH', `${url}?driver=${s.kid.seatId}`, { token: s.mom.carToken, body });
     expect(foreign.status).toBe(403);
     expect((await call(s.t, 'PATCH', `${url}?driver=nope`, { token: s.mom.carToken, body })).status).toBe(403);
@@ -392,16 +400,15 @@ describe('PATCH·eta의 권한과 자리 격리', () => {
     for (const legacyDriverFallback of [true, false]) {
       const s = await (async () => {
         const t = fresh({ legacyDriverFallback });
-        const mom = { ...(await connect(t, '엄마폰', { device: dev('mom') })), device: dev('mom') } as Phone;
-        const dad = { device: dev('dad') } as Phone;
-        const { code } = (await call(t, 'POST', '/family/invite', { ...as(mom), body: { name: '엄마' } })).body;
-        await call(t, 'POST', '/family/join', { ...as(dad), body: { code, name: '아빠' } });
-        const family = (await call(t, 'GET', '/family', as(mom))).body.family;
-        dad.memberId = family.members.find((m: any) => m.name === '아빠').memberId;
+        const momPhone = await connect(t, '엄마폰');
+        const made = (await call(t, 'POST', '/family/invite', { token: momPhone.phoneToken, body: { name: '엄마' } })).body;
+        const mom = { ...momPhone, memberToken: made.memberToken, memberId: made.family.me.memberId } as Phone;
+        const joined = (await call(t, 'POST', '/family/join', { body: { code: made.code, name: '아빠' } })).body;
+        const dad = { memberToken: joined.memberToken, memberId: joined.family.me.memberId } as Phone;
         return { t, mom, dad };
       })();
       // 서버에 자리 있는 차가 정확히 하나 — 옛 호환이면 식별 없는 읽기가 그 자리를 볼 수 있는 상황
-      await phoneCall(s.t, s.dad, 'POST', '/requests', careBody({ memberId: (await call(s.t, 'GET', '/family', as(s.dad))).body.family.members.find((m: any) => m.name === '엄마').memberId }));
+      await phoneCall(s.t, s.dad, 'POST', '/requests', careBody({ memberId: s.mom.memberId }));
       expect((await call(s.t, 'GET', '/requests')).status).toBe(401);
       expect((await call(s.t, 'GET', `/requests?driver=${s.mom.seatId}`)).status).toBe(401);
       const carOnly = await call(s.t, 'GET', '/requests', { token: s.mom.carToken });
@@ -620,9 +627,9 @@ describe('도착 예정 공유와 eta·주행 중 표시', () => {
       const s = await setup();
       await share(s, s.mom, s.dad);
       await share(s, s.uncle, s.dad);
-      const toMom = await send(s, s.dad, careBody({ memberId: s.mom.memberId }));
-      const toUncle = await send(s, s.dad, careBody({ memberId: s.uncle.memberId }));
-      const toCar = await send(s, s.dad, careBody({ carRef: s.carRef(s.mom) }));
+      const toMom = await send(s, s.dad, appointmentBody({ memberId: s.mom.memberId }));
+      const toUncle = await send(s, s.dad, appointmentBody({ memberId: s.uncle.memberId }));
+      const toCar = await send(s, s.dad, appointmentBody({ carRef: s.carRef(s.mom) }));
       await driveState(s, s.dad, true); // 아빠(보낸 사람 자신)의 자리가 달리는 중
       await driveState(s, s.kid, true, s.kid);
       for (const r of [toMom, toUncle, toCar]) expect(await drivingNow(s, r.id)).toBe(false);
@@ -635,7 +642,7 @@ describe('도착 예정 공유와 eta·주행 중 표시', () => {
     it('주행 상태는 그날까지만 유효하다(날짜가 바뀌면 주행 중이 아님), 자리가 끊기면 지워진다', async () => {
       const s = await setup();
       await share(s, s.mom, s.dad);
-      const req = await send(s, s.dad, careBody({ memberId: s.mom.memberId }, { date: '2026-11-16' }));
+      const req = await send(s, s.dad, appointmentBody({ memberId: s.mom.memberId }, { at: '2026-11-16T10:00:00+09:00' }));
       await driveState(s, s.mom, true);
       expect(await drivingNow(s, req.id)).toBe(true);
       s.t.clock.ms += DAY; // 다음 날 10시: 어제 값
@@ -644,6 +651,22 @@ describe('도착 예정 공유와 eta·주행 중 표시', () => {
       expect(await drivingNow(s, req.id)).toBe(true);
       await call(s.t, 'DELETE', '/pair', as(s.mom));
       expect(await drivingNow(s, req.id)).toBe(false);
+    });
+
+    it('drivingNow는 약속 가기·데려다주기·픽업에서만 계산한다(채비·들르기는 공유를 켜고 주행 중이어도 늘 false)', async () => {
+      const s = await setup();
+      await share(s, s.mom, s.dad);
+      await driveState(s, s.mom, true);
+      const rows = {
+        care: await send(s, s.dad, careBody({ memberId: s.mom.memberId })),
+        stop: await send(s, s.dad, stopBody({ memberId: s.mom.memberId })),
+        appointment: await send(s, s.dad, appointmentBody({ memberId: s.mom.memberId })),
+        ride: await send(s, s.dad, rideBody({ memberId: s.mom.memberId })),
+      };
+      expect(await drivingNow(s, rows.care.id)).toBe(false);
+      expect(await drivingNow(s, rows.stop.id)).toBe(false);
+      expect(await drivingNow(s, rows.appointment.id)).toBe(true);
+      expect(await drivingNow(s, rows.ride.id)).toBe(true);
     });
 
     it('POST /drive-state: 바뀔 때만 바뀐 시각을 새로 하고, 위치 같은 다른 항목은 받지 않는다', async () => {
@@ -660,7 +683,7 @@ describe('도착 예정 공유와 eta·주행 중 표시', () => {
   });
 });
 
-describe('보관: 날짜가 지나면 삭제, 완료는 짧게 보관', () => {
+describe('보관: 날짜가 지나면 삭제(완료·거절도 그날까지 보관)', () => {
   it('날짜가 지난 요청은 조회에서 보이지 않고 purge(정기 작업)가 지운다. 내일 날짜 요청은 남는다', async () => {
     const s = await setup();
     const today = await send(s, s.dad, careBody({ memberId: s.mom.memberId }));
@@ -718,19 +741,19 @@ describe('보관: 날짜가 지나면 삭제, 완료는 짧게 보관', () => {
     expect(s.t.familyRequests.purge(new Date(s.t.clock.ms)).requests).toBe(1);
   });
 
-  it('완료된 요청은 보낸 사람이 상태를 볼 수 있게 짧게(가안 1시간) 두었다가 지운다. 거절은 날짜가 지날 때까지 둔다', async () => {
+  it('완료·거절된 요청은 모두 그날(서울 날짜)이 끝날 때까지 두어 보낸 사람이 상태를 볼 수 있다(정책서 원문 \'완료되면 삭제\'와 다른 점, 문서에 이유)', async () => {
     const s = await setup();
     const done = await send(s, s.dad, careBody({ memberId: s.mom.memberId }));
     const declined = await send(s, s.dad, stopBody({ memberId: s.mom.memberId }));
     for (const step of ['delivered', 'completed']) await patch(s, s.mom, s.mom, done.id, step);
     for (const step of ['delivered', 'declined']) await patch(s, s.mom, s.mom, declined.id, step);
-    s.t.clock.ms += COMPLETED_RETENTION_MS - 1;
-    const statuses = async () => (await phoneCall(s.t, s.dad, 'GET', '/requests')).body.sent.map((r: any) => [r.id, r.status]);
-    expect(await statuses()).toHaveLength(2);
-    s.t.clock.ms += 1;
-    expect(await statuses()).toEqual([[declined.id, 'declined']]);
-    expect(s.t.familyRequests.purge(new Date(s.t.clock.ms)).requests).toBe(1);
-    expect(s.t.familyRequests.storedRequests()).toBe(1);
+    const statuses = async () => (await phoneCall(s.t, s.dad, 'GET', '/requests')).body.sent.map((r: any) => [r.id, r.status]).sort();
+    s.t.clock.ms += 13 * 60 * MINUTE; // 같은 날 22:59
+    expect(await statuses()).toEqual([[done.id, 'completed'], [declined.id, 'declined']].sort());
+    expect(s.t.familyRequests.purge(new Date(s.t.clock.ms)).requests).toBe(0);
+    s.t.clock.ms = Date.parse('2026-11-16T00:00:00+09:00');
+    expect(await statuses()).toEqual([]);
+    expect(s.t.familyRequests.purge(new Date(s.t.clock.ms)).requests).toBe(2);
   });
 });
 
@@ -740,17 +763,17 @@ describe('자리 이벤트와 요청', () => {
     const req = await send(s, s.dad, careBody({ memberId: s.mom.memberId }));
     expect(await carList(s, s.mom, s.mom)).toHaveLength(1);
     await call(s.t, 'DELETE', '/pair', as(s.mom));
-    const received = (await call(s.t, 'GET', '/requests', { device: s.mom.device })).body.received;
+    const received = (await call(s.t, 'GET', '/requests', memberOnly(s.mom))).body.received;
     expect(received.map((r: any) => [r.id, r.reachable])).toEqual([[req.id, false]]);
   });
 
-  it('차곡 초기화(DELETE /car)는 자리를 지우지만 가족·요청은 기기 id로 남는다', async () => {
+  it('차곡 초기화(DELETE /car)는 자리를 지우지만 가족·요청은 구성원 비밀값으로 남는다', async () => {
     const s = await setup();
     const req = await send(s, s.dad, careBody({ memberId: s.mom.memberId }));
     expect((await call(s.t, 'DELETE', '/car', { token: s.mom.carToken })).status).toBe(200);
-    expect((await call(s.t, 'GET', '/requests', { device: s.mom.device })).body.received.map((r: any) => r.id)).toEqual([req.id]);
-    expect((await call(s.t, 'GET', '/requests', { device: s.dad.device })).body.sent[0].reachable).toBe(false);
-    expect((await call(s.t, 'GET', '/family', { device: s.mom.device })).body.family.members).toHaveLength(4);
+    expect((await call(s.t, 'GET', '/requests', memberOnly(s.mom))).body.received.map((r: any) => r.id)).toEqual([req.id]);
+    expect((await call(s.t, 'GET', '/requests', memberOnly(s.dad))).body.sent[0].reachable).toBe(false);
+    expect((await call(s.t, 'GET', '/family', memberOnly(s.mom))).body.family.members).toHaveLength(4);
   });
 });
 
@@ -762,11 +785,11 @@ describe('기존 일정 보내기(픽스처 가족)는 그대로', () => {
     expect(res.body).toMatchObject({ id: 'gwangju-kia:family-mom', memberId: 'family-mom', status: 'delivered' });
     expect((await call(t, 'GET', '/family/requests')).body.requests).toHaveLength(1);
     // 새 가족에는 픽스처 가족의 id를 받는 사람으로 쓸 수 없다
-    const { family } = (await call(t, 'POST', '/family/invite', { device: dev('mom'), body: { name: '엄마' } })).body;
+    const { family, memberToken } = (await call(t, 'POST', '/family/invite', { body: { name: '엄마' } })).body;
     expect(family.members).toHaveLength(1);
-    const bad = await call(t, 'POST', '/requests', { device: dev('mom'), body: careBody({ memberId: 'family-mom' }) });
+    const bad = await call(t, 'POST', '/requests', { member: memberToken, body: careBody({ memberId: 'family-mom' }) });
     expect(bad.status).toBe(400);
     expect(bad.body.reason).toBe('unknown-recipient');
-    expect((await call(t, 'GET', '/requests', { device: dev('mom') })).body).toMatchObject({ sent: [], received: [] });
+    expect((await call(t, 'GET', '/requests', { member: memberToken })).body).toMatchObject({ sent: [], received: [] });
   });
 });
