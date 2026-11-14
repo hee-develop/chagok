@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
+import { createEnergySources } from './energy/sources.js';
 import { loadDayFixture, loadFamilyMembers, loadMockCalendars, loadPlacesCatalog, resolveFixtureLocation } from './fixtures.js';
 
 const port = Number(process.env.PORT ?? 8787);
@@ -20,6 +21,7 @@ try {
     calendars,
     places: loadPlacesCatalog(),
     familyMembers: loadFamilyMembers(),
+    energy: createEnergySources(process.env),
     eventsLoopbackOnly: process.env.EVENTS_LOOPBACK_ONLY === '1',
     // 차량 Maestro(e2e-car.sh)·PT 시연(pt-demo.sh) 같은 데모 서버에서만 켠다. 실제 사용자 서버에서는 일정을 받은 적 없는 자리가 0건이다.
     fixtureSeats,

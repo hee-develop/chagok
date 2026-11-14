@@ -1,6 +1,8 @@
 import { Hono, type Context } from 'hono';
 import type { DayFixture, FamilyMember, MockCalendar, PlacesCatalog } from './fixture-types.js';
 import { createCalendarsRoute, type SelectionStore } from './routes/calendars.js';
+import type { EnergySources } from './energy/types.js';
+import { createEnergyRoute } from './routes/energy.js';
 import { createEventsRoute, isLoopbackRequest, type EventsStore } from './routes/events.js';
 import { createFamilyRoute, type FamilyStore } from './routes/family.js';
 import { createCarRoute, createDriversRoute, createPairRoute, createPresenceRoute } from './routes/pair.js';
@@ -52,6 +54,12 @@ export type AppOptions = {
   fixtureSeats?: boolean;
   /** 연결 전 버킷 수·TTL·생성 속도 제한과 일정 저장 용량 예산(연결된 자리/버킷 따로, 버킷 하나의 상한). 기본값은 seatData.ts. 테스트에서 바꾼다. */
   capacity?: Omit<NonNullable<Parameters<typeof createSeatDataRegistry>[0]>, 'now' | 'fixtureIds' | 'defaults'>;
+  /** 에너지 후보 어댑터(충전소·주유소·휴게소). 서버 시작 코드가 환경 변수로 골라 넘긴다(`createEnergySources`). */
+  energy: EnergySources;
+  /** 에너지 후보 외부 조회 실패를 알린다. 없으면 한 줄 경고. 테스트에서 바꾼다. */
+  onEnergyError?: (error: unknown) => void;
+  /** 에너지 후보 전체 제한 시간(ms). 테스트에서만 바꾼다. */
+  energyTimeoutMs?: number;
 };
 
 export const createApp = ({
@@ -71,6 +79,9 @@ export const createApp = ({
   legacyDriverFallback = true,
   fixtureSeats = false,
   capacity,
+  energy,
+  onEnergyError,
+  energyTimeoutMs,
 }: AppOptions) => {
   // 일정·선택·자주 가는 곳·가족 요청·보정·채비는 운전자 자리마다 따로 쌓인다. 토큰 없이 기기 id만 있는 폰은 그 기기의 연결 전 버킷을,
   // 식별이 전혀 없는 요청은 기본 자리를 쓴다(픽스처·데모·차량 E2E 경로).
@@ -93,6 +104,7 @@ export const createApp = ({
     .route('/drivers', createDriversRoute(seats))
     .route('/presence', createPresenceRoute(seats))
     .route('/car', createCarRoute(seats))
+    .route('/energy', createEnergyRoute(energy, { now, onError: onEnergyError, totalTimeoutMs: energyTimeoutMs }))
     .route('/schedules', createSchedulesRoute(fixture, calendars, places, guard, { members: familyMembers }, now));
 };
 

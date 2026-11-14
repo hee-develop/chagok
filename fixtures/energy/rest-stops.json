@@ -1,0 +1,12 @@
+{
+  "fictional": true,
+  "note": "시연용 가상 휴게소. 광주에서 서울로 가는 직선 근처에 흩어 둔 값이고 실제 휴게소 위치와 무관하다. hasFood는 식사할 수 있는지.",
+  "restStops": [
+    { "id": "EX-RS-001", "name": "예시 백양 휴게소", "lat": 35.4, "lng": 126.866, "hasFood": true },
+    { "id": "EX-RS-002", "name": "예시 정읍 휴게소", "lat": 35.57, "lng": 126.875, "hasFood": true },
+    { "id": "EX-RS-003", "name": "예시 익산 간이 휴게소", "lat": 35.95, "lng": 126.93, "hasFood": false },
+    { "id": "EX-RS-004", "name": "예시 논산 휴게소", "lat": 36.2, "lng": 127.02, "hasFood": true },
+    { "id": "EX-RS-005", "name": "예시 천안 휴게소", "lat": 36.78, "lng": 127.0, "hasFood": true },
+    { "id": "EX-RS-006", "name": "예시 안성 휴게소", "lat": 37.0, "lng": 127.01, "hasFood": true }
+  ]
+}
