@@ -29,3 +29,6 @@ e2e/output/
 
 # E2E 산출물(스크린샷·로그·Expo Go 캐시)
 .e2e-shots/
+
+# Pleos 문서 원문 스냅샷(pleos-guide-checker 기준). 공개 저장소에 올리지 않고 각자 로컬에만 둔다
+.claude/pleos-guide-snapshot/

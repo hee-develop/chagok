@@ -34,7 +34,7 @@ Pleos Connect(현대차그룹 AAOS 기반 인포테인먼트) 차량 앱 사이�
 - 도착 판단 → 다음 일정: 내비 목적지 도착 알림(차곡이 길안내한 일정) 또는 P단 + 대상 일정 장소 300m 안(위치는 내비에 묻는다)이면 도착으로 바꾸고, 잠깐 정차(10분)가 지나 다시 타면 다음 일정을 한 줄로 묻는다(재탑승). 도착 순간에는 말하지 않는다. 계약은 `docs/arrival.md`.
 - 주행 중 다음 일정 칩(`NextChip`, main·release 포함): `DriveSession`이 주행(motion=DRIVING)이라고 판단하고 폰과 연결돼 있고 Suspend가 아니며 다음 일정(`DayPlan.target()`: 도착·건너뜀·종일 제외)이 있을 때만 창 왼쪽 위(카드 열 밖, 여백 24)에 "다음 13:00 육전집 점심"을 정적인 글자로 보인다("다음"과 본문은 별도 글자, 간격 12). 정차하면 같은 이벤트에서 바로 숨기고, 도착하면 다음 일정으로 바뀐다. 이벤트 없이 시간만 흘러도 맞도록 칩이 보이는 동안 `Effect.ScheduleChipRecheck`(대상 일정이 끝나는 시각, `SessionHost`가 postDelayed → `Event.ChipRecheck`, 기기·데모 시계가 바뀌면 `Event.ClockChanged`로 다시 예약)로 다시 판단하고, 칩이 바뀌거나 숨겨지면 이전 타이머는 ID가 달라 무시된다. 일정을 받는 중(`ScheduleLoading`~`ScheduleLoaded`, 탑승 판단 중 다시 받기 포함)에는 칩을 바꾸지 않는다(정차·미연결·Suspend 숨김은 예외). 표시 전용이라 누를 수 없고 말·소리·애니메이션이 없다(주행 규제). 상태는 `Effect.ShowNextChip` → `UiState.nextChip`, 문구는 `Phrases.nextChipBody`다. 도착 예정은 시안 칩에 없고 내비 몫이라 넣지 않았다. 계약은 `docs/next-chip.md`.
 - 아직 없음(다음 기능): 하차 카드(하차 체크), 장소 키워드 검색.
-- debug 빌드의 `chagok-debug://signal`로 휴대폰 연결(`paired`, 기존 flow는 `paired=true`로 시작)·소요 시간(`trip`)·경로 요청 결과(`route`)·들은 말(`heard`)·현재 위치(`loc`)·내비 도착(`arrived`)을 주입해 회사망에서도 E2E가 돕니다. 실제 내비와 음성 인식은 `docs/sdk-check.md`의 수동 확인 목록입니다.
+- debug 빌드의 `chagok-debug://signal`로 휴대폰 연결(`paired`, 기존 flow는 `paired=true`로 시작)·소요 시간(`trip`)·경로 요청 결과(`route`)·들은 말(`heard`)·현재 위치(`loc`)·내비 도착(`arrived`)을 주입해 실제 내비·음성 인식 없이도 E2E가 돕니다. 실제 내비와 음성 인식은 `docs/sdk-check.md`의 수동 확인 목록입니다.
 
 ## Pleos 설계 가이드 점검
 
@@ -42,9 +42,9 @@ Pleos Connect(현대차그룹 AAOS 기반 인포테인먼트) 차량 앱 사이�
 
 - 정의: `.claude/agents/pleos-guide-checker.md`. 읽기 전용이라 코드를 고치지 않고 보고만 합니다.
 - 부르는 법: 이 폴더에서 연 세션에서 `@agent-pleos-guide-checker <요청>`을 입력합니다. 범위를 주지 않으면 커밋하지 않은 변경분을 보고, 변경분이 없으면 차량 앱 모듈 전체를 봅니다.
-- 다른 폴더의 세션에서 부를 때: `cd ~/Projects-my/chagok && claude -p "@agent-pleos-guide-checker 차량 앱 가이드 점검해줘"`처럼 별도 실행으로 부릅니다. 결과만 받고 이어서 대화할 수는 없습니다.
+- 다른 폴더의 세션에서 부를 때: `cd <저장소 경로> && claude -p "@agent-pleos-guide-checker 차량 앱 가이드 점검해줘"`처럼 별도 실행으로 부릅니다. 결과만 받고 이어서 대화할 수는 없습니다.
 - 언제 부르나: 차량 앱 기능 하나를 끝냈을 때, 또는 화면·매니페스트·오디오·주행 규제·SDK 연동 코드를 바꿨을 때 부릅니다. 자동 실행 훅은 두지 않았습니다.
-- 기준 원문: `.claude/pleos-guide-snapshot/`에 2026-10-29 시점 원문이 있습니다. 가이드가 바뀌면 에이전트가 "가이드 변경 감지"로 알려 주는데, 이때 체크리스트와 스냅샷을 함께 갱신합니다.
+- 기준 원문: 2026-10-29 시점 원문은 각자 `.claude/pleos-guide-snapshot/`에 로컬로만 둡니다. Pleos 문서 원문이라 공개 저장소에 올리지 않습니다(`.gitignore`). 없으면 에이전트가 가이드 페이지를 WebFetch로 읽습니다. 가이드가 바뀌면 에이전트가 "가이드 변경 감지"로 알려 주는데, 이때 체크리스트(와 로컬 스냅샷)를 갱신합니다.
 
 ### 가이드에서 해석이 갈리는 지점
 

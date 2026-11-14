@@ -18,7 +18,7 @@
 
 | 기획서 항목 | 판정 | 근거와 대안 |
 | --- | --- | --- |
-| 도착과 안내 취소 구분 | 🟡 | `onDestinationArrived`, `onRouteCancelled`가 별도 콜백. 회사망에서는 에뮬레이터 내비가 Zscaler 때문에 서버 연결 실패라 실측 못 함 |
+| 도착과 안내 취소 구분 | 🟡 | `onDestinationArrived`, `onRouteCancelled`가 별도 콜백. 에뮬레이터 내비로는 아직 실측 못 함 |
 | 도착 예정 시각 | 🟡 | `RouteStartInfo.duration`, `requestTrip` → `TripInfo.eta`. 주행 중 실시간 갱신 이벤트는 불명(`DrivingInfo` 내용 미확인) |
 | "응" → 길안내 | 🟡 | `requestRoute(RouteInfo)`. 결과는 이벤트로 오며 내비 구현에 따라 다를 수 있다고 문서에 명시 |
 | 장소 키워드 검색 | ✅(기획서 전제와 일치) | NaviHelper에는 검색 결과를 데이터로 주는 API가 없다(`SearchPlace`는 내비 화면만 띄움). 서버가 외부 API 호출하는 설계가 맞다 |
@@ -50,25 +50,19 @@
 | --- | --- | --- |
 | 갤럭시에서 폰 앱이 문자를 바로 보냄 | ⚠️ | Google Play는 SMS 권한을 기본 SMS 앱 등 예외에만 허용. 아이폰처럼 내용이 채워진 문자 창을 여는 방식(`ACTION_SENDTO`)이 안전 |
 
-## 개발 환경 메모
-
-- 회사망 Zscaler가 `*.pleos.ai`, `*.umos.ai` TLS를 가로챈다.
-  - 빌드: `~/.gradle/gradle.properties`의 truststore로 해결
-  - 에뮬레이터 안 내비·서버 모드 TTS/STT: 해결 안 됨(시스템 CA 설치 불가한 user 빌드). 회사망 밖에서 실측하거나 IT에 예외 요청
-
 ## 추가 실측 (2026-10-29, Emulator v2.1.0 user 빌드)
 
 - `NaviHelper.requestRoute`는 `pleos.car.permission.NAVI_ROUTE_SEARCH` 권한이 있어야 동작했다(`NAVI_ROUTE`만으로는 부족). 매니페스트에 둘 다 선언한다.
 - 이 에뮬레이터(user 빌드)에서는 `inject-vhal-event`로 기어를 바꿀 수 없다. 기어·시동 전환은 디버그 버튼([탑승] 등)이나 단위 테스트로 확인한다.
 
 
-## 출발 제안 → 길안내 (2026-11-06 구현, 회사망 안에서는 주입으로만 확인)
+## 출발 제안 → 길안내 (2026-11-06 구현, 신호 주입으로 확인)
 
 - 권한: `pleos.car.permission.STT_SERVICE`를 더했다. 에뮬레이터 `pm list permissions -f`로 확인한 등급은 NAVI_ROUTE·NAVI_ROUTE_SEARCH·TTS_SERVICE·STT_SERVICE 모두 normal이라 런타임 동의(PermissionGate·권한 설명 카드)는 켜지 않았다.
-- 마이크(`RECORD_AUDIO`, dangerous): 넣지 않았다. STT는 CAAS 서비스(`ai.pleos.playground.caas`)가 녹음하고, SpeechToText AAR 매니페스트에도 RECORD_AUDIO가 없다. 2026-10-29 진단에서 이 권한 없이 `request()` 뒤 마이크가 열렸다(로그 실측). 실기기·회사망 밖에서 인식이 안 되면 그때 필요 여부를 다시 본다.
+- 마이크(`RECORD_AUDIO`, dangerous): 넣지 않았다. STT는 CAAS 서비스(`ai.pleos.playground.caas`)가 녹음하고, SpeechToText AAR 매니페스트에도 RECORD_AUDIO가 없다. 2026-10-29 진단에서 이 권한 없이 `request()` 뒤 마이크가 열렸다(로그 실측). 실기기에서 인식이 안 되면 그때 필요 여부를 다시 본다.
 - 경로 시작 이벤트: 결과 안내는 `requestRoute`를 내비에 보냈는지(`RouteRequestResult`)로 정한다. `onRouteStarted`·`onRouteCancelled`는 이번 기능의 결과 안내에 쓰이지 않는다. 주행 중 칩은 `DayPlan.target()` 기준이라 경로 이벤트를 쓰지 않고 도착 예정도 넣지 않는다(도착 시각은 내비 몫, `docs/next-chip.md`).
 
-### 미확인 — 수동 확인 필요 (회사망 밖, 실제 에뮬레이터·실차)
+### 미확인 — 수동 확인 필요 (실제 내비·음성이 도는 에뮬레이터·실차)
 
 | 항목 | 확인할 것 | 상태 |
 | --- | --- | --- |

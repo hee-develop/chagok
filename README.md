@@ -2,6 +2,14 @@
 
 일정은 폰에서 읽고, 판단은 차에서 한다. Pleos Connect 차량 앱 + 폰 앱(RN) + 서버로 이루어져 있습니다.
 
+## 지금 되는 것 (2026-11-14, 에뮬레이터 기준)
+
+- **폰 첫 설정**: 캘린더 고르기(실제 Android 캘린더) → 자주 가는 곳 → 일정별 장소 보정 · 채비 한 줄 · 가족에게 보내기('전달됨') → 차 화면 QR이나 6자리 번호로 차와 연결
+- **차 탑승 브리핑**: 오늘 일정과 채비를 읽고 "출발할까요?"를 묻고, "응"이면 내비 길안내를 시작한다. 늦었으면 같이 묻고, 일정이 없거나 여유가 많으면 자주 가는 곳을 후보로 보인다
+- **도착 → 다음 일정**: 내비 도착 알림이나 P단 + 일정 장소 300m 안이면 도착으로 보고, 다시 타면 다음 일정을 한 줄로 묻는다
+- **주행 중**: 말하지 않고 다음 일정 칩 한 줄만 보인다
+- **아직 안 됨**: 실제 내비 · 음성 인식 실측(지금은 debug 신호 주입으로 확인), 서버 배포(HTTPS) · DB 저장, 장소 검색 API(카카오 로컬), 하차 카드, 가족 요청 받는 쪽
+
 | 폴더 | 내용 | 스택 |
 | --- | --- | --- |
 | `car/` | 차량 앱 (`com.chagok.car`) | Kotlin, Pleos Connect SDK, AAOS Car API. 독립 Gradle 프로젝트 |
@@ -66,12 +74,10 @@ pnpm e2e:phone         # Android E2E (아래)
 
 ## 차량 앱
 
-사전 준비 (이 맥에는 2026-10-29에 설치 완료)
+사전 준비
 
 - Pleos Connect Emulator v2.1.0 이미지: `system-images;android-34;pleos_car_emulator;arm64-v8a`
 - AVD `Pleos_Connect_v2_1` (Cold boot, RAM 4GB)
-- 회사망(Zscaler)에서는 `nexus-playground.pleos.ai` 인증서를 JDK가 신뢰하지 못한다.
-  `~/.gradle/gradle.properties`에 Zscaler 루트를 더한 truststore를 지정해 두었다.
 
 ```bash
 # 1. 에뮬레이터 실행 (또는 Android Studio Device Manager)
@@ -100,4 +106,4 @@ Android Studio에서는 `car/` 폴더를 열고 Run 하면 된다.
 
 - `pnpm e2e:car`는 debug 앱 설치 → 서버(watch 없이 `tsx src/index.ts`, 8787) 시작 → `e2e/maestro/car/boarding-briefing.yaml`, `depart-route.yaml` 순서로 실행 → 서버 종료(프로세스 그룹째)를 한다. 에뮬레이터 시간대를 서울로 잠시 바꿨다가 되돌린다(원래 값이 비어 있었으면 UTC로 두고 비운다). 스크린샷은 실행마다 새로 만드는 `e2e/output/car/<실행 시각>/shots/`(git 제외)에 남는다. `E2E_FRESH_INSTALL=1`을 주면 앱을 지우고 설치한 상태로 돈다. 기기가 여럿이면 `ANDROID_SERIAL`을 지정한다. 8787이 이미 쓰이고 있으면 `PORT=8790 pnpm e2e:car`처럼 포트를 바꾼다(서버와 debug 앱 모두 그 포트로 맞춘다). 이렇게 돌린 뒤에는 설치된 debug 앱이 그 포트를 기억하므로, 기본 서버(8787)로 직접 확인하기 전에 `./gradlew :app:installDebug`로 다시 설치한다. Gradle로 직접 설치할 때도 `ANDROID_SERIAL`을 꼭 지정한다(없으면 연결된 모든 기기에 설치된다).
 - 일정 데이터는 `fixtures/schedules/gwangju-day.json`(프로토타입 '광주 직관 하루')이고, 기본값은 저장소 루트의 `fixtures/` 아래 이 파일이다. `FIXTURE_PATH`로 바꿀 수 있고, 절대 경로는 그대로, 상대 경로는 작업 폴더가 아니라 **저장소 루트 기준**으로 읽는다(예: `FIXTURE_PATH=fixtures/schedules/gwangju-day.json`). 형식이 틀리면(place의 lat·lng 숫자, memo·locationText 문자열 또는 null, attendees 문자열 배열) 서버가 시작할 때 오류로 멈춘다. 서버가 시작할 때 읽어 `GET /schedules/today?at=<ISO8601>`로 내려준다. 차량 앱 단위·계측 테스트도 같은 파일을 읽는다.
-- debug 빌드에만 신호 주입 통로가 있다. `adb shell am start -a android.intent.action.VIEW -d "chagok-debug://signal?gear=D"`처럼 `now`(ISO8601, 데모 시계·초기화), `gear`(P·R·N·D), `ignition`, `restricted`, `enter`, `board`를 줄 수 있다. 출발 제안 → 길안내용으로 `trip`(소요 시간 초, `none`=모름, `real`=실제 내비), `route`(`ok`·`fail`·`real`: 길안내 요청 결과), `listen`(`off`면 실제 STT를 열지 않음), `heard`(들은 말, 퍼센트 인코딩)도 준다. 이 값들은 debug 빌드에만 있고 release에는 없다. 실제 내비 경로 시작과 음성 인식은 회사망 밖에서 사람이 확인한다(`docs/sdk-check.md`). debug 빌드만 평문 HTTP로 `10.0.2.2:8787`(PC의 서버)에 붙는다.
+- debug 빌드에만 신호 주입 통로가 있다. `adb shell am start -a android.intent.action.VIEW -d "chagok-debug://signal?gear=D"`처럼 `now`(ISO8601, 데모 시계·초기화), `gear`(P·R·N·D), `ignition`, `restricted`, `enter`, `board`를 줄 수 있다. 출발 제안 → 길안내용으로 `trip`(소요 시간 초, `none`=모름, `real`=실제 내비), `route`(`ok`·`fail`·`real`: 길안내 요청 결과), `listen`(`off`면 실제 STT를 열지 않음), `heard`(들은 말, 퍼센트 인코딩)도 준다. 이 값들은 debug 빌드에만 있고 release에는 없다. 실제 내비 경로 시작과 음성 인식은 사람이 따로 확인한다(`docs/sdk-check.md`). debug 빌드만 평문 HTTP로 `10.0.2.2:8787`(PC의 서버)에 붙는다.
