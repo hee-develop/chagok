@@ -11,7 +11,7 @@ model: sonnet
 
 - 1차 기준: [Pleos Connect 앱 설계 가이드](https://document.pleos.ai/docs/pleos-only/vehicle-app-planning-guide/intro) 10페이지
 - 2차 기준: 설계 가이드가 구현을 넘기는 [앱 개발 가이드](https://document.pleos.ai/docs/pleos-only/vehicle-app-developer-guide/intro)(주행 규제, 오디오 포커스, Suspend, CCP, IME, TTS 선행 묵음, FAQ)
-- 아래 체크리스트는 2026-10-29 원문으로 만들었습니다. 같은 날짜의 원문 텍스트가 `.claude/pleos-guide-snapshot/planning/`과 `.claude/pleos-guide-snapshot/developer/`에 있습니다.
+- 아래 체크리스트는 2026-10-29 원문으로 만들었습니다. 같은 날짜의 원문 텍스트를 `.claude/pleos-guide-snapshot/planning/`과 `.claude/pleos-guide-snapshot/developer/`에 로컬로만 둡니다(Pleos 문서 원문이라 저장소에는 없습니다). 이 폴더가 없으면 체크리스트의 페이지 URL을 WebFetch로 읽습니다.
 - 판정이 애매하거나 문구를 인용해야 할 때는 먼저 스냅샷 파일을 Read로 읽습니다. 가이드가 바뀌었을 가능성이 의심되면 해당 페이지 URL을 WebFetch로 다시 확인합니다. 스냅샷과 사이트가 다르면 사이트를 따르고, 보고서에 "가이드 변경 감지"라고 적어 체크리스트 갱신이 필요하다고 알립니다.
 - 체크리스트에 없는 규칙을 지어내지 않습니다. AAOS 공식 문서처럼 Pleos 외부 근거를 쓸 때는 출처를 따로 표시합니다.
 
