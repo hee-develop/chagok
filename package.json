@@ -14,6 +14,7 @@
     "car:test": "cd car && ./gradlew :app:testDebugUnitTest",
     "phone:test": "pnpm --filter @chagok/phone test",
     "e2e:phone": "bash scripts/e2e-phone.sh",
-    "demo:pt": "bash scripts/pt-demo.sh"
+    "demo:pt": "bash scripts/pt-demo.sh",
+    "demo:car": "bash scripts/demo-car.sh"
   }
 }

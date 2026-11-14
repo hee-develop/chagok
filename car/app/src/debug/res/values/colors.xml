@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 디버그 빌드 전용 가짜 지도의 도로색. 화면 시안(Drive)의 값이고 차곡 색 토큰에는 없어 여기에만 둔다. 주황(care)은 쓰지 않는다. -->
+<resources>
+    <color name="map_road_major">#1e1e1e</color>
+    <color name="map_road_minor">#1a1a1a</color>
+</resources>

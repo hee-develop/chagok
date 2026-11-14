@@ -16,6 +16,7 @@ import com.chagok.car.runtime.PermissionStep
 import com.chagok.car.runtime.SessionHost
 import com.chagok.car.runtime.UiState
 import com.chagok.car.ui.BriefingCardView
+import com.chagok.car.ui.CardAlign
 import com.chagok.car.ui.CardContent
 import com.chagok.car.ui.CardMotion
 import com.chagok.car.ui.DesignScale
@@ -41,6 +42,7 @@ class MainActivity : Activity() {
     private lateinit var permissionCard: BriefingCardView
     private lateinit var ducking: DuckingPill
     private lateinit var nextChip: NextChip
+    private lateinit var column: FrameLayout
     private lateinit var notices: LinearLayout
 
     /** 마지막으로 그린 카드. 같은 내용이면 다시 그리지 않아 AutoDismissBar 같은 진행 중인 표시가 처음으로 돌아가지 않는다. */
@@ -52,6 +54,9 @@ class MainActivity : Activity() {
     private var driving = false
     private var firstRender = true
 
+    /** 지금 카드 열에 적용한 정렬. 가짜 내비(디버그)가 켜지고 꺼질 때만 바뀐다. */
+    private var align: CardAlign? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         d = DesignScale.of(this)
@@ -59,10 +64,12 @@ class MainActivity : Activity() {
         // 카드 그림자가 부모 밖으로 번지도록 자식 자르기를 끈다.
         val root = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
         setContentView(root)
+        // 디버그 빌드에만 있는 가짜 길안내 지도. 맨 아래에 깐다. 릴리스에서는 null.
+        FakeNavi.create(this, d, host.clock)?.let { root.addView(it, 0, FrameLayout.LayoutParams(-1, -1)) }
 
-        // 카드·알약은 카드 너비의 열 안에 두고 그 열을 창 가로 가운데에 놓는다.
+        // 카드·알약은 카드 너비의 열 안에 두고 그 열을 창 가로 가운데에 놓는다(정렬은 [applyAlign]).
         // 세로 창에서는 열이 창 너비와 같고, 가로 창에서는 높이 기준 크기라 양옆이 빈다.
-        val column = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
+        column = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
         root.addView(column, FrameLayout.LayoutParams(d.cardWidth, -1, Gravity.TOP or Gravity.CENTER_HORIZONTAL))
 
         fun cardParams() = FrameLayout.LayoutParams(d.cardWidth, d.dimenInt(R.dimen.size_card_h), Gravity.TOP or Gravity.START)
@@ -113,6 +120,7 @@ class MainActivity : Activity() {
             root.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.BOTTOM).apply { bottomMargin = d.dimenInt(R.dimen.size_card_h) / 4 })
         }
 
+        applyAlign()
         registerBackToHide()
         driving = host.ui.driving
         requestRuntimePermissions()
@@ -137,9 +145,16 @@ class MainActivity : Activity() {
         super.onResume()
         host.listener = ::render
         host.onActivityResumed()
+        FakeNavi.onResume(::applyAlign)
+    }
+
+    override fun onDestroy() {
+        FakeNavi.onDestroy(this)
+        super.onDestroy()
     }
 
     override fun onPause() {
+        FakeNavi.onPause()
         host.onActivityPaused()
         host.listener = null
         super.onPause()
@@ -153,7 +168,29 @@ class MainActivity : Activity() {
         host.startPermissionGatedSources()
     }
 
+    /**
+     * 카드 열을 [FakeNavi.cardAlign]대로 놓는다. 릴리스는 늘 가운데이고, 디버그에서 가짜 내비를 켜면 왼쪽 위(시안)다.
+     * 정렬이 바뀔 때만 다시 배치한다. 왼쪽 여백은 열 안쪽으로 둬서 카드가 시안의 여백만큼 안으로 들어온다.
+     */
+    private fun applyAlign() {
+        val next = FakeNavi.cardAlign()
+        if (next == align) return
+        align = next
+        val windowWidth = (resources.configuration.screenWidthDp * resources.displayMetrics.density).toInt()
+        val inset = next.inset(windowWidth, d.cardWidth, d.dimenInt(R.dimen.space_2xl))
+        column.layoutParams = FrameLayout.LayoutParams(
+            d.cardWidth + inset, -1,
+            Gravity.TOP or if (next == CardAlign.START) Gravity.START else Gravity.CENTER_HORIZONTAL,
+        )
+        for (v in listOf(card, permissionCard)) {
+            (v.layoutParams as FrameLayout.LayoutParams).leftMargin = inset
+            v.requestLayout()
+        }
+    }
+
     private fun render(state: UiState) {
+        FakeNavi.render(state)
+        applyAlign()
         if (state.driving != driving) {
             driving = state.driving
             if (driving) hidePermissionUi() else requestRuntimePermissions()

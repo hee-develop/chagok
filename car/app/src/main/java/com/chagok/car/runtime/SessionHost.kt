@@ -10,6 +10,7 @@ import android.os.Looper
 import android.os.SystemClock
 import com.chagok.car.BuildConfig
 import com.chagok.car.DebugHooks
+import com.chagok.car.FlowLog
 import com.chagok.car.flow.DriveSession
 import com.chagok.car.flow.Effect
 import com.chagok.car.flow.Event
@@ -218,7 +219,9 @@ class SessionHost(
     private fun refreshSchedules() = refresher.refresh()
 
     private fun dispatch(event: Event) {
-        session.handle(event).forEach(::execute)
+        val effects = session.handle(event)
+        FlowLog.record(event, effects)
+        effects.forEach(::execute)
         if (refreshRequested) {
             refreshRequested = false
             refreshSchedules()
