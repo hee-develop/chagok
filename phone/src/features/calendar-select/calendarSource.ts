@@ -19,6 +19,8 @@ export type DeviceEvent = {
   locationText: string | null;
   notes: string | null;
   attendees: string[];
+  /** 사용자가 "이동 일정이에요"로 바꾼 같은 이름 일정. 서버의 이동 없음 안전망을 건너뛰게 한다(없으면 적용). */
+  travelConfirmed?: boolean;
 };
 
 /** 캘린더 읽기 권한이 없을 때 던진다. 목 캘린더로 대신하지 않고 화면이 안내한다. */

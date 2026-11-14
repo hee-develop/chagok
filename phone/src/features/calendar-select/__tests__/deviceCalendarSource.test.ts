@@ -1,5 +1,5 @@
 import { CalendarPermissionError } from '../calendarSource';
-import { ATTENDEE_LOOKUP_LIMIT, deviceCalendarSource, MAX_EVENTS } from '../deviceCalendarSource';
+import { ATTENDEE_LOOKUP_LIMIT, deviceCalendarSource, isDefaultSelected, MAX_EVENTS } from '../deviceCalendarSource';
 
 const mockCalendar = {
   getCalendarPermissionsAsync: jest.fn(),
@@ -71,19 +71,51 @@ describe('권한', () => {
 describe('list', () => {
   beforeEach(() => mockCalendar.getCalendarPermissionsAsync.mockResolvedValue(granted));
 
-  it('이름·계정·색을 옮기고 숨긴 캘린더는 뺀다. 기본 선택은 기본·소유 캘린더', async () => {
+  it('이름·계정·색을 옮기고 숨긴 캘린더는 뺀다. 기본 체크는 접근 수준이 소유·편집 가능인 캘린더', async () => {
     mockCalendar.getCalendarsAsync.mockResolvedValue([
       calendar(),
       calendar({ id: '2', title: '구독', isPrimary: false, accessLevel: 'read', source: { name: 'Holidays' } }),
       calendar({ id: '3', title: '숨김', isVisible: false }),
       calendar({ id: '4', title: '가족', isPrimary: false, accessLevel: 'owner' }),
+      calendar({ id: '5', title: '공유', isPrimary: false, accessLevel: 'editor', source: { name: 'Team' } }),
     ]);
     expect(await deviceCalendarSource.list()).toEqual([
       { id: '1', name: '내 캘린더', source: 'me@gmail.com', color: '#3367d6', defaultSelected: true },
       { id: '2', name: '구독', source: 'Holidays', color: '#3367d6', defaultSelected: false },
       { id: '4', name: '가족', source: 'me@gmail.com', color: '#3367d6', defaultSelected: true },
+      { id: '5', name: '공유', source: 'Team', color: '#3367d6', defaultSelected: true },
     ]);
     expect(mockCalendar.getCalendarsAsync).toHaveBeenCalledWith('event');
+  });
+});
+
+describe('기본 체크(접근 수준, 정책서 10.2 종류 가르기)', () => {
+  it.each([
+    ['owner', true],
+    ['root', true],
+    ['editor', true],
+    ['contributor', true],
+    ['read', false],
+    ['respond', false],
+    ['freebusy', false],
+    ['none', false],
+    ['override', false],
+  ])('접근 수준 %s → 체크 %s', (accessLevel, expected) => {
+    expect(isDefaultSelected({ accessLevel })).toBe(expected);
+  });
+
+  it('읽기 전용이면 기본 캘린더 표시가 있어도 해제한다(공휴일·구독)', () => {
+    expect(isDefaultSelected({ accessLevel: 'read', isPrimary: true })).toBe(false);
+  });
+
+  it('소유 캘린더는 기본 캘린더가 아니어도 체크한다(공유·가족)', () => {
+    expect(isDefaultSelected({ accessLevel: 'editor', isPrimary: false })).toBe(true);
+  });
+
+  it('접근 수준을 모를 때만 기본 캘린더 표시를 따른다', () => {
+    expect(isDefaultSelected({ isPrimary: true })).toBe(true);
+    expect(isDefaultSelected({ isPrimary: false })).toBe(false);
+    expect(isDefaultSelected({})).toBe(false);
   });
 });
 

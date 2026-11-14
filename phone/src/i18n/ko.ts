@@ -114,6 +114,19 @@ export const ko = {
     retry: RETRY,
     cancel: '취소',
   },
+  // 폰이 거른 일정(온라인·건물 안)의 줄·확인·되돌리기. 3단계와 오늘 일정 화면이 같이 쓴다.
+  travelFilter: {
+    markTravel: '이동 일정이에요',
+    markTravelHint: '같은 이름 일정은 앞으로 차에 보내요',
+    confirmQuestion: (title: string) => `‘${title}’ 일정을 이동 일정으로 바꿀까요?`,
+    confirmHint: '같은 이름 일정을 앞으로 차에 보내요.',
+    confirm: '바꾸기',
+    cancel: '취소',
+    changed: (title: string) => `‘${title}’ 일정을 이동 일정으로 바꿨어요.`,
+    undo: '되돌리기',
+    markFailed: '바꾸지 못했어요. 일정은 그대로예요. 잠시 뒤 다시 시도해 주세요.',
+    undoFailed: '되돌렸어요. 차에는 아직 반영하지 못했고 잠시 뒤 다시 보내요.',
+  },
   fillPlaces: {
     title: (count: number) => `장소가 빈 일정이 ${count}개 있어요`,
     heading: '일정 장소를 확인해 주세요',
@@ -122,8 +135,9 @@ export const ko = {
     noSchedules: '선택한 캘린더에 확인할 일정이 없어요.',
     missing: '장소 없음',
     noTravel: '이동 없음',
-    // 서버가 저절로 이동 없음으로 본 이유(온라인 회의·회의실). 1단계 문구 "걸러서 차에 보내지 않아요"의 실제 동작이다.
-    noTravelReason: { online: '온라인 회의', meetingRoom: '회의실' },
+    // 저절로 이동 없음으로 본 이유(온라인 회의·건물 안). 폰이 읽을 때 거르고(서버로 보내지 않음) 서버는 안전망이다.
+    // 1단계 문구 "걸러서 차에 보내지 않아요"의 실제 동작이다.
+    noTravelReason: { online: '온라인 회의', meetingRoom: '건물 안' },
     // 일정마다 적는 채비. 차가 탈 때 읽는다.
     careLabel: '채비',
     careAdd: '채비 넣기',

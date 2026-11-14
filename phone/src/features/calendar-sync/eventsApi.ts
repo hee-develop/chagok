@@ -10,3 +10,12 @@ export const putEvents: SendEvents = async (events, signal) => {
   if (!res.ok) throw new HttpError(res.status, `PUT /events ${res.status}`);
   return res.json();
 };
+
+export type FetchReceivedAt = (signal: AbortSignal) => Promise<string | null>;
+
+/** 서버가 폰 일정을 받은 적이 있는가(GET /events의 `receivedAt`, 받은 적이 없거나 재시작·초기화됐으면 null). */
+export const fetchEventsReceivedAt: FetchReceivedAt = async (signal) => {
+  const res = await api.events.$get({ query: { date: undefined } }, { init: { signal } });
+  if (!res.ok) throw new HttpError(res.status, `GET /events ${res.status}`);
+  return (await res.json()).receivedAt;
+};

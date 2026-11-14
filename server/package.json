@@ -8,6 +8,10 @@
     ".": {
       "types": "./src/app.ts",
       "default": "./dist/app.js"
+    },
+    "./no-travel": {
+      "types": "./src/noTravel.ts",
+      "default": "./src/noTravel.ts"
     }
   },
   "scripts": {
