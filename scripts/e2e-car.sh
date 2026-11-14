@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 차량 앱 E2E(Maestro): debug 앱을 설치하고 서버를 띄운 뒤 flow를 돌리고 서버를 내린다.
-# flow는 e2e/maestro/car/ 아래 pairing.yaml, boarding-briefing.yaml, depart-route.yaml, arrival-next.yaml 순서로 돈다.
+# flow는 e2e/maestro/car/ 아래 pairing.yaml, boarding-briefing.yaml, depart-route.yaml, arrival-next.yaml, fake-navi.yaml(가짜 길안내, debug 전용) 순서로 돈다.
 # 사용: pnpm e2e:car   (에뮬레이터 하나가 떠 있어야 한다. 여러 기기가 붙어 있으면 ANDROID_SERIAL=emulator-5554)
 # 환경 변수: E2E_FRESH_INSTALL=1 이면 앱을 지우고 설치한다(처음 설치 상태). E2E_OUT은 산출물 루트(기본 e2e/output/car).
 # 실행마다 $E2E_OUT/<시각>/ 폴더를 새로 만들고 스크린샷(shots/)과 로그는 그 안에만 둔다.
@@ -62,10 +62,21 @@ restore_timezone() {
   fi
 }
 
+# flow가 중간에 실패해도 flow가 바꾼 debug 주입값(가짜 내비·소요 시간·길안내 결과·듣기·가짜 경로 시간·위치·하차 카드 시간)이 앱에 남지 않게 되돌린다.
+# 이 스크립트(flow)가 바꾸는 값만 되돌린다. 연결 상태(paired)·시계(now)는 기존처럼 되돌리지 않는다. adb가 실패해도 정리는 계속한다.
+reset_injection() {
+  adb shell "am start -a android.intent.action.VIEW -d 'chagok-debug://signal?navi=real&trip=real&route=real&listen=real&drive=4.5&loc=real&exitcard=real'" </dev/null >/dev/null 2>&1 ||
+    echo "경고: debug 주입값을 되돌리지 못했습니다(adb 실패). 앱에 navi·trip·route·listen·drive·loc·exitcard 주입값이 남아 있을 수 있습니다." >&2
+  sleep 1
+}
+
 cleanup() {
+  # trap 안에서는 한 단계가 실패해도 끝까지 간다(set -e 해제)
+  set +e
   # Maestro가 테스트 출력 폴더 깊은 곳에 두는 이번 실행의 스크린샷을 $SHOTS 로 모은다
   mkdir -p "$SHOTS"
   find "$RUN_DIR/maestro" -path '*takeScreenshot*' -name '*.png' -exec cp {} "$SHOTS/" \; 2>/dev/null || true
+  reset_injection
   restore_timezone
   stop_server
 }
@@ -91,7 +102,7 @@ curl -fs "http://127.0.0.1:$PORT/health" >/dev/null || { echo "서버가 뜨지 
 
 echo "== Maestro 실행 (스크린샷: $SHOTS)"
 cd "$ROOT"
-for flow in pairing boarding-briefing depart-route arrival-next; do
+for flow in pairing boarding-briefing depart-route arrival-next fake-navi; do
   echo "-- $flow"
   "$MAESTRO" test "e2e/maestro/car/$flow.yaml" \
     --device "$ANDROID_SERIAL" \
