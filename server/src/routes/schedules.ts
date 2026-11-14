@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
-import type { DayFixture, MockCalendar, MockPlace, PlaceFixture, PlacesCatalog } from '../fixture-types.js';
+import type { DayFixture, FamilyMember, MockCalendar, MockPlace, PlaceFixture, PlacesCatalog } from '../fixture-types.js';
 import { MAX_BODY_BYTES, MAX_CARE_LENGTH, MAX_ID_LENGTH } from '../limits.js';
 import { MINUTE_MS, parseAt, seoulDay } from '../time.js';
 import { effectiveSelectedIds, type SelectionStore } from './calendars.js';
 import type { EventsStore } from './events.js';
+import type { FamilyStore } from './family.js';
 import { detectNoTravel, type NoTravelReason } from '../noTravel.js';
 import type { FavoritesStore } from './places.js';
 
@@ -48,6 +49,7 @@ export const createSchedulesRoute = (
   catalog: PlacesCatalog,
   events: EventsStore,
   favorites: FavoritesStore,
+  family: { members: FamilyMember[]; store: FamilyStore },
   now: () => Date = () => new Date(),
 ) => {
   const overrides = new Map<string, Override>();
@@ -197,6 +199,7 @@ export const createSchedulesRoute = (
             return {
               ...v, title: s.title, ...times(s), care: cares.get(s.id) ?? null,
               suggestion: known ? { placeId: known.id, name: known.name } : null,
+              familyRequests: family.store.forSchedule(s.id).map((r) => ({ memberId: r.memberId, name: r.memberName, status: r.status, sentAt: r.sentAt })),
             };
           }),
       }, 200);
@@ -240,5 +243,27 @@ export const createSchedulesRoute = (
         if (care === null) cares.delete(schedule.id);
         else cares.set(schedule.id, care);
         return c.json({ id: schedule.id, care: cares.get(schedule.id) ?? null }, 200);
+      })
+    // 가족에게 보내기. 보낼 때의 일정 내용(보정한 주소·채비 포함)을 담아 저장하고 '전달됨'으로 돌려준다.
+    // 같은 일정을 같은 가족에게 다시 보내면 내용과 보낸 시각을 새로 한다. 종일 일정은 이동 대상이 아니라 409.
+    .post('/:id/family-request', bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => c.json({ error: '본문이 너무 큽니다' }, 413) }),
+      validator('json', (raw: unknown, c) => {
+        if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return c.json({ error: '본문은 객체여야 합니다' }, 400);
+        const value = raw as Record<string, unknown>;
+        if (Object.keys(value).length !== 1 || typeof value.memberId !== 'string') return c.json({ error: 'memberId 하나가 필요합니다' }, 400);
+        if (!family.members.some((m) => m.id === value.memberId)) return c.json({ error: '묶어 둔 가족이 아닙니다' }, 400);
+        // RPC 타입 추론이 이 반환값을 본문 모양으로 쓰므로 받은 모양({ memberId }) 그대로 돌려준다.
+        return { memberId: value.memberId };
+      }), (c) => {
+        const schedule = selectedSchedules(now()).find((s) => s.id === c.req.param('id'));
+        if (!schedule) return c.json({ error: '선택한 캘린더에 없는 일정입니다' }, 404);
+        if (schedule.allDay) return c.json({ error: '종일 일정은 보낼 수 없습니다' }, 409);
+        const member = family.members.find((m) => m.id === c.req.valid('json').memberId)!;
+        const { locationText, place } = view(schedule);
+        const saved = family.store.save({
+          scheduleId: schedule.id, memberId: member.id, memberName: member.name, title: schedule.title, ...times(schedule),
+          locationText, place, care: cares.get(schedule.id) ?? null,
+        });
+        return c.json(saved, 200);
       });
 };

@@ -1,6 +1,6 @@
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
-import { loadDayFixture, loadMockCalendars, loadPlacesCatalog, resolveFixtureLocation } from './fixtures.js';
+import { loadDayFixture, loadFamilyMembers, loadMockCalendars, loadPlacesCatalog, resolveFixtureLocation } from './fixtures.js';
 
 const port = Number(process.env.PORT ?? 8787);
 const hostname = process.env.HOST ?? '127.0.0.1';
@@ -12,6 +12,7 @@ try {
     fixture: loadDayFixture(resolveFixtureLocation(process.env.FIXTURE_PATH), calendars),
     calendars,
     places: loadPlacesCatalog(),
+    familyMembers: loadFamilyMembers(),
     eventsLoopbackOnly: process.env.EVENTS_LOOPBACK_ONLY === '1',
   });
 } catch (e) {

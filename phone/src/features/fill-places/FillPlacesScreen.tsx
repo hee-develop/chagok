@@ -166,6 +166,22 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
                 </Pressable>
               </View>
             )}
+            {schedule.noTravel ? null : (
+              // 가족에게 보내기. 보낸 가족이 있으면 '엄마에게 전달됨'처럼 보인다(받는 쪽은 아직 프로토타입).
+              <View style={styles.careRow}>
+                <Text style={[styles.care, font(400)]} numberOfLines={2}>
+                  {schedule.familyRequests.length > 0 ? t.familyDelivered(schedule.familyRequests.map((r) => r.name).join(', ')) : ''}
+                </Text>
+                <Pressable accessibilityRole="button" accessibilityLabel={`${schedule.title} ${t.familySend}`}
+                  accessibilityState={{ disabled: saving }} disabled={saving} style={styles.textButton}
+                  onPress={() => {
+                    setSaveIssue(null);
+                    router.push({ pathname: '/setup/family-send', params: { scheduleId: schedule.id, title: schedule.title } });
+                  }}>
+                  <Text style={[styles.secondaryText, font(400)]}>{t.familySend}</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
         ))}
       </ScrollView>
