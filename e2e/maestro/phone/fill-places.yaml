@@ -31,6 +31,11 @@ appId: ${APP_ID}
     element: '치과 여기 맞아요'
     direction: DOWN
     timeout: 20000
+# 버튼이 막 보일 때 기억한 장소 이름은 아래 푸터에 가려 있을 수 있어 한 번 더 내린다.
+- scrollUntilVisible:
+    element: '예시치과의원'
+    direction: DOWN
+    timeout: 20000
 - assertVisible: ".*지난번 '치과' 일정.*"
 - assertVisible: '예시치과의원'
 - takeScreenshot: 03-remembered

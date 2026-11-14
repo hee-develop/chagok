@@ -10,7 +10,7 @@ import { createNotifications } from '../../../../../server/src/notify/notifier';
 import { createSeatStore } from '../../../../../server/src/seats';
 import { authHeaders, createSession, withSessionReset, type DeviceStorage, type TokenStorage } from '../../../api/session';
 import { createInbox } from '../inbox';
-import { createMemoryStorage } from '../keyValue';
+import { createMemoryStore } from '../../../storage/keyValueStore';
 import { createNotificationsApi } from '../notificationsApi';
 import { createNotificationPoller } from '../poller';
 import { fakeNotifier, fakeSync, idsOf } from '../../../__tests__/support/notifications';
@@ -50,7 +50,7 @@ describe('폰 폴링 ↔ 서버 알림함', () => {
     const a = await s.connectPhone(null, '폰A');
     const { api } = s.clientFor(a.phoneToken, 'a'.repeat(32));
     s.notifier.notify(a.seatId, { kind: 'events-stale', title: '차곡이 일정을 못 받고 있어요', body: '앱을 열면 일정을 새로 보내요.', data: { action: 'resend-events' } });
-    const inbox = createInbox({ storage: createMemoryStorage() });
+    const inbox = createInbox({ storage: createMemoryStore() });
     const { notifier, present } = fakeNotifier('granted');
     const poller = createNotificationPoller({ api: createNotificationsApi(api), inbox, notifier, log: () => undefined, hasSession: async () => true });
     expect(await poller.poll()).toBe('ok');
@@ -66,7 +66,7 @@ describe('폰 폴링 ↔ 서버 알림함', () => {
     const a = await s.connectPhone(null, '폰A');
     const b = await s.connectPhone(a.carToken, '폰B');
     s.notifier.notify(b.seatId, { kind: 'family-status', title: 'B의 알림', body: '' });
-    const inbox = createInbox({ storage: createMemoryStorage() });
+    const inbox = createInbox({ storage: createMemoryStore() });
     const poller = createNotificationPoller({ api: createNotificationsApi(s.clientFor(a.phoneToken, 'a'.repeat(32)).api), inbox, notifier: fakeNotifier().notifier, log: () => undefined, hasSession: async () => true });
     await poller.poll();
     expect(idsOf(inbox)).toEqual([]);
@@ -76,7 +76,7 @@ describe('폰 폴링 ↔ 서버 알림함', () => {
   it('서버가 모르는 토큰(바뀐 폰)이면 토큰을 버리고 빈 목록으로 이어진다(401로 깨지지 않는다)', async () => {
     const s = setup();
     const { api, session } = s.clientFor('s'.repeat(64), 'a'.repeat(32));
-    const inbox = createInbox({ storage: createMemoryStorage() });
+    const inbox = createInbox({ storage: createMemoryStore() });
     const poller = createNotificationPoller({ api: createNotificationsApi(api), inbox, notifier: fakeNotifier().notifier, log: () => undefined, hasSession: async () => Boolean(await session.getToken()) });
     expect(await poller.poll()).toBe('ok');
     expect(idsOf(inbox)).toEqual([]);
@@ -91,7 +91,7 @@ describe('폰 폴링 ↔ 서버 알림함', () => {
     s.notifier.notify(a.seatId, { kind: 'events-stale', title: '차곡이 일정을 못 받고 있어요', body: '', data: { action: 'resend-events' } });
     const put = await s.app.request('/events', { method: 'PUT', headers: { authorization: `Bearer ${a.phoneToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ events: [] }) });
     expect(put.status).toBe(200);
-    const inbox = createInbox({ storage: createMemoryStorage() });
+    const inbox = createInbox({ storage: createMemoryStore() });
     const { notifier, present } = fakeNotifier('granted');
     const poller = createNotificationPoller({ api: createNotificationsApi(api), inbox, notifier, log: () => undefined, hasSession: async () => true, sync: fakeSync('failed').sync });
     expect(await poller.poll()).toBe('ok');
@@ -104,7 +104,7 @@ describe('폰 폴링 ↔ 서버 알림함', () => {
     const a = await s.connectPhone(null, '폰A');
     const { api } = s.clientFor(a.phoneToken, 'a'.repeat(32));
     s.notifier.notify(a.seatId, { kind: 'events-stale', title: '차곡이 일정을 못 받고 있어요', body: '' });
-    const inbox = createInbox({ storage: createMemoryStorage() });
+    const inbox = createInbox({ storage: createMemoryStore() });
     const { notifier, present } = fakeNotifier('granted');
     const poller = createNotificationPoller({ api: createNotificationsApi(api), inbox, notifier, log: () => undefined, hasSession: async () => true, sync: fakeSync('sent').sync });
     expect(await poller.poll()).toBe('ok');
@@ -117,7 +117,7 @@ describe('폰 폴링 ↔ 서버 알림함', () => {
     const first = setup();
     const a1 = await first.connectPhone(null, '폰A');
     first.notifier.notify(a1.seatId, { kind: 'late-sms', title: '옛 서버 알림', body: '' });
-    const inbox = createInbox({ storage: createMemoryStorage() });
+    const inbox = createInbox({ storage: createMemoryStore() });
     const poll = (s: ReturnType<typeof setup>, token: string) =>
       createNotificationPoller({ api: createNotificationsApi(s.clientFor(token, 'a'.repeat(32)).api), inbox, notifier: fakeNotifier('denied').notifier, log: () => undefined, hasSession: async () => true, sync: fakeSync().sync }).poll();
     await poll(first, a1.phoneToken);

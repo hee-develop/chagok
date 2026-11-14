@@ -51,7 +51,7 @@ export type Session = {
   /** 이 토큰이 아직 현재 토큰이면 지운다(오래된 요청의 401이 새 토큰을 지우지 않게). */
   clearIfCurrent: (token: string) => Promise<void>;
   /**
-   * 토큰이 지워질 때마다(연결 끊기·서버가 401로 거절해 토큰을 버림) 부른다. 이 모듈이 다른 기능 모듈(폰 알림함 등)을 직접 가져오지 않고도
+   * 토큰이 지워질 때(연결 끊기·서버가 401로 거절해 토큰을 버림)와 다른 토큰으로 바뀔 때(다른 차·자리에 다시 연결)마다 부른다. 이 모듈이 다른 기능 모듈(폰 알림함 등)을 직접 가져오지 않고도
    * 그 기능이 '다른 자리가 될 데이터'를 비우도록 하는 등록 자리다. 해제 함수를 돌려준다. 리스너가 던져도 토큰 지우기는 끝난다.
    */
   onTokenCleared: (listener: () => void) => () => void;
@@ -95,20 +95,26 @@ export function createSession(
     if (cache === undefined) cache = loaded;
     return cache;
   };
-  const setToken = async (token: string) => {
-    cache = token;
-    await storage.write(token).catch(() => undefined);
-  };
   const clearedListeners = new Set<() => void>();
-  const clearToken = async () => {
-    cache = null;
+  const notifyCleared = () => {
     for (const listener of [...clearedListeners]) {
       try {
         listener();
       } catch {
-        // 리스너 오류가 토큰 지우기를 막지 않는다.
+        // 리스너 오류가 토큰 지우기·바꾸기를 막지 않는다.
       }
     }
+  };
+  const setToken = async (token: string) => {
+    // 이미 다른 토큰이 있었다면(다른 차·자리에 다시 연결) 자리가 바뀐 것이라 지울 때와 같이 알린다. 처음 받는 토큰(이전 토큰 없음)은 알리지 않는다.
+    const replaced = typeof cache === 'string' && cache !== token;
+    cache = token;
+    if (replaced) notifyCleared();
+    await storage.write(token).catch(() => undefined);
+  };
+  const clearToken = async () => {
+    cache = null;
+    notifyCleared();
     await storage.remove().catch(() => undefined);
   };
   return {

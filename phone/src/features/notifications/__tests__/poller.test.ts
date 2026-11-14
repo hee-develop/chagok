@@ -1,13 +1,13 @@
 import { HttpError } from '../../../api/request';
 import { createInbox } from '../inbox';
-import { createMemoryStorage } from '../keyValue';
+import { createMemoryStore } from '../../../storage/keyValueStore';
 import type { NotificationsApi } from '../notificationsApi';
 import { createNotificationPoller } from '../poller';
 import { deferred, fakeNotifier, fakeSync, idsOf, note, page } from '../../../__tests__/support/notifications';
 import type { SyncResult } from '../../calendar-sync/eventSync';
 
 const setup = (over: { permission?: 'granted' | 'denied' | 'undetermined'; session?: boolean; list?: ReturnType<typeof note>[]; sync?: SyncResult | null; inFlight?: Promise<SyncResult> | null; cursor?: string | null } = {}) => {
-  const inbox = createInbox({ storage: createMemoryStorage() });
+  const inbox = createInbox({ storage: createMemoryStore() });
   const { notifier, present, state } = fakeNotifier(over.permission ?? 'granted');
   const fetchNew = jest.fn<ReturnType<NotificationsApi['fetchNew']>, Parameters<NotificationsApi['fetchNew']>>().mockResolvedValue(page(over.list ?? [], over.cursor ?? null));
   const ack = jest.fn<ReturnType<NotificationsApi['ack']>, Parameters<NotificationsApi['ack']>>().mockResolvedValue(undefined);
@@ -133,7 +133,7 @@ describe('createNotificationPoller', () => {
 
   it('stop()이 세션 확인 중에 불려도 그 실행은 요청을 보내지 않는다', async () => {
     const gate = deferred<boolean>();
-    const inbox = createInbox({ storage: createMemoryStorage() });
+    const inbox = createInbox({ storage: createMemoryStore() });
     const fetchNew = jest.fn().mockResolvedValue(page());
     const poller = createNotificationPoller({ api: { fetchNew, ack: jest.fn() }, inbox, notifier: fakeNotifier().notifier, hasSession: () => gate.promise, sync: fakeSync().sync, log: jest.fn() });
     const result = poller.poll();

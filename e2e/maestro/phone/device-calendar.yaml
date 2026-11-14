@@ -71,3 +71,38 @@ appId: ${APP_ID}
     file: assert-device-calendar.js
     env:
       SERVER_URL: ${SERVER_URL}
+
+# 폰이 읽을 때 거른 온라인 일정(E2E Online Standup)은 서버로 가지 않지만 3단계와 오늘 탭에는 '이동 없음'으로 흐리게 보인다.
+- tapOn: '건너뛰기'
+- extendedWaitUntil:
+    visible: 'E2E Online Standup'
+    timeout: 30000
+- assertVisible: '✓ 이동 없음 · 온라인 회의'
+- assertVisible: 'E2E Today Meeting'
+- takeScreenshot: 03-fill-places-filtered
+- tapOn: '나중에 할게요'
+- extendedWaitUntil:
+    visible: '차와 연결해요'
+    timeout: 15000
+- tapOn: '건너뛰기'
+# 첫 설정 끝에서 알림 권한을 한 번 묻는다(정책 10.4). 허용으로 답한다.
+- runFlow:
+    file: notification-allow.yaml
+- extendedWaitUntil:
+    visible: '오늘 일정'
+    timeout: 20000
+- extendedWaitUntil:
+    visible: 'E2E Online Standup'
+    timeout: 20000
+- assertVisible: '이동 없음 · 온라인 회의'
+- assertVisible: 'E2E Today Meeting'
+- takeScreenshot: 04-today-filtered
+# 거른 줄을 누르면 확인이 나오고, 취소하면 아무것도 바뀌지 않는다.
+- tapOn: 'E2E Online Standup 11:00.*'
+- extendedWaitUntil:
+    visible: '.*E2E Online Standup.* 일정을 이동 일정으로 바꿀까요\?'
+    timeout: 10000
+- takeScreenshot: 05-today-filtered-confirm
+- tapOn: '취소'
+- assertNotVisible: '.*일정을 이동 일정으로 바꿀까요\?'
+- assertVisible: '이동 없음 · 온라인 회의'

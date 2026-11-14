@@ -6,8 +6,10 @@ import type { PairingApi } from '../pairingApi';
 import { PairCarScreen } from '../PairCarScreen';
 
 const mockReplace = jest.fn();
+const mockBack = jest.fn();
+let mockCanGoBack = true;
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ replace: mockReplace }),
+  useRouter: () => ({ replace: mockReplace, back: mockBack, canGoBack: () => mockCanGoBack }),
 }));
 
 let mockGranted = false;
@@ -23,7 +25,7 @@ jest.mock('expo-camera', () => {
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
 const PAIRED = { seatId: 'seat-1', name: 'Pixel', mode: 'new' as const, pairedAt: '2026-11-06T00:20:00.000Z' };
 const makeApi = (claim: PairingApi['claim'] = jest.fn().mockResolvedValue(PAIRED)): PairingApi => ({ claim, disconnect: jest.fn(), status: jest.fn() });
-const renderScreen = (api: PairingApi, props: { onSkip?: () => void; onDone?: () => void } = {}) =>
+const renderScreen = (api: PairingApi, props: { onSkip?: () => void; onDone?: () => void; standalone?: boolean; onPaired?: () => void } = {}) =>
   render(
     <SafeAreaProvider initialMetrics={insets}>
       <PairCarScreen api={api} {...props} />
@@ -32,6 +34,8 @@ const renderScreen = (api: PairingApi, props: { onSkip?: () => void; onDone?: ()
 
 beforeEach(() => {
   mockReplace.mockReset();
+  mockBack.mockReset();
+  mockCanGoBack = true;
   mockRequestPermission.mockReset();
   mockGranted = false;
 });
@@ -147,4 +151,60 @@ it('onDone을 주면 [완료]가 기본 이동 대신 그 콜백을 부른다', 
   await fireEvent.press(await screen.findByRole('button', { name: '완료' }));
   expect(onDone).toHaveBeenCalledTimes(1);
   expect(mockReplace).not.toHaveBeenCalled();
+});
+
+describe('standalone(오늘·설정 탭의 [차 연결하기])', () => {
+  const connect = async () => {
+    await fireEvent.changeText(screen.getByTestId('pair-code-input'), '123456');
+    await fireEvent.press(screen.getByRole('button', { name: '연결하기' }));
+    return screen.findByRole('button', { name: '완료' });
+  };
+
+  it('단계 표시(4 / 4)가 없고 제목·번호 입력은 그대로다. 첫 설정 기본(standalone 없음)은 4 / 4가 보인다', async () => {
+    const { unmount } = await renderScreen(makeApi(), { standalone: true });
+    expect(screen.queryByText('4 / 4')).toBeNull();
+    expect(screen.queryAllByTestId('progress-bar-filled')).toHaveLength(0);
+    expect(screen.getByRole('header', { name: '차와 연결해요' })).toBeOnTheScreen();
+    expect(screen.getByTestId('pair-code-input')).toBeOnTheScreen();
+    await unmount();
+    await renderScreen(makeApi());
+    expect(screen.getByText('4 / 4')).toBeOnTheScreen();
+  });
+
+  it('연결한 뒤 [완료]는 3단계가 아니라 왔던 화면(탭)으로 되돌아간다', async () => {
+    await renderScreen(makeApi(), { standalone: true });
+    await fireEvent.press(await connect());
+    expect(mockBack).toHaveBeenCalledTimes(1);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('되돌아갈 화면이 없으면(딥링크로 바로 열림) 오늘 탭으로 간다', async () => {
+    mockCanGoBack = false;
+    await renderScreen(makeApi(), { standalone: true });
+    await fireEvent.press(await connect());
+    expect(mockReplace).toHaveBeenCalledWith('/');
+    expect(mockReplace).not.toHaveBeenCalledWith('/setup/fill-places');
+  });
+
+  it('onDone을 함께 주면 그것이 우선한다', async () => {
+    const onDone = jest.fn();
+    await renderScreen(makeApi(), { standalone: true, onDone });
+    await fireEvent.press(await connect());
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(mockBack).not.toHaveBeenCalled();
+  });
+});
+
+it('onPaired는 연결에 성공한 순간 한 번 부르고, 실패하면 부르지 않는다', async () => {
+  const onPaired = jest.fn();
+  const claim = jest.fn().mockRejectedValueOnce(new HttpError(404, 'x')).mockResolvedValueOnce(PAIRED);
+  await renderScreen(makeApi(claim), { onPaired });
+  await fireEvent.changeText(screen.getByTestId('pair-code-input'), '000000');
+  await fireEvent.press(screen.getByRole('button', { name: '연결하기' }));
+  await screen.findByText(/번호가 맞지 않거나/);
+  expect(onPaired).not.toHaveBeenCalled();
+  await fireEvent.changeText(screen.getByTestId('pair-code-input'), '123456');
+  await fireEvent.press(screen.getByRole('button', { name: '연결하기' }));
+  await screen.findByRole('header', { name: '✓ 차와 연결됐어요' });
+  expect(onPaired).toHaveBeenCalledTimes(1);
 });

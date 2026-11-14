@@ -18,6 +18,8 @@ type Props = {
   title: string;
   /** 이미 적어 둔 채비. 없으면 빈 글 */
   initialCare: string;
+  /** 첫 설정 밖(오늘 탭)에서 열었으면 true. 단계 표시를 빼고 닫으면 열었던 화면으로 돌아간다. */
+  standalone?: boolean;
   api?: SchedulePlacesApi;
   timeoutMs?: number;
 };
@@ -26,7 +28,7 @@ type Props = {
  * 일정 하나에 채비 한 줄을 적는다. 차곡 서버에만 저장하고 캘린더는 건드리지 않는다.
  * 저장하면 일정 목록으로 돌아가고, 목록은 다시 열릴 때 서버에서 새로 읽는다.
  */
-export function ScheduleCareScreen({ scheduleId, title, initialCare, api = schedulePlacesApi, timeoutMs = REQUEST_TIMEOUT_MS }: Props) {
+export function ScheduleCareScreen({ scheduleId, title, initialCare, standalone = false, api = schedulePlacesApi, timeoutMs = REQUEST_TIMEOUT_MS }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
@@ -49,8 +51,8 @@ export function ScheduleCareScreen({ scheduleId, title, initialCare, api = sched
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
-    else router.replace('/setup/fill-places');
-  }, [router]);
+    else router.replace(standalone ? '/' : '/setup/fill-places');
+  }, [router, standalone]);
 
   const save = async (care: string | null) => {
     if (request.current) return;
@@ -81,7 +83,7 @@ export function ScheduleCareScreen({ scheduleId, title, initialCare, api = sched
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.screen, { paddingTop: insets.top + 6 }]}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <SetupHeader step={3} />
+        <SetupHeader step={standalone ? undefined : 3} />
         <View style={styles.titles}>
           <Text accessibilityRole="header" style={[styles.title, font(600)]}>{t.title(title)}</Text>
           <Text style={[styles.description, font(400)]}>{t.description}</Text>

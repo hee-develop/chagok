@@ -1,5 +1,5 @@
 import { appInbox } from './inbox';
-import { asyncKeyValueStorage, type KeyValueStorage } from './keyValue';
+import { deviceStore, type KeyValueStore } from '../../storage/keyValueStore';
 import { expoLocalNotifier, type LocalNotifier } from './localNotifier';
 import type { PermissionState } from './types';
 
@@ -15,8 +15,8 @@ let asking: Promise<PermissionState> | null = null;
  */
 export function askNotificationPermissionOnce({
   notifier = expoLocalNotifier,
-  storage = asyncKeyValueStorage,
-}: { notifier?: LocalNotifier; storage?: KeyValueStorage } = {}): Promise<PermissionState> {
+  storage = deviceStore,
+}: { notifier?: LocalNotifier; storage?: KeyValueStore } = {}): Promise<PermissionState> {
   asking ??= (async (): Promise<PermissionState> => {
     try {
       const current = await notifier.permission();
