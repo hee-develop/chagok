@@ -7,9 +7,11 @@ import { createEnergyRoute } from './routes/energy.js';
 import { createEventsRoute, isLoopbackRequest, type EventsStore } from './routes/events.js';
 import { createFamilyRoute, type FamilyStore } from './routes/family.js';
 import { createCarRoute, createDriversRoute, createPairRoute, createPresenceRoute } from './routes/pair.js';
+import { createNotificationsRoute } from './routes/notifications.js';
 import { createPairingRoute } from './routes/pairing.js';
 import { createSchedulesRoute } from './routes/schedules.js';
 import { createPlacesRoute, type FavoritesStore } from './routes/places.js';
+import { createNotifications, type Notifications } from './notify/notifier.js';
 import { createSeatDataRegistry } from './seatData.js';
 import { connectionAddress, createSeatGuard } from './seatScope.js';
 import { createSeatStore, type SeatStore } from './seats.js';
@@ -40,6 +42,11 @@ export type AppOptions = {
   familyStore?: FamilyStore;
   /** 차·운전자 자리·연결 코드 저장소. 없으면 인스턴스마다 새로 만든다. */
   seats?: SeatStore;
+  /**
+   * 폰 알림(알림함과 `notify`). 없으면 인스턴스마다 새로 만든다. 서버 시작 코드(`index.ts`)는 정기 작업이 같은 `notifier`로 알림을 넣도록
+   * 직접 만들어 넘긴다(FCM 같은 추가 `PushSender`를 붙일 때도 여기서). 자리가 지워지거나 폰이 바뀌면 그 자리의 알림을 버린다.
+   */
+  notifications?: Notifications;
   /** 코드 시도 횟수를 세는 요청 주소. 기본은 연결 주소이고, 프록시 뒤에서는 바꿔야 한다. 테스트에서도 바꾼다. */
   clientAddress?: (c: Context) => string;
   /**
@@ -81,6 +88,7 @@ export const createApp = ({
   familyMembers,
   familyStore,
   seats = createSeatStore(now),
+  notifications = createNotifications({ now }),
   clientAddress = connectionAddress,
   legacyDriverFallback = true,
   fixtureSeats = false,
@@ -99,6 +107,10 @@ export const createApp = ({
     ...capacity,
   });
   seats.subscribe((event) => registry.apply(event));
+  // 자리가 지워지거나(끊기·차 초기화·정리) 폰이 바뀌면 옛 폰이 읽지 않은 알림은 새 폰에 넘기지 않고 버린다.
+  seats.subscribe((event) => {
+    if (event.type !== 'created') notifications.notifier.forget(event.seatId);
+  });
   const guard = createSeatGuard(seats, registry, { legacyDriverFallback, fixtureSeats, clientAddress });
   return new Hono()
     .get('/health', (c) => c.json({ ok: true as const }))
@@ -108,6 +120,7 @@ export const createApp = ({
     .route('/family', createFamilyRoute(familyMembers, guard))
     .route('/pairing', createPairingRoute(seats, { clientAddress, isLoopback }))
     .route('/pair', createPairRoute(seats, { now, clientAddress, isLoopback }))
+    .route('/notifications', createNotificationsRoute(seats, notifications.outbox))
     .route('/drivers', createDriversRoute(seats))
     .route('/presence', createPresenceRoute(seats))
     .route('/car', createCarRoute(seats))
