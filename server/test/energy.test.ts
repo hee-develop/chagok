@@ -182,6 +182,38 @@ describe('POST /energy/options 전기차', () => {
     expect(ids(lunch)).toEqual(['far-food', 'near-nofood', 'busy-food']);
   });
 
+  it('mealBundle은 맨 앞 후보가 식사 가능일 때만 true다(점심, A=식사 없음·빈 곳, B=식사 가능·전부 충전 중)', async () => {
+    const sources = sourcesOf({
+      chargers: [
+        charger({ stationId: 'A', speed: 'fast', lat: 35, lng: 127.03, state: 'available' }),
+        charger({ stationId: 'B', speed: 'fast', lat: 35, lng: 127.06, state: 'charging' }),
+      ],
+      stops: [stop('a', 35, 127.03, false), stop('b', 35, 127.06, true)],
+    });
+    const r = await ok(appOf(sources), { fuel: 'ev', origin: ORIGIN, destination: DEST, at: NOON });
+    expect(ids(r)).toEqual(['A', 'B']); // 빈 곳이 먼저
+    expect(r.candidates[0].hasFood).toBe(false);
+    expect(r.mealBundle).toBe(false); // 식사 가능한 후보가 뒤에 있어도 묶지 않는다
+  });
+
+  it('식사 시간대에는 빈 급속 충전기가 있는 식사 가능 휴게소가 더 멀어도 맨 앞이고 mealBundle이 true다', async () => {
+    const sources = sourcesOf({
+      chargers: [
+        charger({ stationId: 'near', speed: 'fast', lat: 35, lng: 127.02, state: 'available' }),
+        charger({ stationId: 'food', speed: 'fast', lat: 35 + metersNorth(2500), lng: 127.07, state: 'available' }),
+      ],
+      stops: [stop('near', 35, 127.02, false), stop('food', 35 + metersNorth(2500), 127.07, true)],
+    });
+    const app = appOf(sources);
+    const body = { fuel: 'ev', origin: ORIGIN, destination: DEST };
+    const lunch = await ok(app, { ...body, at: NOON });
+    expect(ids(lunch)).toEqual(['food', 'near']);
+    expect(lunch.mealBundle).toBe(true);
+    const afternoon = await ok(app, { ...body, at: AFTERNOON });
+    expect(ids(afternoon)).toEqual(['near', 'food']);
+    expect(afternoon.mealBundle).toBe(false);
+  });
+
   it('휴게소는 경로에서 3km 안만, 급속 충전기가 있는 곳만 후보가 된다', async () => {
     const sources = sourcesOf({
       chargers: [
@@ -219,7 +251,7 @@ describe('POST /energy/options 전기차', () => {
 
   it('후보가 없으면 stage none과 빈 목록이다(source는 fixture)', async () => {
     const r = await ok(appOf(sourcesOf({})), { fuel: 'ev', origin: ORIGIN, destination: DEST, stayMinutes: 300 });
-    expect(r).toEqual({ fuel: 'ev', source: 'fixture', stage: 'none', mealBundle: false, candidates: [] });
+    expect(r).toEqual({ fuel: 'ev', source: 'fixture', stage: 'none', mealBundle: false, partial: false, candidates: [] });
   });
 });
 
@@ -278,19 +310,19 @@ describe('POST /energy/options 내연·하이브리드', () => {
     expect(ids(r)).toEqual(['s8', 's7', 's6', 's5', 's4']);
   });
 
-  it('긴 경로는 출발점에서 100km까지만 훑는다(검색 원 14개 이하)', async () => {
+  it('긴 경로는 출발점에서 100km까지만 훑는다(검색 원 16개 이하)', async () => {
     const calls: { lat: number; lng: number; radius: number }[] = [];
     const fuelStations: FuelStationSource = { kind: 'fixture', findNear: async (c, radius) => (calls.push({ ...c, radius }), []) };
     const app = appOf({ ...sourcesOf({}), fuelStations });
     await ok(app, { fuel: 'gasoline', origin: GWANGJU, destination: SEOUL_TOWER });
-    expect(calls).toHaveLength(14);
+    expect(calls).toHaveLength(16);
     expect(calls.every((c) => c.radius === 5000)).toBe(true);
     expect(calls.at(-1)!.lat).toBeLessThan(36.1); // 광주(35.16)에서 북쪽으로 약 100km
   });
 
   it('조건에 맞는 주유소가 없으면 stage none', async () => {
     const r = await ok(appOf(sourcesOf({ stations: [station('far', 1500, 35 + metersNorth(9000))] })), { fuel: 'gasoline', origin: ORIGIN, destination: DEST });
-    expect(r).toMatchObject({ source: 'fixture', stage: 'none', candidates: [] });
+    expect(r).toMatchObject({ source: 'fixture', stage: 'none', partial: false, candidates: [] });
   });
 
   it('출발과 목적지가 같아도 그 지점 3km 안 주유소를 준다', async () => {
@@ -311,7 +343,7 @@ describe('외부 어댑터 실패', () => {
     const onError = vi.fn();
     const app = appOf({ ...fixtureEnergy, chargers: failing() }, { onEnergyError: onError });
     const r = await ok(app, { fuel: 'ev', origin: GWANGJU, destination: KIA, stayMinutes: 180 });
-    expect(r).toEqual({ fuel: 'ev', source: 'unavailable', stage: 'none', mealBundle: false, candidates: [] });
+    expect(r).toEqual({ fuel: 'ev', source: 'unavailable', stage: 'none', mealBundle: false, partial: false, candidates: [] });
     expect(onError).toHaveBeenCalledTimes(1);
     // 실패한 뒤에도 서버는 다음 요청에 정상으로 답한다.
     const again = await ok(newApp(), { fuel: 'ev', origin: GWANGJU, destination: KIA, stayMinutes: 180 });
@@ -322,7 +354,7 @@ describe('외부 어댑터 실패', () => {
     const onError = vi.fn();
     const app = appOf({ ...fixtureEnergy, fuelStations: failing() }, { onEnergyError: onError });
     const r = await ok(app, { fuel: 'diesel', origin: GWANGJU, destination: KIA });
-    expect(r).toEqual({ fuel: 'diesel', source: 'unavailable', stage: 'none', mealBundle: false, candidates: [] });
+    expect(r).toEqual({ fuel: 'diesel', source: 'unavailable', stage: 'none', mealBundle: false, partial: false, candidates: [] });
     expect(onError).toHaveBeenCalledTimes(1);
   });
 
@@ -436,5 +468,180 @@ describe('식사 시간대', () => {
   it('UTC로 보내도 서울 시각으로 본다', () => {
     expect(isMealTimeSeoul(new Date('2026-11-06T03:00:00Z'))).toBe(true); // 서울 12:00
     expect(isMealTimeSeoul(new Date('2026-11-06T12:00:00Z'))).toBe(false); // 서울 21:00
+  });
+});
+
+describe('부분 실패', () => {
+  const stationsNear = [station('ok1', 1650, 35 + metersNorth(500)), station('ok2', 1600, 35 + metersNorth(800))];
+
+  it('주유소: 일부 지점 조회만 실패하면 받은 결과로 답하고 partial true, 오류는 한 번 알린다', async () => {
+    let n = 0;
+    const fuelStations: FuelStationSource = {
+      kind: 'live',
+      findNear: async () => {
+        n += 1;
+        if (n % 2 === 0) throw new Error('일부 실패');
+        return stationsNear;
+      },
+    };
+    const onError = vi.fn();
+    const r = await ok(appOf({ ...sourcesOf({}), fuelStations }, { onEnergyError: onError }), { fuel: 'gasoline', origin: GWANGJU, destination: SEOUL_TOWER });
+    expect(r.source).toBe('live');
+    expect(r.partial).toBe(true);
+    expect(r.stage).toBe('none'); // 이 가짜 주유소는 경로(광주→서울) 3km 밖이라 후보가 없다. 비어도 partial이 실패를 알린다.
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('주유소: 일부만 실패해도 경로 위 후보는 그대로 준다', async () => {
+    let n = 0;
+    const fuelStations: FuelStationSource = {
+      kind: 'live',
+      findNear: async () => {
+        n += 1;
+        if (n === 1) throw new Error('첫 지점만 실패');
+        return [station('x', 1600, 35 + metersNorth(100))];
+      },
+    };
+    // 동서 약 9km 경로라 검색 원이 2개다.
+    const r = await ok(appOf({ ...sourcesOf({}), fuelStations }, { onEnergyError: () => undefined }), { fuel: 'gasoline', origin: ORIGIN, destination: DEST });
+    expect(ids(r)).toEqual(['x']);
+    expect(r.partial).toBe(true);
+  });
+
+  it('주유소: 전부 실패해야 unavailable이고 partial은 false다', async () => {
+    const fuelStations: FuelStationSource = { kind: 'live', findNear: async () => Promise.reject(new Error('전부 실패')) };
+    const r = await ok(appOf({ ...sourcesOf({}), fuelStations }, { onEnergyError: () => undefined }), { fuel: 'gasoline', origin: ORIGIN, destination: DEST });
+    expect(r).toMatchObject({ source: 'unavailable', partial: false, candidates: [] });
+  });
+
+  it('전기차: 일부 휴게소 조회만 실패하면 받은 곳으로 답하고 partial true', async () => {
+    const good = charger({ stationId: 'good', speed: 'fast', lat: 35, lng: 127.03 });
+    const chargers: ChargerSource = {
+      kind: 'live',
+      findNear: async (c) => {
+        if (Math.abs(c.lng - 127.07) < 1e-6) throw new Error('이 휴게소만 실패');
+        return [good];
+      },
+    };
+    const onError = vi.fn();
+    const sources: EnergySources = { ...sourcesOf({ stops: [stop('a', 35, 127.03, true), stop('b', 35, 127.07, true)] }), chargers };
+    const r = await ok(appOf(sources, { onEnergyError: onError }), { fuel: 'ev', origin: ORIGIN, destination: DEST, at: AFTERNOON });
+    expect(ids(r)).toEqual(['good']);
+    expect(r).toMatchObject({ source: 'live', stage: 'route', partial: true });
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('전기차: 목적지 조회가 실패해도 경로상 휴게소 조회가 되면 그것으로 답한다(partial true)', async () => {
+    const fast = charger({ stationId: 'fast', speed: 'fast', lat: 35, lng: 127.05 });
+    const chargers: ChargerSource = {
+      kind: 'live',
+      findNear: async (c, radius) => {
+        if (radius === 500) throw new Error('목적지 조회만 실패');
+        return [fast].filter((x) => Math.abs(x.lng - c.lng) < 0.01);
+      },
+    };
+    const sources: EnergySources = { ...sourcesOf({ stops: [stop('rs', 35, 127.05, true)] }), chargers };
+    const r = await ok(appOf(sources, { onEnergyError: () => undefined }), { fuel: 'ev', origin: ORIGIN, destination: DEST, stayMinutes: 240, at: AFTERNOON });
+    expect(ids(r)).toEqual(['fast']);
+    expect(r.partial).toBe(true);
+  });
+
+  it('전기차: 목적지 조회만 했는데 실패하면(경로에 휴게소가 없음) unavailable이다', async () => {
+    const chargers: ChargerSource = { kind: 'live', findNear: async () => Promise.reject(new Error('실패')) };
+    const r = await ok(appOf({ ...sourcesOf({}), chargers }, { onEnergyError: () => undefined }), { fuel: 'ev', origin: ORIGIN, destination: DEST, stayMinutes: 240 });
+    expect(r).toMatchObject({ source: 'unavailable', partial: false });
+  });
+});
+
+describe('제한 시간과 취소', () => {
+  it('제한 시간이 지나면 어댑터에 준 signal이 중단되고 아직 시작하지 않은 조회는 시작하지 않는다', async () => {
+    const signals: AbortSignal[] = [];
+    let calls = 0;
+    const fuelStations: FuelStationSource = {
+      kind: 'live',
+      findNear: (_c, _r, _f, signal) => {
+        calls += 1;
+        if (signal) signals.push(signal);
+        return new Promise(() => undefined); // 끝나지 않는다
+      },
+    };
+    const app = appOf({ ...sourcesOf({}), fuelStations }, { energyTimeoutMs: 30, onEnergyError: () => undefined });
+    const r = await ok(app, { fuel: 'gasoline', origin: GWANGJU, destination: SEOUL_TOWER }); // 검색 원 16개
+    expect(r.source).toBe('unavailable');
+    expect(calls).toBe(4); // 동시 4개까지만 나갔고, 제한 시간 뒤에는 더 나가지 않는다
+    expect(signals).toHaveLength(4);
+    expect(signals.every((s) => s.aborted)).toBe(true);
+    await new Promise((r2) => setTimeout(r2, 20));
+    expect(calls).toBe(4);
+  });
+
+  it('전기차 휴게소 조회도 제한 시간 뒤에는 더 시작하지 않는다', async () => {
+    let calls = 0;
+    const signals: (AbortSignal | undefined)[] = [];
+    const chargers: ChargerSource = {
+      kind: 'live',
+      findNear: (_c, _r, signal) => {
+        calls += 1;
+        signals.push(signal);
+        return new Promise(() => undefined);
+      },
+    };
+    const stops = Array.from({ length: 10 }, (_, i) => stop(`s${i}`, 35, 127.01 + i * 0.005, true));
+    const r = await ok(appOf({ ...sourcesOf({ stops }), chargers }, { energyTimeoutMs: 30, onEnergyError: () => undefined }), { fuel: 'ev', origin: ORIGIN, destination: DEST });
+    expect(r.source).toBe('unavailable');
+    expect(calls).toBe(4);
+    expect(signals.every((s) => s?.aborted)).toBe(true);
+  });
+});
+
+describe('POST /energy/options 속도 제한', () => {
+  const body = { fuel: 'gasoline', origin: GWANGJU, destination: KIA };
+  const clock = (start = '2026-11-06T12:00:00+09:00') => {
+    let ms = new Date(start).getTime();
+    return { now: () => new Date(ms), advance: (d: number) => (ms += d) };
+  };
+
+  it('기본값은 같은 주소에서 분당 20회까지 받고 그 위는 429 + Retry-After', async () => {
+    const c = clock();
+    const app = newApp({ now: c.now });
+    for (let i = 0; i < 20; i++) expect((await post(app, body)).status).toBe(200);
+    const blocked = await post(app, body);
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect(((await blocked.json()) as { error: string }).error).toMatch(/잦습니다/);
+    c.advance(61_000); // 창이 지나면 다시 받는다
+    expect((await post(app, body)).status).toBe(200);
+  });
+
+  it('주소별로 따로 센다', async () => {
+    const c = clock();
+    let who = 'a';
+    const app = newApp({ now: c.now, energyRateLimit: { limit: 2, windowMs: 60_000 }, energyClientKey: () => who });
+    expect([(await post(app, body)).status, (await post(app, body)).status, (await post(app, body)).status]).toEqual([200, 200, 429]);
+    who = 'b';
+    expect((await post(app, body)).status).toBe(200);
+  });
+
+  it('창 안에 남은 시간만큼 Retry-After를 준다', async () => {
+    const c = clock();
+    const app = newApp({ now: c.now, energyRateLimit: { limit: 1, windowMs: 60_000 }, energyClientKey: () => 'a' });
+    await post(app, body);
+    c.advance(45_000);
+    expect(Number((await post(app, body)).headers.get('retry-after'))).toBe(15);
+  });
+
+  it('잘못된 요청도 횟수에 센다(검증 전에 막는다)', async () => {
+    const c = clock();
+    const app = newApp({ now: c.now, energyRateLimit: { limit: 1, windowMs: 60_000 }, energyClientKey: () => 'a' });
+    expect((await post(app, { fuel: 'nope' })).status).toBe(400);
+    expect((await post(app, body)).status).toBe(429);
+  });
+});
+
+describe('기본 에너지 소스', () => {
+  it('createApp에 energy를 주지 않으면 픽스처 목으로 답한다', async () => {
+    const r = await ok(newApp(), { fuel: 'gasoline', origin: GWANGJU, destination: KIA });
+    expect(r.source).toBe('fixture');
+    expect(r.candidates.length).toBeGreaterThan(0);
   });
 });

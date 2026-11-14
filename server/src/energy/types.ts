@@ -35,16 +35,19 @@ export type FuelStation = {
 
 export type RestStop = { id: string; name: string; lat: number; lng: number; hasFood: boolean };
 
-/** 환경부 전기차 충전소 포트. 실패하면 throw한다(서비스가 `unavailable`로 바꾼다). */
+/**
+ * 환경부 전기차 충전소 포트. 실패하면 throw한다(서비스가 `unavailable`로 바꾼다).
+ * `signal`이 중단되면 기다리던 조회를 그만둔다(요청 전체 제한 시간이 지났을 때).
+ */
 export interface ChargerSource {
   readonly kind: 'fixture' | 'live';
-  findNear(center: LatLng, radiusMeters: number): Promise<Charger[]>;
+  findNear(center: LatLng, radiusMeters: number, signal?: AbortSignal): Promise<Charger[]>;
 }
 
-/** 오피넷 주유소 포트. 실패하면 throw한다. */
+/** 오피넷 주유소 포트. 실패하면 throw한다. `signal`이 중단되면 나가던 호출을 멈춘다. */
 export interface FuelStationSource {
   readonly kind: 'fixture' | 'live';
-  findNear(center: LatLng, radiusMeters: number, fuel: PumpFuel): Promise<FuelStation[]>;
+  findNear(center: LatLng, radiusMeters: number, fuel: PumpFuel, signal?: AbortSignal): Promise<FuelStation[]>;
 }
 
 /** 휴게소 목록 포트. 이번에는 픽스처만 있다(실제 목록 출처는 정하지 않았다, docs/energy.md). */

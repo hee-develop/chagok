@@ -1,6 +1,8 @@
+/// <reference types="node" />
+// app.ts가 기본값으로 이 파일을 쓰고, 폰 앱은 AppType을 가져오며 이 파일까지 타입체크한다. 폰의 tsconfig는 node 타입을 싣지 않아 여기서 직접 싣는다.
 import { readFileSync } from 'node:fs';
 import { haversineMeters } from './geo.js';
-import type { Charger, ChargerSource, ChargerSpeed, ChargerState, FuelStation, FuelStationSource, RestStop, RestStopSource } from './types.js';
+import type { Charger, ChargerSource, ChargerSpeed, ChargerState, EnergySources, FuelStation, FuelStationSource, RestStop, RestStopSource } from './types.js';
 
 /** 저장소 루트 fixtures/energy/. 이 파일(server/src/energy) 기준 상대 경로로 푼다. */
 export const ENERGY_FIXTURES_URL = new URL('../../../fixtures/energy/', import.meta.url);
@@ -102,3 +104,12 @@ export const createFixtureFuelSource = (stations: FixtureFuelStation[]): FuelSta
 });
 
 export const createFixtureRestStopSource = (restStops: RestStop[]): RestStopSource => ({ list: () => restStops });
+
+/** `fixtures/energy/` 목으로 만든 세 포트. `createApp`의 기본값이다. */
+export function createFixtureEnergySources(fixtures: EnergyFixtures = loadEnergyFixtures()): EnergySources {
+  return {
+    chargers: createFixtureChargerSource(fixtures.chargers),
+    fuelStations: createFixtureFuelSource(fixtures.fuelStations),
+    restStops: createFixtureRestStopSource(fixtures.restStops),
+  };
+}

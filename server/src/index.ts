@@ -31,6 +31,13 @@ try {
   process.exit(1);
 }
 
+const energyLive = Boolean(process.env.EV_CHARGER_KEY?.trim() || process.env.OPINET_KEY?.trim());
+if (energyLive && !['127.0.0.1', 'localhost', '::1'].includes(hostname)) {
+  console.warn(
+    `[energy] 실제 API 키(EV_CHARGER_KEY·OPINET_KEY)가 설정된 채로 HOST=${hostname}으로 엽니다. POST /energy/options는 인증이 없어 서버에 닿는 누구나 부를 수 있고 부를 때마다 키의 외부 호출 한도를 씁니다. 신뢰할 수 있는 망·프록시 뒤에서만 여세요(docs/energy.md).`,
+  );
+}
+
 serve({ fetch: app.fetch, port, hostname }, (info) => {
   console.log(`차곡 서버 실행 중: http://${hostname}:${info.port}`);
 });

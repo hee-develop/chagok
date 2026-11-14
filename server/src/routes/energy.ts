@@ -1,8 +1,10 @@
-import { Hono } from 'hono';
+import { getConnInfo } from '@hono/node-server/conninfo';
+import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
-import { MAX_STAY_MINUTES } from '../energy/constants.js';
+import { ENERGY_RATE_LIMIT_MAX_CLIENTS, ENERGY_RATE_LIMIT_PER_WINDOW, ENERGY_RATE_LIMIT_WINDOW_MS, MAX_STAY_MINUTES } from '../energy/constants.js';
 import { findEnergyOptions, type EnergyRequest } from '../energy/options.js';
+import { createRateLimiter } from '../energy/rateLimit.js';
 import type { EnergySources, FuelKind, LatLng } from '../energy/types.js';
 import { MAX_BODY_BYTES } from '../limits.js';
 import { parseAt } from '../time.js';
@@ -55,12 +57,39 @@ export type EnergyRouteOptions = {
   onError?: (error: unknown) => void;
   /** 전체 제한 시간(ms). 테스트에서만 바꾼다. */
   totalTimeoutMs?: number;
+  /** 요청 주소별 속도 제한(창 안 최대 횟수·창 길이 ms). 기본은 분당 20회. */
+  rateLimit?: { limit?: number; windowMs?: number };
+  /** 요청 주소를 정하는 함수. 기본은 연결의 원격 주소(프록시 헤더는 믿지 않는다). 테스트에서 바꾼다. */
+  clientKey?: (c: Context) => string;
+};
+
+/** 원격 주소. node 서버가 아닌 환경(app.request 등)에서는 알 수 없어 한 묶음으로 본다. */
+export const remoteAddress = (c: Context): string => {
+  try {
+    return getConnInfo(c).remote.address ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
 };
 
 // RPC 타입 추론을 위해 체이닝을 유지한다.
-export const createEnergyRoute = (sources: EnergySources, { now, onError = defaultOnError, totalTimeoutMs }: EnergyRouteOptions) =>
-  new Hono().post(
+export const createEnergyRoute = (sources: EnergySources, { now, onError = defaultOnError, totalTimeoutMs, rateLimit, clientKey = remoteAddress }: EnergyRouteOptions) => {
+  const limiter = createRateLimiter({
+    limit: rateLimit?.limit ?? ENERGY_RATE_LIMIT_PER_WINDOW,
+    windowMs: rateLimit?.windowMs ?? ENERGY_RATE_LIMIT_WINDOW_MS,
+    maxKeys: ENERGY_RATE_LIMIT_MAX_CLIENTS,
+    now: () => now().getTime(),
+  });
+  return new Hono().post(
     '/options',
+    async (c, next) => {
+      const r = limiter.check(clientKey(c));
+      if (!r.ok) {
+        c.header('Retry-After', String(r.retryAfterSeconds));
+        return c.json({ error: '요청이 너무 잦습니다. 잠시 뒤에 다시 시도해 주세요' }, 429);
+      }
+      await next();
+    },
     tooLarge,
     validator('json', (value, c) => {
       const parsed = parseEnergyRequest(value);
@@ -72,6 +101,7 @@ export const createEnergyRoute = (sources: EnergySources, { now, onError = defau
       return c.json(await findEnergyOptions({ ...req, at: req.at ?? now() }, sources, { onError, totalTimeoutMs }), 200);
     },
   );
+};
 
 function defaultOnError(error: unknown) {
   console.warn(`[energy] 외부 조회 실패: ${error instanceof Error ? error.message : 'unknown'}`);

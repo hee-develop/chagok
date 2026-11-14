@@ -3,6 +3,10 @@ import type { LatLng } from './types.js';
 const EARTH_RADIUS_METERS = 6_371_000;
 const RAD = Math.PI / 180;
 
+/** 한반도와 그 둘레. 밖에서는 KATEC 변환도, 국내 충전소·주유소 조회도 의미가 없어 외부 호출을 하지 않는다. */
+const KOREA_BOUNDS = { latMin: 32.5, latMax: 39.5, lngMin: 123.5, lngMax: 132.5 };
+export const inKorea = (p: LatLng): boolean => p.lat >= KOREA_BOUNDS.latMin && p.lat <= KOREA_BOUNDS.latMax && p.lng >= KOREA_BOUNDS.lngMin && p.lng <= KOREA_BOUNDS.lngMax;
+
 /** 두 점 사이 대원 거리(m). */
 export function haversineMeters(a: LatLng, b: LatLng): number {
   const dLat = (b.lat - a.lat) * RAD;
@@ -44,7 +48,8 @@ export const pointAlong = (a: LatLng, b: LatLng, progress: number): LatLng => ({
 // (https://www.opinet.co.kr/user/custapi/openApiInfoDtl.do?apiId=3). 문서에는 좌표계 이름만 있고 변환식은 없다.
 // KATEC은 EPSG 코드가 없는 비공식 좌표계라, 아래 변환 값은 널리 쓰이는 정의(Bessel 1841 + TM, 위도 38도·경도 128도,
 // 축척 0.9999, 가산 400000/600000, towgs84 = -146.43, 507.89, 681.46)이며 오피넷이 공식으로 밝힌 값은 아니다(미확인).
-// 문서의 예시 좌표(서울 강남, x=314681.8 y=544837)가 강남 일대로 변환되는지만 테스트로 확인했다.
+// 변환 정밀도는 검증하지 못했다: 국토지리정보원 등 공식 기준점(KATEC 좌표와 위경도 쌍)을 찾지 못했다. 테스트는 왕복 변환이 되돌아오는지(일관성)와
+// 오피넷 문서의 예시 좌표(서울 강남, x=314681.8 y=544837)가 강남 일대로, 문서의 DISTANCE(885.4m)와 같은 자릿수로 변환되는지만 본다.
 
 type Ellipsoid = { a: number; e2: number };
 const ellipsoid = (a: number, invF: number): Ellipsoid => {

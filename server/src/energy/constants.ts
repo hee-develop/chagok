@@ -41,12 +41,13 @@ export const MAX_STAY_MINUTES = 7 * 24 * 60;
 export const OPINET_MAX_RADIUS_METERS = 5000;
 
 /**
- * 경로를 따라 주유소를 찾을 때 검색 원의 중심 간격(m). 반경 5000 원이 폭 3000m 띠를 빈틈없이 덮으려면
- * 간격이 2*sqrt(5000^2-3000^2)=8000m 이하여야 한다.
+ * 경로를 따라 주유소를 찾을 때 검색 원의 중심 간격(m). 반경 5000 원이 폭 3000m 띠를 빈틈없이 덮으려면 간격이
+ * 2*sqrt(5000^2-3000^2)=8000m 이하여야 한다. 오피넷 조회는 중심을 `OPINET_GRID_DEGREES`로 맞춰(최대 약 0.4km 이동)
+ * 캐시를 공유하므로, 이동분을 빼고 2*sqrt(5000^2-3400^2)=7300m보다 작은 7000m로 둔다.
  */
-export const FUEL_SAMPLE_SPACING_METERS = 8000;
+export const FUEL_SAMPLE_SPACING_METERS = 7000;
 
-/** 출발점에서 이 거리(m)까지만 경로를 훑는다(가안). 검색 원 개수(=외부 호출 수)를 14개 이하로 묶으려는 상한이다. */
+/** 출발점에서 이 거리(m)까지만 경로를 훑는다(가안). 검색 원 개수(=외부 호출 수)를 16개 이하로 묶으려는 상한이다. */
 export const FUEL_SCAN_MAX_METERS = 100_000;
 
 /** 외부 API 호출 하나의 제한 시간(ms). 넘기면 실패로 보고 `source: "unavailable"`로 답한다. */
@@ -57,3 +58,47 @@ export const MAX_REST_STOPS_LOOKUP = 20;
 
 /** `POST /energy/options` 전체 제한 시간(ms). 외부 호출 여러 번(주유소 경로 탐색)이 겹쳐도 이 안에 답한다. */
 export const TOTAL_TIMEOUT_MS = 12_000;
+
+/**
+ * 충전기 급속·완속 구분 기준(kW, 가안). 환경부 충전기 정보의 `output`(충전용량 kW)이 이 값 이상이면 급속으로 본다.
+ * 공식 가이드의 output 예시 값이 3·7·50·100·200이라 7과 50 사이를 가르는 값이고, 가이드가 급속의 정의를 밝힌 것은 아니다(미확인).
+ */
+export const FAST_CHARGER_MIN_KW = 50;
+
+/** 오피넷 조회 중심 좌표를 맞추는 격자(도). 0.005도는 위도 방향 약 0.55km라 한 칸 안에서 중심이 최대 약 0.4km 움직인다. */
+export const OPINET_GRID_DEGREES = 0.005;
+/** 오피넷 조회 결과를 메모리에 두는 시간(ms). 주유소 가격은 하루 단위로 바뀌어 짧게만 둔다. */
+export const OPINET_CACHE_TTL_MS = 5 * 60_000;
+/** 오피넷 캐시 항목 수 상한(가장 오래 안 쓴 것부터 버린다). */
+export const OPINET_CACHE_MAX_ENTRIES = 500;
+/** 서버 전체에서 동시에 나가는 오피넷 호출 상한과, 그 위로 기다리게 두는 호출 상한(넘으면 바로 실패). */
+export const OPINET_MAX_CONCURRENT = 4;
+export const OPINET_MAX_QUEUE = 32;
+/** 오피넷 응답 한 번의 바이트 상한. 반경 5km 주유소 목록은 수십 KB다. */
+export const OPINET_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+
+/** 환경부 충전소 정보 한 쪽(9999건)의 응답 바이트 상한. 공식 예시 한 건이 약 1.1KB라 정상 응답은 약 11MB다. */
+export const EV_MAX_PAGE_BYTES = 24 * 1024 * 1024;
+/** 시도 데이터를 메모리에 두는 시간. 충전기 상태(stat)가 이 주기로 갱신된다. */
+export const EV_CACHE_TTL_MS = 5 * 60_000;
+/** 받기에 실패했을 때 오래된 데이터로 계속 답하는 한도. 이보다 오래된 시도 데이터는 버린다(상태가 너무 낡는다). */
+export const EV_MAX_STALE_MS = 30 * 60_000;
+/** 받기에 실패한 시도를 다시 시도하기 전 대기. */
+export const EV_FAILURE_BACKOFF_MS = 30_000;
+/** 시도 데이터를 한꺼번에 메모리에 두는 충전기 수 상한(가장 오래 안 쓴 시도부터 버린다). */
+export const EV_MAX_CACHED_CHARGERS = 300_000;
+/** 시도 하나를 받는 전체 제한 시간(ms)과 서버 전체에서 동시에 받는 시도 수. */
+export const EV_LOAD_TIMEOUT_MS = 120_000;
+export const EV_MAX_CONCURRENT_LOADS = 2;
+
+/** XML 한 문서의 글자 수 상한(읽기 도구 방어선). */
+export const MAX_XML_CHARS = 32 * 1024 * 1024;
+
+/**
+ * `POST /energy/options`의 요청 주소별 속도 제한(분당, 가안). 차 한 대는 에너지 제안 직전에 한 번, 거절하면 한두 번 더 부르는 정도라
+ * 정상 사용은 분당 한 자릿수다. 같은 공유기·프록시 뒤의 여러 대와 재시도를 감안해 20으로 둔다.
+ */
+export const ENERGY_RATE_LIMIT_PER_WINDOW = 20;
+export const ENERGY_RATE_LIMIT_WINDOW_MS = 60_000;
+/** 속도 제한이 동시에 기억하는 주소 수 상한. */
+export const ENERGY_RATE_LIMIT_MAX_CLIENTS = 5000;
