@@ -12,9 +12,9 @@ jest.mock('../storage/keyValueStore', () => {
     ...actual,
     __delegate: delegate,
     deviceStore: {
-      get: (key: string) => delegate.current.get(key),
-      set: (key: string, value: string) => delegate.current.set(key, value),
-      remove: (key: string) => delegate.current.remove(key),
+      getItem: (key: string) => delegate.current.getItem(key),
+      setItem: (key: string, value: string) => delegate.current.setItem(key, value),
+      removeItem: (key: string) => delegate.current.removeItem(key),
     },
   };
 });
@@ -59,7 +59,7 @@ describe('앱을 열 때 탭과 첫 설정을 가른다', () => {
   });
 
   it('저장소에 쓰지 못했어도 이번 실행에서 끝냈으면(4단계 건너뛰기·완료) 새로 연 탭이 첫 설정으로 되돌리지 않는다', async () => {
-    useStore({ ...createMemoryStore(), set: () => Promise.reject(new Error('storage')) } as ReturnType<typeof createMemoryStore>);
+    useStore({ ...createMemoryStore(), setItem: () => Promise.reject(new Error('storage')) } as ReturnType<typeof createMemoryStore>);
     await markSetupDone();
     await render(<TabsLayout />);
     expect(await screen.findByTestId('tabs')).toBeOnTheScreen();
@@ -67,7 +67,7 @@ describe('앱을 열 때 탭과 첫 설정을 가른다', () => {
   });
 
   it('저장소를 읽는 동안에는 탭도 첫 설정도 보이지 않는다(깜빡임 방지)', async () => {
-    useStore({ ...createMemoryStore(), get: () => new Promise(() => {}) } as ReturnType<typeof createMemoryStore>);
+    useStore({ ...createMemoryStore(), getItem: () => new Promise(() => {}) } as ReturnType<typeof createMemoryStore>);
     await render(<TabsLayout />);
     expect(screen.getByTestId('entry-loading')).toBeOnTheScreen();
     expect(screen.queryByTestId('tabs')).toBeNull();

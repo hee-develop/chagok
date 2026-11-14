@@ -20,7 +20,7 @@ export const resetSetupDoneForTests = () => {
 export async function isSetupDone(store: KeyValueStore = deviceStore): Promise<boolean> {
   if (doneThisRun) return true;
   try {
-    return (await store.get(SETUP_DONE_KEY)) === '1';
+    return (await store.getItem(SETUP_DONE_KEY)) === '1';
   } catch {
     return false;
   }
@@ -30,7 +30,7 @@ export async function isSetupDone(store: KeyValueStore = deviceStore): Promise<b
 export async function markSetupDone(store: KeyValueStore = deviceStore): Promise<void> {
   doneThisRun = true;
   try {
-    await store.set(SETUP_DONE_KEY, '1');
+    await store.setItem(SETUP_DONE_KEY, '1');
   } catch {
     // 위 설명 참고
   }

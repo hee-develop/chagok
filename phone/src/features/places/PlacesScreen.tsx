@@ -9,11 +9,15 @@ import { SetupHeader } from '../../ui/SetupHeader';
 import { colors, useFont } from '../../ui/theme';
 import { notSaved, type PlaceTarget } from './favorites';
 import { PlaceRow } from './PlaceRow';
+import { placeMemoryApi, type PlaceMemoryApi } from './memoryApi';
 import { placesApi, type Favorites, type PlacesApi, type Suggestion } from './placesApi';
+import { RememberedPlaces } from './RememberedPlaces';
 import { SuggestionCard } from './SuggestionCard';
 
 type Props = {
   api?: PlacesApi;
+  /** 장소 탭의 '기억한 장소' 목록·지우기 API. */
+  memoryApi?: PlaceMemoryApi;
   timeoutMs?: number;
   /** 'setup'은 첫 설정 2단계(단계 표시·다음·건너뛰기). 'tab'은 장소 탭(단계 표시·다음 없음, 검색 화면도 단계 표시 없이 열림). */
   mode?: 'setup' | 'tab';
@@ -26,7 +30,7 @@ type LoadState = { status: 'loading' } | { status: 'error' } | { status: 'ready'
 
 const NEXT_ROUTE = '/setup/fill-places';
 
-export function PlacesScreen({ api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS, mode = 'setup' }: Props) {
+export function PlacesScreen({ api = placesApi, memoryApi = placeMemoryApi, timeoutMs = REQUEST_TIMEOUT_MS, mode = 'setup' }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
@@ -226,14 +230,13 @@ export function PlacesScreen({ api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS, 
             </Pressable>
 
             {mode === 'tab' ? (
-              // 다음 묶음(J2b)에서 채울 자리. 지금은 빈 상태만 보인다.
               <>
-                {([['remembered', strings.placesTab.remembered, strings.placesTab.rememberedEmpty], ['noTravel', strings.placesTab.noTravel, strings.placesTab.noTravelEmpty]] as const).map(([key, heading, empty]) => (
-                  <View key={key} style={styles.suggestions} testID={`places-tab-${key}`}>
-                    <Text accessibilityRole="header" style={[styles.heading, font(600)]}>{heading}</Text>
-                    <Text style={[styles.placeholder, font(400)]}>{empty}</Text>
-                  </View>
-                ))}
+                <RememberedPlaces api={memoryApi} timeoutMs={timeoutMs} />
+                {/* 이동 없음 목록은 다음 묶음(J2b)에서 채울 자리다. 지금은 빈 상태만 보인다. */}
+                <View style={styles.suggestions} testID="places-tab-noTravel">
+                  <Text accessibilityRole="header" style={[styles.heading, font(600)]}>{strings.placesTab.noTravel}</Text>
+                  <Text style={[styles.placeholder, font(400)]}>{strings.placesTab.noTravelEmpty}</Text>
+                </View>
               </>
             ) : null}
           </>

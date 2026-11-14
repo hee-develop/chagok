@@ -35,7 +35,7 @@ export function createCarConnectionSource(
     status: async (signal) => {
       if (!cleaned) {
         cleaned = true;
-        await store.remove(LEGACY_PAIRED_CAR_KEY).catch(() => undefined);
+        await store.removeItem(LEGACY_PAIRED_CAR_KEY).catch(() => undefined);
       }
       const status = await api.status(signal);
       return status ? { name: status.name, pairedAt: status.pairedAt } : null;

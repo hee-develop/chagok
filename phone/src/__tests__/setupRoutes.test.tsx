@@ -14,9 +14,9 @@ jest.mock('../storage/keyValueStore', () => {
     ...actual,
     __delegate: delegate,
     deviceStore: {
-      get: (key: string) => delegate.current.get(key),
-      set: (key: string, value: string) => delegate.current.set(key, value),
-      remove: (key: string) => delegate.current.remove(key),
+      getItem: (key: string) => delegate.current.getItem(key),
+      setItem: (key: string, value: string) => delegate.current.setItem(key, value),
+      removeItem: (key: string) => delegate.current.removeItem(key),
     },
   };
 });
@@ -36,15 +36,20 @@ jest.mock('expo-router', () => ({
 jest.mock('../features/pair-car/PairCarScreen', () => {
   const { Pressable, Text, View } = jest.requireActual('react-native');
   return {
-    PairCarScreen: ({ onSkip, onDone, standalone }: { onSkip?: () => void; onDone?: () => void; standalone?: boolean }) => (
+    PairCarScreen: ({ onSkip, onDone, standalone, onPaired }: { onSkip?: () => void; onDone?: () => void; standalone?: boolean; onPaired?: () => void }) => (
       <View>
         <Text>{standalone ? '연결 화면(탭에서 연 것)' : '연결 화면(첫 설정)'}</Text>
+        {onPaired ? <Pressable onPress={onPaired}><Text>연결 성공</Text></Pressable> : null}
         {onSkip ? <Pressable onPress={onSkip}><Text>건너뛰기</Text></Pressable> : null}
         {onDone ? <Pressable onPress={onDone}><Text>완료</Text></Pressable> : null}
       </View>
     ),
   };
 });
+const mockAskNotification = jest.fn();
+jest.mock('../features/notifications/permission', () => ({
+  askNotificationPermissionOnce: (...args: unknown[]) => mockAskNotification(...args),
+}));
 jest.mock('../features/calendar-select/CalendarSelectScreen', () => {
   const { Text } = jest.requireActual('react-native');
   return { CalendarSelectScreen: ({ standalone }: { standalone?: boolean }) => <Text>{standalone ? '캘린더(탭에서 연 것)' : '캘린더(첫 설정)'}</Text> };
@@ -62,6 +67,8 @@ beforeEach(() => {
   mockDismissAll.mockReset();
   mockCanDismiss = true;
   mockParams = {};
+  mockAskNotification.mockReset();
+  mockAskNotification.mockResolvedValue('granted');
 });
 
 describe('4단계(차 연결) 라우트: 연결하지 않아도 홈으로 간다', () => {
@@ -89,6 +96,22 @@ describe('4단계(차 연결) 라우트: 연결하지 않아도 홈으로 간다
     expect(mockDismissAll).toHaveBeenCalledTimes(1);
   });
 
+  it.each([['건너뛰기'], ['완료']])('[%s]는 완료 표시 뒤 알림 권한을 한 번 묻고(정책 10.4 첫 설정 끝) 그 창을 기다리지 않고 탭으로 간다', async (label) => {
+    mockAskNotification.mockReturnValue(new Promise(() => {})); // 사용자가 창에 답할 때까지 끝나지 않는다
+    await render(<PairCarRoute />);
+    await fireEvent.press(screen.getByText(label));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/'));
+    expect(mockAskNotification).toHaveBeenCalledTimes(1);
+    expect(delegate.current.dump()[SETUP_DONE_KEY]).toBe('1');
+  });
+
+  it('알림 권한 요청이 던져도(거부·오류) 탭으로 가는 데 영향이 없다', async () => {
+    mockAskNotification.mockRejectedValue(new Error('denied'));
+    await render(<PairCarRoute />);
+    await fireEvent.press(screen.getByText('건너뛰기'));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/'));
+  });
+
   it('닫을 화면이 없으면(탭이 처음부터 첫 설정으로 보낸 경우) 닫지 않고 탭으로만 간다', async () => {
     mockCanDismiss = false;
     await render(<PairCarRoute />);
@@ -98,7 +121,7 @@ describe('4단계(차 연결) 라우트: 연결하지 않아도 홈으로 간다
   });
 
   it('완료 표시를 저장하지 못해도 이번 실행에서는 탭으로 간다(메모리 표시)', async () => {
-    useStore({ ...createMemoryStore(), set: () => Promise.reject(new Error('storage')) } as ReturnType<typeof createMemoryStore>);
+    useStore({ ...createMemoryStore(), setItem: () => Promise.reject(new Error('storage')) } as ReturnType<typeof createMemoryStore>);
     await render(<PairCarRoute />);
     await fireEvent.press(screen.getByText('건너뛰기'));
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/'));
@@ -106,10 +129,13 @@ describe('4단계(차 연결) 라우트: 연결하지 않아도 홈으로 간다
     expect(await isSetupDone(createMemoryStore())).toBe(true);
   });
 
-  it('탭에서 연 화면(from=tab)은 첫 설정 선택 속성을 주지 않아 건너뛰기·완료 표시가 없다', async () => {
+  it('탭에서 연 화면(from=tab)은 연결에 성공했을 때 알림 권한을 한 번 묻고, 첫 설정 선택 속성을 주지 않아 건너뛰기·완료 표시가 없다', async () => {
     mockParams = { from: 'tab' };
     await render(<PairCarRoute />);
     expect(screen.getByText('연결 화면(탭에서 연 것)')).toBeOnTheScreen();
+    expect(mockAskNotification).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByText('연결 성공'));
+    expect(mockAskNotification).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('건너뛰기')).toBeNull();
     expect(screen.queryByText('완료')).toBeNull();
     expect(delegate.current.dump()[SETUP_DONE_KEY]).toBeUndefined();

@@ -3,9 +3,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Linking } from 'react-native';
 
 import { defaultCalendarSource } from '../calendar-select/defaultSource';
+import type { PermissionState } from '../notifications/types';
 
-/** 앱이 실제로 쓰는 권한만 둔다. 캘린더는 일정을 읽을 때, 카메라는 차 화면의 QR을 찍을 때. */
-export type PermissionName = 'calendar' | 'camera';
+/** 앱이 실제로 쓰는 권한만 둔다. 캘린더는 일정을 읽을 때, 카메라는 차 화면의 QR을 찍을 때, 알림은 시스템 알림을 띄울 때(첫 설정 끝에 한 번 묻는다). */
+export type PermissionName = 'calendar' | 'camera' | 'notifications';
 /** granted 켜짐 / ask 아직 안 물었거나 다시 물을 수 있음 / denied 설정에서만 켤 수 있음 */
 export type PermissionStatus = 'granted' | 'ask' | 'denied';
 export type PermissionMap = Record<PermissionName, PermissionStatus>;
@@ -19,11 +20,14 @@ export interface PermissionsSource {
 
 type Response = { granted: boolean; canAskAgain: boolean };
 const toStatus = (r: Response): PermissionStatus => (r.granted ? 'granted' : r.canAskAgain ? 'ask' : 'denied');
+/** 알림은 한 번 물은 뒤에는 창 없이 현재 상태만 오므로(`askNotificationPermissionOnce`) 아직 안 정했으면 ask, 거부했으면 denied(설정에서만 켤 수 있다). */
+const fromNotification = (state: PermissionState): PermissionStatus => (state === 'granted' ? 'granted' : state === 'undetermined' ? 'ask' : 'denied');
 
 // 네이티브 모듈은 처음 쓸 때 불러온다. 목 캘린더로 돌 때나 테스트에서는 건드리지 않는다.
 /* eslint-disable @typescript-eslint/no-require-imports */
 const calendarModule = () => require('expo-calendar/legacy') as typeof import('expo-calendar/legacy');
 const cameraModule = () => require('expo-camera') as typeof import('expo-camera');
+const notificationModule = () => require('../notifications/permission') as typeof import('../notifications/permission');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 export const devicePermissions: PermissionsSource = {
@@ -31,9 +35,13 @@ export const devicePermissions: PermissionsSource = {
     // 목 캘린더(테스트·E2E)는 기기 캘린더를 읽지 않으므로 권한이 필요 없다.
     const calendar: PermissionStatus = defaultCalendarSource.kind === 'mock' ? 'granted' : toStatus(await calendarModule().getCalendarPermissionsAsync());
     const camera = toStatus(await cameraModule().Camera.getCameraPermissionsAsync());
-    return { calendar, camera };
+    const notifications = fromNotification(await notificationModule().getNotificationPermission());
+    return { calendar, camera, notifications };
   },
-  request: async (name) => toStatus(name === 'calendar' ? await calendarModule().requestCalendarPermissionsAsync() : await cameraModule().Camera.requestCameraPermissionsAsync()),
+  request: async (name) => {
+    if (name === 'notifications') return fromNotification(await notificationModule().askNotificationPermissionOnce());
+    return toStatus(name === 'calendar' ? await calendarModule().requestCalendarPermissionsAsync() : await cameraModule().Camera.requestCameraPermissionsAsync());
+  },
   openSettings: () => { Linking.openSettings().catch(() => {}); },
 };
 

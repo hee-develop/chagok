@@ -55,6 +55,9 @@ env:
 
 # 연결한 뒤 [완료]는 첫 설정을 끝낸 것으로 보고 오늘 탭으로 간다(3단계로 되돌아가지 않는다). 오늘 탭은 폰 토큰으로 서버(GET /pair)에 연결 상태를 묻는다.
 - tapOn: '완료'
+# 첫 설정 끝에서 알림 권한을 한 번 묻는다(정책 10.4). 허용으로 답한다.
+- runFlow:
+    file: notification-allow.yaml
 - extendedWaitUntil:
     visible: '오늘 일정'
     timeout: 20000

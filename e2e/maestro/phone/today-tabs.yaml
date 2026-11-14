@@ -36,9 +36,17 @@ appId: ${APP_ID}
 - assertVisible: '건너뛰기'
 - takeScreenshot: 02-reached-step-4
 - tapOn: '건너뛰기'
+# 첫 설정 끝에서 알림 권한을 한 번 묻는다(정책 10.4). 여기서는 거부해 '켜면 이게 돼요' 한 줄이 오늘 탭 맨 위에 남는지 본다.
+- runFlow:
+    file: notification-deny.yaml
 - extendedWaitUntil:
     visible: '오늘 일정'
     timeout: 20000
+- extendedWaitUntil:
+    visible: '알림을 켜면 차곡 소식을 바로 알려 드려요.*'
+    timeout: 15000
+- assertVisible: '알림 설정 열기'
+- takeScreenshot: 03a-today-notification-denied
 - assertNotVisible: '4 / 4'
 - assertNotVisible: '차와 연결해요'
 - assertVisible: '차와 연결되지 않았어요'
@@ -140,15 +148,55 @@ appId: ${APP_ID}
 - assertVisible: '가족을 묶고 요청을 받는 기능은 곧 만나요.'
 - takeScreenshot: 06-family
 
-# 8) 장소 탭: 자주 가는 곳(단계 표시·다음 없음)과 다음 묶음 자리
+# 8) 장소 탭: 자주 가는 곳(단계 표시·다음 없음), 기억한 장소(서버에 심은 둘을 보이고 하나는 확인을 거쳐 지운다), 이동 없음 자리
+- runScript:
+    file: seed-place-memory.js
+    env:
+      SERVER_URL: ${SERVER_URL}
 - tapOn:
     id: 'tabbar-places'
 - extendedWaitUntil:
     visible: '자주 가는 곳을 알려주세요'
     timeout: 15000
 - assertNotVisible: '2 / 4'
-- assertVisible: '기억한 장소'
+- scrollUntilVisible:
+    element: '기억한 장소'
+    direction: DOWN
+    timeout: 20000
+- extendedWaitUntil:
+    visible: '상무 피트니스.*'
+    timeout: 15000
 - takeScreenshot: 07-places
+- scrollUntilVisible:
+    element: '이름이 겹쳐서 갈 때마다 한 번 더 물어봐요.'
+    direction: DOWN
+    timeout: 20000
+- assertVisible: '스타벅스 상무점.*'
+- takeScreenshot: 07a-memory-list-bottom
+- scrollUntilVisible:
+    element: '헬스장 기억 지우기'
+    direction: UP
+    timeout: 20000
+- tapOn: '헬스장 기억 지우기'
+- extendedWaitUntil:
+    visible: '‘헬스장’ 기억을 지울까요\?'
+    timeout: 10000
+- takeScreenshot: 07b-memory-confirm
+- tapOn: '취소'
+- assertNotVisible: '‘헬스장’ 기억을 지울까요\?'
+- tapOn: '헬스장 기억 지우기'
+- tapOn: '헬스장 기억 지우기 확인'
+- extendedWaitUntil:
+    notVisible: '상무 피트니스.*'
+    timeout: 15000
+- assertVisible: '스타벅스 상무점.*'
+- takeScreenshot: 07c-memory-deleted
+- runScript:
+    file: assert-place-memory.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT: '스타벅스'
+      ABSENT: '헬스장'
 
 # 9) 설정 탭: 고정 안내와 입구
 - tapOn:

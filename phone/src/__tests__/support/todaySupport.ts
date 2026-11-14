@@ -32,12 +32,12 @@ export const makeScheduleApi = (schedules: SetupSchedule[] = [LUNCH, ONLINE, GAM
   ...overrides,
 });
 
-export const GRANTED: PermissionMap = { calendar: 'granted', camera: 'granted' };
+export const GRANTED: PermissionMap = { calendar: 'granted', camera: 'granted', notifications: 'granted' };
 
 type PermissionsMock = { read: jest.Mock<Promise<PermissionMap>, []>; request: jest.Mock<Promise<PermissionStatus>, [PermissionName]>; openSettings: jest.Mock };
 
-export const makePermissions = (map: PermissionMap = GRANTED, overrides: Partial<PermissionsSource> = {}): PermissionsMock & PermissionsSource => {
-  let current = map;
+export const makePermissions = (map: Partial<PermissionMap> = {}, overrides: Partial<PermissionsSource> = {}): PermissionsMock & PermissionsSource => {
+  let current: PermissionMap = { ...GRANTED, ...map };
   return {
     read: jest.fn(async () => current),
     request: jest.fn(async (name: PermissionName) => { current = { ...current, [name]: 'granted' as const }; return 'granted' as const; }),

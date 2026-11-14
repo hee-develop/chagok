@@ -47,10 +47,7 @@ export const LOAD_TIMEOUT_MS = 5_000;
 export const normalizeTitle = (title: string) => title.trim().replace(/\s+/g, ' ').toLowerCase();
 
 // AsyncStorage는 `storage/keyValueStore.ts` 한 곳에서만 불러온다.
-const defaultStorage: KeyValueStorage = {
-  getItem: (key) => deviceStore.get(key),
-  setItem: (key, value) => deviceStore.set(key, value),
-};
+const defaultStorage: KeyValueStorage = deviceStore;
 
 export function createTravelExceptions(
   storage: KeyValueStorage = defaultStorage,

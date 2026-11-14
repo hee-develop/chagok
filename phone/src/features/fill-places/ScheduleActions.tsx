@@ -5,6 +5,20 @@ import { strings } from '../../i18n/ko';
 import { colors, useFont } from '../../ui/theme';
 import type { SchedulePlaceChange, SetupSchedule } from './schedulePlacesApi';
 
+type Suggestion = NonNullable<SetupSchedule['suggestion']>;
+
+/**
+ * '여기 맞아요'로 저장할 내용. 목 장소 후보는 id로, 지난번 기억(애매해서 확인이 필요한 장소)은 서버가 내려준 장소 스냅숏으로 저장한다.
+ */
+export function confirmChange(suggestion: Suggestion): SchedulePlaceChange {
+  if (suggestion.placeId !== null) return { placeId: suggestion.placeId };
+  if ('place' in suggestion) {
+    const { name, address, lat, lng } = suggestion.place;
+    return { place: { name, address: address ?? undefined, lat, lng } };
+  }
+  return { placeId: null };
+}
+
 /** 일정 하나를 다루는 화면들(장소 검색·채비·가족 보내기). */
 type ScheduleRoute = '/setup/schedule-place-search' | '/setup/schedule-care' | '/setup/family-send';
 
@@ -43,7 +57,7 @@ export function ScheduleActions({ schedule, saving, onSave, onNavigate, origin =
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel={`${schedule.title} ${t.rememberedConfirm}`}
             accessibilityState={{ disabled: saving }} disabled={saving} style={styles.confirm}
-            onPress={() => onSave(schedule.id, { placeId: schedule.suggestion!.placeId })}>
+            onPress={() => onSave(schedule.id, confirmChange(schedule.suggestion!))}>
             <Text style={[styles.confirmText, font(600)]}>{t.rememberedConfirm}</Text>
           </Pressable>
         </View>

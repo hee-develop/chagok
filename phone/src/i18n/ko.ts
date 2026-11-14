@@ -96,8 +96,10 @@ export const ko = {
     heading: '켜 두면 좋아요',
     calendar: '캘린더를 켜면 오늘 일정을 차에 보내 드려요.',
     camera: '카메라를 켜면 차 화면의 QR을 찍어 바로 연결할 수 있어요.',
+    notifications: '알림을 켜면 차곡 소식을 바로 알려 드려요. 꺼 두면 소식은 이 화면에만 쌓여요.',
     calendarName: '캘린더',
     cameraName: '카메라',
+    notificationsName: '알림',
     on: '켜기',
     openSettings: '설정 열기',
     turnOnLabel: (name: string) => `${name} 켜기`,
@@ -105,6 +107,17 @@ export const ko = {
     granted: '켜져 있어요',
     checkFailed: '권한을 확인하지 못했어요. 잠시 뒤 다시 시도해 주세요.',
     retry: '다시 확인',
+  },
+  // 폰 알림함(오늘 탭 맨 위, 읽지 않은 알림만)
+  inbox: {
+    heading: '새 소식',
+    hint: '누르면 확인하고 읽음으로 해요',
+    markAllRead: '모두 읽음',
+  },
+  // 일정을 서버로 보낼 수 없는 이유(권한이 꺼진 경우는 권한 안내가 맡는다)
+  sendBlock: {
+    noSelection: '고른 캘린더가 없어서 일정을 차에 보내지 못하고 있어요. 캘린더를 고르면 오늘 일정을 차에 보내 드려요.',
+    pickCalendar: '캘린더 고르기',
   },
   carConnection: {
     heading: '차 연결',
@@ -163,6 +176,21 @@ export const ko = {
     rememberedEmpty: '일정 제목으로 기억한 장소가 생기면 여기에 모여요.',
     noTravel: '이동 없음으로 둔 일정',
     noTravelEmpty: '이동 없음으로 둔 일정이 생기면 여기에 모여요.',
+  },
+  // 장소 탭의 '기억한 장소'(정책서 10.8 '기억한 장소 지우기')
+  rememberedPlaces: {
+    loading: '기억한 장소를 불러오는 중',
+    loadFailed: '기억한 장소를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.',
+    retry: RETRY,
+    ambiguous: '이름이 겹쳐서 갈 때마다 한 번 더 물어봐요.',
+    delete: '지우기',
+    deleteLabel: (name: string) => `${name} 기억 지우기`,
+    confirmQuestion: (name: string) => `‘${name}’ 기억을 지울까요?`,
+    confirmDelete: '지우기',
+    confirmDeleteLabel: (name: string) => `${name} 기억 지우기 확인`,
+    deleting: '지우는 중',
+    cancel: '취소',
+    deleteFailed: (name: string) => `‘${name}’ 기억을 지우지 못했어요. 잠시 뒤 다시 해 주세요.`,
   },
   settings: {
     title: '설정',

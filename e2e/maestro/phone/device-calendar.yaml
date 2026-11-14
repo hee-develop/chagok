@@ -85,6 +85,9 @@ appId: ${APP_ID}
     visible: '차와 연결해요'
     timeout: 15000
 - tapOn: '건너뛰기'
+# 첫 설정 끝에서 알림 권한을 한 번 묻는다(정책 10.4). 허용으로 답한다.
+- runFlow:
+    file: notification-allow.yaml
 - extendedWaitUntil:
     visible: '오늘 일정'
     timeout: 20000

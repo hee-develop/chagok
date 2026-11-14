@@ -49,7 +49,7 @@ export function SettingsScreen({ connectionSource = carConnectionSource, permiss
           ) : permissions.state.status === 'error' ? (
             <ErrorBlock message={strings.permissions.checkFailed} retryLabel={strings.permissions.retry} onRetry={() => void permissions.refresh()} />
           ) : (
-            <PermissionGuide map={permissions.state.map} names={['calendar', 'camera']} showGranted
+            <PermissionGuide map={permissions.state.map} names={['calendar', 'camera', 'notifications']} showGranted
               onRequest={(name) => void permissions.request(name)} onOpenSettings={permissions.openSettings} />
           )}
         </Card>

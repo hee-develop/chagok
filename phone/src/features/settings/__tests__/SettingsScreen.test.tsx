@@ -50,6 +50,15 @@ describe('설정 탭', () => {
     expect(screen.getByRole('button', { name: '카메라 설정 열기' })).toBeOnTheScreen();
   });
 
+  it('알림 권한도 같은 구역에 보이고 아직 안 물었으면 [켜기]로 요청한다', async () => {
+    const permissions = makePermissions({ notifications: 'ask' });
+    await setup({ permissionsSource: permissions });
+    const row = within(await screen.findByTestId('permission-notifications'));
+    expect(row.getByText(/알림을 켜면 차곡 소식을 바로 알려 드려요/)).toBeOnTheScreen();
+    await fireEvent.press(screen.getByRole('button', { name: '알림 켜기' }));
+    expect(permissions.request).toHaveBeenCalledWith('notifications');
+  });
+
   it('처음부터 권한을 읽지 못하면 오류를 보이고 [다시 확인]으로 복구한다', async () => {
     const read = jest.fn().mockRejectedValueOnce(new Error('native')).mockResolvedValueOnce({ calendar: 'granted', camera: 'granted' });
     await setup({ permissionsSource: makePermissions(undefined, { read }) });

@@ -4,9 +4,9 @@ import { createMemoryStore, type KeyValueStore } from '../../../storage/keyValue
 import { isSetupDone, markSetupDone, resetSetupDoneForTests, SETUP_DONE_KEY, useSetupGate } from '../setupGate';
 
 const brokenStore: KeyValueStore = {
-  get: jest.fn().mockRejectedValue(new Error('storage')),
-  set: jest.fn().mockRejectedValue(new Error('storage')),
-  remove: jest.fn().mockRejectedValue(new Error('storage')),
+  getItem: jest.fn().mockRejectedValue(new Error('storage')),
+  setItem: jest.fn().mockRejectedValue(new Error('storage')),
+  removeItem: jest.fn().mockRejectedValue(new Error('storage')),
 };
 
 beforeEach(() => resetSetupDoneForTests());
@@ -37,7 +37,7 @@ describe('첫 설정 완료 표시', () => {
 
 describe('useSetupGate', () => {
   it('읽는 동안 loading, 끝났으면 done, 아니면 needed', async () => {
-    const pending = await renderHook(() => useSetupGate({ ...createMemoryStore(), get: () => new Promise(() => {}) }));
+    const pending = await renderHook(() => useSetupGate({ ...createMemoryStore(), getItem: () => new Promise(() => {}) }));
     expect(pending.result.current).toBe('loading');
 
     const done = await renderHook(() => useSetupGate(createMemoryStore({ [SETUP_DONE_KEY]: '1' })));

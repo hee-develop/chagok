@@ -8,6 +8,9 @@ import { colors } from '../../../ui/theme';
 import { HttpError } from '../../../api/request';
 import type { FilteredEvent } from '../../calendar-sync/filteredEvents';
 import type { SchedulePlacesApi } from '../../fill-places/schedulePlacesApi';
+import { createInbox } from '../../notifications/inbox';
+import { registerTapHandler } from '../../notifications/taps';
+import { createMemoryStore } from '../../../storage/keyValueStore';
 import { TodayScreen } from '../TodayScreen';
 import { DENTIST, GRANTED, LUNCH, makeConnection, makePermissions, makeScheduleApi, SEAT } from '../../../__tests__/support/todaySupport';
 
@@ -490,5 +493,97 @@ describe('오늘 탭: 저장 오류와 다시 읽기', () => {
     await waitFor(() => expect(fetchSchedules).toHaveBeenCalledTimes(2));
     expect(saveSignals[0]!.aborted).toBe(false);
     await waitFor(() => expect(within(screen.getByTestId('today-row-lunch')).getByText('이동 없음')).toBeOnTheScreen());
+  });
+});
+
+describe('오늘 탭: 맨 위(알림함·일정을 보낼 수 없는 이유·알림 권한)', () => {
+  const NOTE = { id: '1', kind: 'late-sms', title: '늦을 것 같아요', body: '5분 늦는다고 보낼까요?', data: { who: 'mom' }, createdAt: '2026-11-06T00:00:00Z' };
+  const makeInbox = async (...notes: (typeof NOTE)[]) => {
+    const inbox = createInbox({ storage: createMemoryStore() });
+    await inbox.load();
+    await inbox.add(notes);
+    return inbox;
+  };
+  const texts = () => {
+    const ids: string[] = [];
+    const walk = (node: unknown): void => {
+      if (!node || typeof node !== 'object') return;
+      const n = node as { props?: { testID?: string }; children?: unknown[] };
+      if (n.props?.testID) ids.push(n.props.testID);
+      n.children?.forEach(walk);
+    };
+    const tree = screen.toJSON();
+    (Array.isArray(tree) ? tree : [tree]).forEach(walk);
+    return ids;
+  };
+
+  it('읽지 않은 알림을 맨 위에 보이고, 누르면 종류별 처리를 부르고 읽음이 되어 줄이 사라진다', async () => {
+    const handler = jest.fn();
+    const off = registerTapHandler('late-sms', handler);
+    const inbox = await makeInbox(NOTE);
+    await setup({ inbox, connectionSource: makeConnection(false), permissionsSource: makePermissions({ calendar: 'denied' }) });
+    const row = await screen.findByRole('button', { name: '늦을 것 같아요 5분 늦는다고 보낼까요?' });
+    // 알림함 → 권한 안내 → 차 연결 순서
+    await screen.findByTestId('permission-guide');
+    await screen.findByTestId('car-connection');
+    const ids = texts();
+    expect(ids.indexOf('inbox')).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf('inbox')).toBeLessThan(ids.indexOf('permission-guide'));
+    expect(ids.indexOf('permission-guide')).toBeLessThan(ids.indexOf('car-connection'));
+    await fireEvent.press(row);
+    await waitFor(() => expect(handler).toHaveBeenCalledWith({ id: '1', kind: 'late-sms', data: { who: 'mom' } }));
+    await waitFor(() => expect(screen.queryByTestId('inbox')).toBeNull());
+    expect(inbox.getState().items[0]!.read).toBe(true);
+    off();
+  });
+
+  it('이미 읽은 알림이나 빈 알림함이면 구역이 없다. 읽지 않은 것이 둘 이상이면 [모두 읽음]이 있다', async () => {
+    const read = await makeInbox(NOTE);
+    read.markRead('1');
+    await setup({ inbox: read });
+    await screen.findByText('육전집 점심');
+    expect(screen.queryByTestId('inbox')).toBeNull();
+
+    const two = await makeInbox(NOTE, { ...NOTE, id: '2', title: '가족 요청' });
+    await setup({ inbox: two });
+    await fireEvent.press(await screen.findByRole('button', { name: '모두 읽음' }));
+    await waitFor(() => expect(two.getState().items.every((i) => i.read)).toBe(true));
+  });
+
+  it('알림 권한을 거부했으면 켜면 이게 돼요 한 줄과 [설정 열기]가 남는다. 아직 안 물었거나 허용이면 보이지 않는다', async () => {
+    const denied = makePermissions({ notifications: 'denied' });
+    await setup({ permissionsSource: denied, connectionSource: makeConnection(true) });
+    const guide = within(await screen.findByTestId('permission-guide'));
+    expect(guide.getByText('알림을 켜면 차곡 소식을 바로 알려 드려요. 꺼 두면 소식은 이 화면에만 쌓여요.')).toBeOnTheScreen();
+    await fireEvent.press(guide.getByRole('button', { name: '알림 설정 열기' }));
+    expect(denied.openSettings).toHaveBeenCalled();
+  });
+
+  it.each([['ask'], ['granted']] as const)('알림 권한이 %s면 홈에 안내하지 않는다', async (state) => {
+    await setup({ permissionsSource: makePermissions({ notifications: state }), connectionSource: makeConnection(true) });
+    await screen.findByText('육전집 점심');
+    expect(screen.queryByTestId('permission-guide')).toBeNull();
+  });
+
+  it('일정을 보낼 수 없는 이유: 고른 캘린더가 없으면 한 줄과 [캘린더 고르기]가 맨 위 안내에 들어가고 탭에서 연 화면으로 간다', async () => {
+    await setup({ sendBlock: 'no-selection' });
+    const row = within(await screen.findByTestId('send-block-no-selection'));
+    expect(row.getByText(/고른 캘린더가 없어서 일정을 차에 보내지 못하고 있어요/)).toBeOnTheScreen();
+    await fireEvent.press(row.getByRole('button', { name: '캘린더 고르기' }));
+    expect(mockPush).toHaveBeenLastCalledWith({ pathname: '/setup/calendar', params: { from: 'tab' } });
+  });
+
+  it('일정을 보낼 수 없는 이유: 권한이 꺼졌다고 알려 오면 권한 목록이 아직 켜짐이어도 캘린더 [설정 열기] 안내를 보인다', async () => {
+    await setup({ sendBlock: 'permission-denied', permissionsSource: makePermissions({ calendar: 'granted' }) });
+    const guide = within(await screen.findByTestId('permission-guide'));
+    expect(guide.getByText('캘린더를 켜면 오늘 일정을 차에 보내 드려요.')).toBeOnTheScreen();
+    expect(screen.queryByTestId('send-block-no-selection')).toBeNull();
+  });
+
+  it('보낼 수 없는 이유가 없으면(null) 안내가 없다', async () => {
+    await setup({ sendBlock: null });
+    await screen.findByText('육전집 점심');
+    expect(screen.queryByTestId('send-block-no-selection')).toBeNull();
+    expect(screen.queryByTestId('permission-guide')).toBeNull();
   });
 });

@@ -15,8 +15,8 @@ type Props = {
   onOpenSettings: () => void;
 };
 
-const NAME: Record<PermissionName, string> = { calendar: strings.permissions.calendarName, camera: strings.permissions.cameraName };
-const HINT: Record<PermissionName, string> = { calendar: strings.permissions.calendar, camera: strings.permissions.camera };
+const NAME: Record<PermissionName, string> = { calendar: strings.permissions.calendarName, camera: strings.permissions.cameraName, notifications: strings.permissions.notificationsName };
+const HINT: Record<PermissionName, string> = { calendar: strings.permissions.calendar, camera: strings.permissions.camera, notifications: strings.permissions.notifications };
 
 /** 권한 하나당 한 줄: 켜면 되는 일을 말하고, 아직 물을 수 있으면 [켜기], 아니면 [설정 열기]. */
 export function PermissionGuide({ map, names, showGranted = false, onRequest, onOpenSettings }: Props) {

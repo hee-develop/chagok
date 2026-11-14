@@ -155,7 +155,7 @@ describe('기기 id', () => {
   });
 });
 
-describe('토큰이 지워질 때의 알림(onTokenCleared)', () => {
+describe('토큰이 지워지거나 바뀔 때의 알림(onTokenCleared)', () => {
   it('clearToken(연결 끊기)과 401로 버릴 때 부르고, 해제하면 부르지 않는다. 리스너가 던져도 토큰은 지워진다', async () => {
     const storage = memoryStorage('t');
     const session = createSession(storage);
@@ -176,6 +176,19 @@ describe('토큰이 지워질 때의 알림(onTokenCleared)', () => {
     await session.setToken('v');
     await session.clearToken();
     expect(cleared).toHaveBeenCalledTimes(2);
+  });
+
+  it('이미 토큰이 있는데 다른 토큰으로 바뀌면(다른 자리에 다시 연결) 알린다. 같은 토큰이나 처음 받는 토큰은 알리지 않는다', async () => {
+    const session = createSession(memoryStorage(null));
+    const cleared = jest.fn();
+    session.onTokenCleared(cleared);
+    await session.setToken('first');
+    expect(cleared).not.toHaveBeenCalled();
+    await session.setToken('first');
+    expect(cleared).not.toHaveBeenCalled();
+    await session.setToken('second');
+    expect(cleared).toHaveBeenCalledTimes(1);
+    expect(await session.getToken()).toBe('second');
   });
 
   it('오래된 요청의 401이 새 토큰을 지우지 않으면 알리지도 않는다', async () => {

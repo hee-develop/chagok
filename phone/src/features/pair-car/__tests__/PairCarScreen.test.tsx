@@ -25,7 +25,7 @@ jest.mock('expo-camera', () => {
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
 const PAIRED = { seatId: 'seat-1', name: 'Pixel', mode: 'new' as const, pairedAt: '2026-11-06T00:20:00.000Z' };
 const makeApi = (claim: PairingApi['claim'] = jest.fn().mockResolvedValue(PAIRED)): PairingApi => ({ claim, disconnect: jest.fn(), status: jest.fn() });
-const renderScreen = (api: PairingApi, props: { onSkip?: () => void; onDone?: () => void; standalone?: boolean } = {}) =>
+const renderScreen = (api: PairingApi, props: { onSkip?: () => void; onDone?: () => void; standalone?: boolean; onPaired?: () => void } = {}) =>
   render(
     <SafeAreaProvider initialMetrics={insets}>
       <PairCarScreen api={api} {...props} />
@@ -193,4 +193,18 @@ describe('standalone(오늘·설정 탭의 [차 연결하기])', () => {
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(mockBack).not.toHaveBeenCalled();
   });
+});
+
+it('onPaired는 연결에 성공한 순간 한 번 부르고, 실패하면 부르지 않는다', async () => {
+  const onPaired = jest.fn();
+  const claim = jest.fn().mockRejectedValueOnce(new HttpError(404, 'x')).mockResolvedValueOnce(PAIRED);
+  await renderScreen(makeApi(claim), { onPaired });
+  await fireEvent.changeText(screen.getByTestId('pair-code-input'), '000000');
+  await fireEvent.press(screen.getByRole('button', { name: '연결하기' }));
+  await screen.findByText(/번호가 맞지 않거나/);
+  expect(onPaired).not.toHaveBeenCalled();
+  await fireEvent.changeText(screen.getByTestId('pair-code-input'), '123456');
+  await fireEvent.press(screen.getByRole('button', { name: '연결하기' }));
+  await screen.findByRole('header', { name: '✓ 차와 연결됐어요' });
+  expect(onPaired).toHaveBeenCalledTimes(1);
 });

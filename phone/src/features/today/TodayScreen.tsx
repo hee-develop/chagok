@@ -1,20 +1,24 @@
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { REQUEST_TIMEOUT_MS } from '../../api/request';
 import { strings } from '../../i18n/ko';
-import { Card, EmptyText, ErrorBlock, LoadingBlock, Section } from '../../ui/blocks';
+import { Card, EmptyText, ErrorBlock, LoadingBlock, OutlineButton, Section } from '../../ui/blocks';
 import { TabScreen } from '../../ui/TabScreen';
 import { colors, useFont } from '../../ui/theme';
 import { useFilteredEvents, type FilteredEvent } from '../calendar-sync/filteredEvents';
+import { useEventSendBlock, type SendBlockReason } from '../calendar-sync/sendBlock';
 import { TravelMarkNotice } from '../calendar-sync/TravelMarkNotice';
 import { useTravelMark, type TravelMarkOptions } from '../calendar-sync/useTravelMark';
 import { formatScheduleDay } from '../fill-places/scheduleFormat';
 import { schedulePlacesApi, type SchedulePlacesApi } from '../fill-places/schedulePlacesApi';
+import type { Inbox } from '../notifications/inbox';
 import { useSchedulePlaces } from '../fill-places/useSchedulePlaces';
 import { carConnectionSource, useCarConnection, type CarConnectionSource } from './carConnection';
 import { ConnectionCard } from './ConnectionCard';
 import { FilteredRow } from './FilteredRow';
+import { InboxSection } from './InboxSection';
 import { devicePermissions, usePermissions, type PermissionName, type PermissionsSource } from './permissions';
 import { PermissionGuide } from './PermissionGuide';
 import { ScheduleRow } from './ScheduleRow';
@@ -29,6 +33,10 @@ type Props = {
   filteredEvents?: readonly FilteredEvent[];
   /** 거른 일정을 "이동 일정이에요"로 바꾸고 되돌리는 동작(기본은 `calendar-sync/travelMark.ts`). 바뀌면 서버 목록을 다시 조회한다. */
   travelMark?: Pick<TravelMarkOptions, 'mark' | 'undo' | 'undoVisibleMs'>;
+  /** 폰 알림함. 기본은 앱 전체가 공유하는 것. */
+  inbox?: Inbox;
+  /** 일정을 서버로 보낼 수 없는 이유. 기본은 일정 동기화 결과를 따라가는 `useEventSendBlock()`. */
+  sendBlock?: SendBlockReason | null;
 };
 
 /**
@@ -44,8 +52,11 @@ export function TodayScreen({
   timeoutMs = REQUEST_TIMEOUT_MS,
   filteredEvents,
   travelMark,
+  inbox,
+  sendBlock: sendBlockProp,
 }: Props) {
   const font = useFont();
+  const router = useRouter();
   const t = strings.today;
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const sharedFiltered = useFilteredEvents();
@@ -62,14 +73,22 @@ export function TodayScreen({
   // 거른 줄을 이동 일정으로 바꾸거나 되돌리면 서버가 아는 일정이 달라지므로 서버 목록을 다시 조회한다.
   const travel = useTravelMark({ ...travelMark, lines: filtered, onChanged: sched.reload });
   const saving = sched.saving || travel.busy;
+  const observedBlock = useEventSendBlock();
+  const sendBlock = sendBlockProp === undefined ? observedBlock : sendBlockProp;
 
   // 홈에는 거부한 권한만 남긴다. 캘린더는 홈에 꼭 필요하므로 아직 묻지 않았어도 [켜기]를 보이고,
   // 카메라는 한 번도 묻지 않았으면 보이지 않으며 거부했고 아직 연결 전일 때만 보인다.
+  // 알림도 같은 규칙이다: 첫 설정 끝에 한 번 묻고, 거부했을 때만 '켜면 이게 돼요'로 남긴다(꺼 두면 알림은 이 화면 맨 위에만 쌓인다).
+  // 일정 동기화가 캘린더 권한이 꺼져 있다고 알려 오면(`permission-denied`) 권한 목록이 아직 켜짐이어도 캘린더 안내를 보인다.
+  const shownMap = permissionMap && sendBlock === 'permission-denied' && permissionMap.calendar === 'granted'
+    ? { ...permissionMap, calendar: 'denied' as const } : permissionMap;
   const guideNames: PermissionName[] = [];
-  if (permissionMap) {
-    if (permissionMap.calendar !== 'granted') guideNames.push('calendar');
-    if (permissionMap.camera === 'denied' && connection.state.status === 'notConnected') guideNames.push('camera');
+  if (shownMap) {
+    if (shownMap.calendar !== 'granted') guideNames.push('calendar');
+    if (shownMap.camera === 'denied' && connection.state.status === 'notConnected') guideNames.push('camera');
+    if (shownMap.notifications === 'denied') guideNames.push('notifications');
   }
+  const calendarOffForSend = !calendarBlocked && sendBlock === 'no-selection';
 
   // 권한이 꺼지면 이전에 읽어 둔 일정은 보이지 않는다.
   const split = !calendarBlocked && sched.load.status === 'ready' ? splitSchedules(sched.load.schedules, sched.load.anchor, filtered) : null;
@@ -78,10 +97,20 @@ export function TodayScreen({
 
   return (
     <TabScreen title={t.title} description={day} testID="tab-today">
-      {guideNames.length > 0 && permissionMap ? (
+      <InboxSection inbox={inbox} />
+
+      {(guideNames.length > 0 && shownMap) || calendarOffForSend ? (
         <Section heading={strings.permissions.heading} testID="permission-guide">
           <Card>
-            <PermissionGuide map={permissionMap} names={guideNames} onRequest={(name) => void permissions.request(name)} onOpenSettings={permissions.openSettings} />
+            {shownMap && guideNames.length > 0 ? (
+              <PermissionGuide map={shownMap} names={guideNames} onRequest={(name) => void permissions.request(name)} onOpenSettings={permissions.openSettings} />
+            ) : null}
+            {calendarOffForSend ? (
+              <View testID="send-block-no-selection" style={styles.guideRow}>
+                <Text style={[styles.guideText, font(400)]}>{strings.sendBlock.noSelection}</Text>
+                <OutlineButton label={strings.sendBlock.pickCalendar} onPress={() => router.push({ pathname: '/setup/calendar', params: { from: 'tab' } })} />
+              </View>
+            ) : null}
           </Card>
         </Section>
       ) : null}
@@ -151,6 +180,8 @@ const styles = StyleSheet.create({
   banner: { padding: 16, borderRadius: 16, backgroundColor: colors.tint, gap: 4 },
   bannerTitle: { fontSize: 16, color: colors.text },
   bannerHint: { fontSize: 14, lineHeight: 20, color: colors.textStrong },
+  guideRow: { gap: 10 },
+  guideText: { fontSize: 15, lineHeight: 22, color: colors.textStrong },
   inboxTitle: { fontSize: 16, color: colors.text },
   inboxHint: { fontSize: 14, lineHeight: 20, color: colors.textMuted },
 });

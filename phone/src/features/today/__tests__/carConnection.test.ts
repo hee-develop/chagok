@@ -32,7 +32,7 @@ describe('createCarConnectionSource: 폰 토큰으로 GET /pair를 묻는다', (
 
   it('J1 이전 버전이 폰에 남긴 차 id는 처음 확인할 때 한 번 지운다', async () => {
     const store = createMemoryStore({ [LEGACY_PAIRED_CAR_KEY]: 'car-1', other: 'keep' });
-    const remove = jest.spyOn(store, 'remove');
+    const remove = jest.spyOn(store, 'removeItem');
     const source = createCarConnectionSource({ status: jest.fn().mockResolvedValue(null) }, store);
     await source.status(signal);
     await source.status(signal);
@@ -41,7 +41,7 @@ describe('createCarConnectionSource: 폰 토큰으로 GET /pair를 묻는다', (
   });
 
   it('예전 키를 지우지 못해도 상태 확인은 그대로 된다', async () => {
-    const store = { ...createMemoryStore(), remove: jest.fn().mockRejectedValue(new Error('storage')) };
+    const store = { ...createMemoryStore(), removeItem: jest.fn().mockRejectedValue(new Error('storage')) };
     const api = { status: jest.fn().mockResolvedValue(SEAT) };
     await expect(createCarConnectionSource(api, store).status(signal)).resolves.toEqual({ name: 'Pixel 9', pairedAt: SEAT.pairedAt });
   });
