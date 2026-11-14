@@ -3,7 +3,7 @@ import { createEventSync } from '../../calendar-sync/eventSync';
 import type { CalendarSource, DeviceEvent } from '../../calendar-select/calendarSource';
 import { createFilteredEventsStore } from '../../calendar-sync/filteredEvents';
 import { createInbox } from '../../notifications/inbox';
-import { createMemoryStorage } from '../../notifications/keyValue';
+import { createMemoryStore } from '../../../storage/keyValueStore';
 import { bindLocalCarStateToSession, clearLocalCarState, quiesceLocalCarState, type LocalCarState } from '../localState';
 
 const fakeState = () => {
@@ -42,7 +42,7 @@ describe('clearLocalCarState', () => {
   });
 
   it('실제 알림함·일정 보내기·거른 일정 저장소를 비운다', async () => {
-    const inbox = createInbox({ storage: createMemoryStorage() });
+    const inbox = createInbox({ storage: createMemoryStore() });
     await inbox.add([{ id: '5', kind: 'events-stale', title: 't', body: 'b', data: {}, createdAt: '2026-11-14T11:00:00.000Z' }]);
     expect(inbox.getState().items).toHaveLength(1);
     const filtered = createFilteredEventsStore();
