@@ -63,6 +63,9 @@ data class Briefing(
     enum class Level { FULL, ONE_LINE }
 }
 
+/** 앱에서 적은 채비 한 줄과 그 일정 제목. */
+data class CareItem(val title: String, val text: String)
+
 sealed interface MemoNote {
     data object None : MemoNote
     data class ReadAloud(val text: String) : MemoNote
@@ -70,7 +73,29 @@ sealed interface MemoNote {
     /** 길어서 "{일정} 메모가 있어요."만 알림(질문은 카드의 출발 질문 하나) */
     data object HasMemo : MemoNote
 
+    /**
+     * 폰 앱에서 적은 채비. 첫 탑승에는 오늘 일정들의 채비를 모으고(대상 일정이 먼저), 재탑승에는 대상 일정 것만 둔다.
+     * 앱 채비가 하나라도 있으면 메모 대신 이것을 읽는다.
+     */
+    data class Care(val items: List<CareItem>) : MemoNote
+
     companion object {
+        /**
+         * 챙길 것. 첫 탑승([first])이면 대상 일정과 오늘의 다른 일정(종일 포함, 도착·건너뜀 제외)의 앱 채비를 모으고,
+         * 하나도 없으면 지금처럼 대상 일정의 메모를 읽는다. 다른 일정의 메모는 채비인지 알 수 없어 읽지 않는다.
+         * 재탑승이면 대상 일정의 앱 채비만 본다.
+         */
+        fun forBoarding(first: Boolean, plan: DayPlan?, target: Schedule?): MemoNote {
+            val targetCare = target?.careItem()
+            if (!first) return targetCare?.let { Care(listOf(it)) } ?: None
+            val day = plan?.let { p -> p.schedules.filter { it.allDay } + p.pending() }.orEmpty()
+            val others = day.filter { it.id != target?.id }.sortedBy { it.start }.mapNotNull { it.careItem() }
+            val items = listOfNotNull(targetCare) + others
+            return if (items.isEmpty()) of(target?.memo) else Care(items)
+        }
+
+        private fun Schedule.careItem(): CareItem? = care?.trim()?.takeIf { it.isNotEmpty() }?.let { CareItem(title, it) }
+
         /** 9장 챙기기: 메모가 한 줄이고 30자 이하면 그대로 읽는다. */
         fun of(memo: String?): MemoNote {
             val text = memo?.trim().orEmpty()
@@ -113,7 +138,7 @@ object BoardingDecider {
             remainingToday = current?.pending()?.size ?: 0,
             upcoming = current?.pending().orEmpty(),
             allDayTitle = if (kind == BoardingKind.FIRST) current?.allDayTitle() else null,
-            memo = if (kind == BoardingKind.FIRST) MemoNote.of(target?.memo) else MemoNote.None,
+            memo = MemoNote.forBoarding(kind == BoardingKind.FIRST, current, target),
             fromFallback = plan != null && planIsFallback,
         )
         return BoardingDecision.Card(briefing, question(now, target, travelTime, favorites))

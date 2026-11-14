@@ -204,6 +204,7 @@ describe('/schedules/today·places의 출처', () => {
       end: '2026-11-11T06:00:00.000Z',
       allDay: false,
       memo: null,
+      care: null,
       attendees: [],
     });
   });

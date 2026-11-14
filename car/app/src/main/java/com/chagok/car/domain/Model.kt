@@ -23,6 +23,8 @@ data class Schedule(
     /** 8장 장소 해석으로 좌표를 정한 곳. 아직 못 정했으면 null */
     val place: Place? = null,
     val memo: String? = null,
+    /** 폰 앱에서 이 일정에 적은 채비 한 줄. 캘린더에는 없고 차곡 서버에만 있다. 메모보다 먼저 읽는다. */
+    val care: String? = null,
     val attendees: List<String> = emptyList(),
     /** 종일 일정. 길안내 대상이 아니고 첫 탑승 인사에만 쓴다(screens.md). */
     val allDay: Boolean = false,

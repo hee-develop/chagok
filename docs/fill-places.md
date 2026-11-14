@@ -12,7 +12,8 @@
 실제 캘린더 연동에서는 반복 일정의 인스턴스 id(일정 id + 시작 시각 등)로 키를 바꿔야 합니다.
 
 - `GET /schedules/places`: 선택한 캘린더의 종일이 아닌 일정 전체를 시작순으로 반환합니다.
-  `{ anchor, schedules: [{ id, title, start, end, locationText, place, noTravel, noTravelReason, suggestion }] }`.
+  `{ anchor, schedules: [{ id, title, start, end, locationText, place, noTravel, noTravelReason, care, suggestion }] }`.
+  `care`는 앱에서 적은 채비 한 줄(없으면 `null`)이고 카드 아래 채비 줄과 `PUT /schedules/:id/care`는 `docs/care.md`를 따릅니다.
   `noTravelReason`은 서버가 온라인 회의·회의실이라 저절로 이동 없음으로 본 이유(`online`|`meetingRoom`)이고, 보정이 있거나 해당하지 않으면 `null`입니다(규칙은 `docs/calendar-sync.md`). 화면은 이유가 있는 이동 없음 카드를 흐리게 보이고 '이동 없음 · 온라인 회의'처럼 이유를 붙입니다.
   `place`는 `{ name, lat, lng } | null`입니다. 빈 개수는 `place === null && !noTravel`이며 후보가 있는 일정도 셉니다.
   `suggestion`은 `{ placeId, name } | null`로, 장소가 비고 이동 없음이 아닌 일정 중 제목이 기억한 장소와

@@ -16,3 +16,5 @@ export const MAX_LOCATION_LENGTH = 300;
 export const MAX_NOTES_LENGTH = 2000;
 export const MAX_ATTENDEES = 50;
 export const MAX_ATTENDEE_NAME_LENGTH = 100;
+/** 앱에서 적는 채비 한 줄의 길이 상한(글자). 차는 30자 이하면 그대로 읽고 길면 '채비가 있어요'만 말한다. */
+export const MAX_CARE_LENGTH = 100;

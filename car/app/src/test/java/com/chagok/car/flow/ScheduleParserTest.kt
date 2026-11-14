@@ -108,4 +108,18 @@ class ScheduleParserTest {
         // 자주 가는 곳 형식이 어긋나면 응답 전체를 실패로 본다(일정과 같은 규칙)
         assertTrue(runCatching { ScheduleParser.parseDay("""{"schedules":[],"favorites":[{"kind":"home"}]}""") }.isFailure)
     }
+
+    @Test fun `앱 채비를 읽고 없으면 null이다`() {
+        val body = """
+            {"schedules":[
+              {"id":"a","title":"KIA 직관","start":"2026-11-06T08:00:00.000Z","end":"2026-11-06T11:00:00.000Z",
+               "allDay":false,"locationText":null,"place":null,"memo":null,"care":"유니폼·응원봉·티켓","attendees":[]},
+              {"id":"b","title":"점심","start":"2026-11-06T04:00:00.000Z","end":"2026-11-06T05:00:00.000Z",
+               "allDay":false,"locationText":null,"place":null,"memo":"메모","attendees":[]}
+            ]}
+        """.trimIndent()
+        val (a, b) = ScheduleParser.parse(body)
+        assertEquals("유니폼·응원봉·티켓", a.care)
+        assertNull(b.care)
+    }
 }

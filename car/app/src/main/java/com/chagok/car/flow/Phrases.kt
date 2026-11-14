@@ -7,6 +7,7 @@ import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.MemoNote
 import com.chagok.car.domain.Question
+import com.chagok.car.domain.Rules
 import com.chagok.car.domain.Schedule
 import com.chagok.car.ui.CandidateRow
 import com.chagok.car.ui.CardContent
@@ -187,6 +188,7 @@ object Phrases {
     fun greetingSub(target: Schedule, memo: MemoNote): String = when (memo) {
         is MemoNote.ReadAloud -> "${target.title} 메모에 ‘${memo.text}’${iGaJosa(memo.text)} 있어요. $ASK_DEPART"
         MemoNote.HasMemo -> "${target.title} 메모가 있어요. $ASK_DEPART"
+        is MemoNote.Care -> "${careSentence(memo)} $ASK_DEPART"
         MemoNote.None -> ASK_DEPART
     }
 
@@ -329,8 +331,31 @@ object Phrases {
         val rows = briefing.upcoming.take(MAX_TILE_ROWS)
             .mapIndexed { i, s -> TileRow(time(s, zone), s.title, next = i == 0) }
         if (rows.isNotEmpty()) tiles += TileView.Schedules(rows)
-        (briefing.memo as? MemoNote.ReadAloud)?.let { tiles += TileView.Care(careItems(it.text)) }
+        when (val memo = briefing.memo) {
+            is MemoNote.ReadAloud -> tiles += TileView.Care(careItems(memo.text))
+            is MemoNote.Care -> tiles += TileView.Care(careItems(careText(memo)).distinct())
+            MemoNote.HasMemo, MemoNote.None -> Unit
+        }
         return tiles
+    }
+
+    /** 앱 채비를 이어 붙인 글. 일정마다의 채비를 '·'로 잇는다. */
+    private fun careText(care: MemoNote.Care) = care.items.joinToString("·") { it.text }
+
+    /**
+     * 앱 채비 문장. 한 일정이면 "{일정} 채비는 ‘…’이에요.", 여러 일정이면 "오늘 채비는 ‘…’이에요."
+     * 읽을 글이 30자([Rules.MEMO_READ_MAX_CHARS])를 넘으면 있다고만 말하고 항목은 채비 타일에 둔다.
+     */
+    fun careSentence(care: MemoNote.Care): String {
+        val text = careText(care)
+        val single = care.items.singleOrNull()
+        val short = text.length <= Rules.MEMO_READ_MAX_CHARS
+        return when {
+            single != null && short -> "${single.title} 채비는 ${iEyo("‘$text’")}."
+            single != null -> "${single.title} 채비가 있어요."
+            short -> "오늘 채비는 ${iEyo("‘$text’")}."
+            else -> "오늘 챙길 채비가 있어요."
+        }
     }
 
     /** 메모를 채비 태그로 나눈다: '·', ',', '/' 로 끊고, 구분이 없으면 메모 전체가 하나. */
