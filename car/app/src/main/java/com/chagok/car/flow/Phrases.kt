@@ -63,6 +63,9 @@ object Phrases {
     const val WORK = "회사"
     const val DUCKING = "차곡 안내 중 · 볼륨을 잠깐 낮췄어요"
 
+    /** 주행 중 다음 일정 칩(NextChip)의 앞 글자. 뒤에 [nextChipBody]가 붙는다. */
+    const val NEXT_CHIP_LABEL = "다음"
+
     // 권한 설명 카드
     const val PERMISSION_VOICE = "기어와 시동 상태를 쓸게요."
     const val PERMISSION_SUB = "차가 멈췄는지, 시동이 켜졌는지 알려면 필요해요."
@@ -83,6 +86,9 @@ object Phrases {
 
     /** 타일의 24시간제 시각 "13:00" */
     fun time(schedule: Schedule, zone: ZoneId): String = TIME.format(schedule.start.atZone(zone))
+
+    /** 주행 중 다음 일정 칩의 본문 "13:00 육전집 점심"(24시간제 시각 + 제목). 화면에는 앞에 [NEXT_CHIP_LABEL]이 붙는다. 도착 예정은 내비 몫이라 넣지 않는다. */
+    fun nextChipBody(target: Schedule, zone: ZoneId): String = "${time(target, zone)} ${target.title}"
 
     /** 말하는 12시간제 시각. 오전·오후 없이 "1시", "2시 40분". 0시와 12시는 "12시". */
     fun spokenTime(instant: Instant, zone: ZoneId): String {

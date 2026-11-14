@@ -56,6 +56,18 @@ sealed interface Event {
     /** STT 결과. 아무것도 못 들었으면 빈 문자열. */
     data class Heard(val text: String) : Event
 
+    /**
+     * 대상 일정이 끝나는 시각이 됐다. 주행 중 이벤트 없이 시간만 흘러도 칩이 건너뜀을 반영하고 다음 일정으로 바뀌게 한다.
+     * [timerId]가 지금 예약된 것이 아니면(칩이 바뀌거나 숨겨져 낡은 타이머) 무시한다.
+     */
+    data class ChipRecheck(val timerId: Int) : Event
+
+    /**
+     * 기기 시각·시간대가 바뀌었거나(데모 시계 포함) 시계가 건너뛰었다. 예약해 둔 칩 재판단 시각이 낡았으므로 다시 판단·예약하게 한다.
+     * 이 이벤트만으로 탑승 판단 등 다른 동작은 일어나지 않는다.
+     */
+    data object ClockChanged : Event
+
     /** 결과 한 줄을 보인 지 [Rules.RESULT_VISIBLE]이 지났다. */
     data class ResultTimedOut(val timerId: Int) : Event
 
@@ -118,6 +130,18 @@ sealed interface Effect {
     /** 카드를 접은 뒤에도 남기는 결과 한 줄. 빈 문자열이면 지운다. */
     data class ShowResult(val text: String) : Effect
 
+    /**
+     * 주행 중 다음 일정 칩의 본문("13:00 육전집 점심"). 빈 문자열이면 숨긴다.
+     * 칩 내용이 바뀔 때만 낸다. 표시 전용이라 말·소리가 없다.
+     */
+    data class ShowNextChip(val text: String) : Effect
+
+    /**
+     * [delay] 뒤에 [Event.ChipRecheck]을 넣는다. 칩이 보이는 동안 대상 일정이 끝나는 시각에 맞춘다.
+     * 칩이 바뀌어 시각이 달라지거나 숨겨지면 이전 [timerId]는 무시된다.
+     */
+    data class ScheduleChipRecheck(val timerId: Int, val delay: Duration) : Effect
+
     /** [delay] 뒤에 [Event.ResultTimedOut]을 넣는다. */
     data class ScheduleResultTimeout(val timerId: Int, val delay: Duration) : Effect
 
@@ -166,6 +190,15 @@ class DriveSession(
     private var statuses: Map<String, ScheduleStatus> = emptyMap()
     private var statusDate: LocalDate = today()
     private var lastSaved: Snapshot? = null
+
+    /** 마지막으로 내보낸 다음 일정 칩 본문. 빈 문자열은 숨김. */
+    private var shownChip = ""
+
+    /** 예약해 둔 칩 재판단 타이머. 칩이 숨겨지면 null이라 낡은 타이머 이벤트는 무시된다. */
+    private var chipTimerId: Int? = null
+
+    /** [chipTimerId]가 맞춘 시각(대상 일정 끝). 같은 시각이면 다시 예약하지 않는다. */
+    private var chipDeadline: Instant? = null
 
     /** 이벤트 하나를 처리하는 동안 쓰는 오늘 일정과 그 출처. 이벤트마다 한 번만 읽는다. */
     private var schedules: List<Schedule> = emptyList()
@@ -299,6 +332,10 @@ class DriveSession(
             }
             is Event.TravelTimeResult -> onTravelTime(event, out)
             is Event.RouteRequestResult -> onRouteResult(event.ok, out)
+            // 건너뜀은 위에서 이미 반영했다. 타이머가 조금 일찍 와도 다시 예약되게 맞춘 시각을 비운다.
+            is Event.ChipRecheck -> if (chipTimerId == event.timerId) chipDeadline = null
+            // 시계가 건너뛰었으니 예약해 둔 시각이 낡았다. flush의 syncChip이 다시 판단·예약한다.
+            Event.ClockChanged -> chipDeadline = null
             is Event.ResultTimedOut -> if (resultTimerId == event.timerId) clearResult(out)
             is Event.Heard -> onHeard(event.text, out)
             Event.PrimaryPressed -> onButton(primary = true, out)
@@ -745,13 +782,50 @@ class DriveSession(
         heldBoarding = false
         noticeSpokenOn = null
         drivenSincePark = false
+        // 데모 시계가 바뀌었을 수 있어 칩 재판단 시각을 다시 맞춘다.
+        chipDeadline = null
         if (card != null) closeCard(out, instant = true) else out += Effect.StopVoice
         resultTimerId = null
         out += Effect.ShowResult("")
     }
 
+    /**
+     * 다음 일정 칩을 지금 상태에 맞춘다. 주행 중이고 연결돼 있고 Suspend가 아니며 다음 일정([DayPlan.target]: 도착·건너뜀·종일 제외)이
+     * 있을 때만 칩이 있고, 일정이 도착이 되면 다음 일정으로 바뀐다. 정차하면 같은 처리에서 바로 숨긴다.
+     *
+     * 일정을 받는 중([loadingSchedules])에는 칩을 바꾸지 않는다: 그동안은 캐시가 이전 기준 시각의 것일 수 있어
+     * 건너뜀·날짜 넘김 처리를 미루므로([handle]) 낡은 일정을 칩에 올리지 않으려는 것이다. 받기가 끝나는 이벤트에서 다시 맞춘다.
+     * 칩을 보일 수 없는 상태(정차·미연결·Suspend)로 바뀌면 받는 중에도 숨긴다.
+     *
+     * 이벤트 없이 시간만 흘러도 맞도록, 칩이 보이는 동안 대상 일정이 끝나는 시각에 [Effect.ScheduleChipRecheck]를 낸다.
+     * 자정은 따로 깨우지 않는다: 자정을 넘겨도 아직 끝나지 않은 일정은 [rollDate]가 남겨 칩이 그대로이기 때문이다.
+     */
+    private fun syncChip(out: MutableList<Effect>) {
+        val visible = motion() == Motion.DRIVING && paired && !suspended
+        if (visible && loadingSchedules) return
+        val target = if (visible) plan().target() else null
+        val chip = target?.let { Phrases.nextChipBody(it, zone) } ?: ""
+        if (chip != shownChip) {
+            shownChip = chip
+            out += Effect.ShowNextChip(chip)
+        }
+        if (target == null) {
+            chipTimerId = null
+            chipDeadline = null
+            return
+        }
+        val deadline = target.end
+        if (deadline == chipDeadline) return
+        chipDeadline = deadline
+        val id = ++seq
+        chipTimerId = id
+        // 일부러 조금 늦게 깨워, 끝 시각 직후에 건너뜀 판정이 서게 한다(타이머 오차로 일찍 깨 헛돌지 않게).
+        out += Effect.ScheduleChipRecheck(id, Duration.between(now(), deadline).coerceAtLeast(Duration.ZERO) + CHIP_RECHECK_SLACK)
+    }
+
     /** 저장은 매 이벤트 끝에 바뀐 것만 내보낸다. Suspend 진입 때는 바뀌지 않았어도 저장한다. */
     private fun flush(out: MutableList<Effect>) {
+        syncChip(out)
         val snap = snapshot()
         if (snap != lastSaved || forceSave) {
             forceSave = false
@@ -760,7 +834,10 @@ class DriveSession(
         }
     }
 
-    private companion object {
-        const val AWAITING_GENERATION = -1
+    companion object {
+        private const val AWAITING_GENERATION = -1
+
+        /** 칩 재판단 타이머를 끝 시각보다 이만큼 늦게 깨운다. */
+        val CHIP_RECHECK_SLACK: Duration = Duration.ofMillis(500)
     }
 }

@@ -32,7 +32,8 @@ Pleos Connect(현대차그룹 AAOS 기반 인포테인먼트) 차량 앱 사이�
 - 탑승 브리핑, 출발 제안 → 길안내(수락·보류·거절·듣기 8초·늦게 탐도 출발 제안과 같이 묻기·후보 고르기)까지 들어가 있습니다.
 - '어디로 갈까요?' 후보: 폰에서 저장한 자주 가는 곳을 `GET /schedules/today`의 `favorites`로 받아 일정 없음·여유 많음 카드에 후보 타일(최대 3줄)로 보이고, 1번 후보가 주 버튼이다. 줄 누름·이름·"첫/두/세 번째"로 고른다. 계약은 `docs/destination-candidates.md`.
 - 도착 판단 → 다음 일정: 내비 목적지 도착 알림(차곡이 길안내한 일정) 또는 P단 + 대상 일정 장소 300m 안(위치는 내비에 묻는다)이면 도착으로 바꾸고, 잠깐 정차(10분)가 지나 다시 타면 다음 일정을 한 줄로 묻는다(재탑승). 도착 순간에는 말하지 않는다. 계약은 `docs/arrival.md`.
-- 아직 없음(다음 기능): 주행 중 다음 일정 칩, 하차 카드(하차 체크), 장소 키워드 검색.
+- 주행 중 다음 일정 칩(`NextChip`, main·release 포함): `DriveSession`이 주행(motion=DRIVING)이라고 판단하고 폰과 연결돼 있고 Suspend가 아니며 다음 일정(`DayPlan.target()`: 도착·건너뜀·종일 제외)이 있을 때만 창 왼쪽 위(카드 열 밖, 여백 24)에 "다음 13:00 육전집 점심"을 정적인 글자로 보인다("다음"과 본문은 별도 글자, 간격 12). 정차하면 같은 이벤트에서 바로 숨기고, 도착하면 다음 일정으로 바뀐다. 이벤트 없이 시간만 흘러도 맞도록 칩이 보이는 동안 `Effect.ScheduleChipRecheck`(대상 일정이 끝나는 시각, `SessionHost`가 postDelayed → `Event.ChipRecheck`, 기기·데모 시계가 바뀌면 `Event.ClockChanged`로 다시 예약)로 다시 판단하고, 칩이 바뀌거나 숨겨지면 이전 타이머는 ID가 달라 무시된다. 일정을 받는 중(`ScheduleLoading`~`ScheduleLoaded`, 탑승 판단 중 다시 받기 포함)에는 칩을 바꾸지 않는다(정차·미연결·Suspend 숨김은 예외). 표시 전용이라 누를 수 없고 말·소리·애니메이션이 없다(주행 규제). 상태는 `Effect.ShowNextChip` → `UiState.nextChip`, 문구는 `Phrases.nextChipBody`다. 도착 예정은 시안 칩에 없고 내비 몫이라 넣지 않았다. 계약은 `docs/next-chip.md`.
+- 아직 없음(다음 기능): 하차 카드(하차 체크), 장소 키워드 검색.
 - debug 빌드의 `chagok-debug://signal`로 휴대폰 연결(`paired`, 기존 flow는 `paired=true`로 시작)·소요 시간(`trip`)·경로 요청 결과(`route`)·들은 말(`heard`)·현재 위치(`loc`)·내비 도착(`arrived`)을 주입해 회사망에서도 E2E가 돕니다. 실제 내비와 음성 인식은 `docs/sdk-check.md`의 수동 확인 목록입니다.
 
 ## Pleos 설계 가이드 점검

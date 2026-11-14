@@ -38,7 +38,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- 주행 중에는 카드를 접고 화면에 아무것도 말하거나 띄우지 않으므로 DO로 선언한다 -->
+            <!-- 주행 중에는 카드를 접고 말하지 않으며, 남는 것은 누를 수 없는 정적 한 줄 칩뿐이라 DO로 선언한다 -->
             <meta-data
                 android:name="distractionOptimized"
                 android:value="true" />
