@@ -618,7 +618,7 @@ describe('POST /energy/options 속도 제한', () => {
   it('주소별로 따로 센다', async () => {
     const c = clock();
     let who = 'a';
-    const app = newApp({ now: c.now, energyRateLimit: { limit: 2, windowMs: 60_000 }, energyClientKey: () => who });
+    const app = newApp({ now: c.now, energyRateLimit: { limit: 2, windowMs: 60_000 }, clientAddress: () => who });
     expect([(await post(app, body)).status, (await post(app, body)).status, (await post(app, body)).status]).toEqual([200, 200, 429]);
     who = 'b';
     expect((await post(app, body)).status).toBe(200);
@@ -626,7 +626,7 @@ describe('POST /energy/options 속도 제한', () => {
 
   it('창 안에 남은 시간만큼 Retry-After를 준다', async () => {
     const c = clock();
-    const app = newApp({ now: c.now, energyRateLimit: { limit: 1, windowMs: 60_000 }, energyClientKey: () => 'a' });
+    const app = newApp({ now: c.now, energyRateLimit: { limit: 1, windowMs: 60_000 }, clientAddress: () => 'a' });
     await post(app, body);
     c.advance(45_000);
     expect(Number((await post(app, body)).headers.get('retry-after'))).toBe(15);
@@ -634,7 +634,7 @@ describe('POST /energy/options 속도 제한', () => {
 
   it('잘못된 요청도 횟수에 센다(검증 전에 막는다)', async () => {
     const c = clock();
-    const app = newApp({ now: c.now, energyRateLimit: { limit: 1, windowMs: 60_000 }, energyClientKey: () => 'a' });
+    const app = newApp({ now: c.now, energyRateLimit: { limit: 1, windowMs: 60_000 }, clientAddress: () => 'a' });
     expect((await post(app, { fuel: 'nope' })).status).toBe(400);
     expect((await post(app, body)).status).toBe(429);
   });

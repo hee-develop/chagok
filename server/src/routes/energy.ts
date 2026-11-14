@@ -1,4 +1,3 @@
-import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
@@ -7,6 +6,7 @@ import { findEnergyOptions, type EnergyRequest } from '../energy/options.js';
 import { createRateLimiter } from '../energy/rateLimit.js';
 import type { EnergySources, FuelKind, LatLng } from '../energy/types.js';
 import { MAX_BODY_BYTES } from '../limits.js';
+import { connectionAddress } from '../seatScope.js';
 import { parseAt } from '../time.js';
 
 const FUELS: FuelKind[] = ['ev', 'gasoline', 'diesel', 'hybrid'];
@@ -59,21 +59,12 @@ export type EnergyRouteOptions = {
   totalTimeoutMs?: number;
   /** 요청 주소별 속도 제한(창 안 최대 횟수·창 길이 ms). 기본은 분당 20회. */
   rateLimit?: { limit?: number; windowMs?: number };
-  /** 요청 주소를 정하는 함수. 기본은 연결의 원격 주소(프록시 헤더는 믿지 않는다). 테스트에서 바꾼다. */
+  /** 요청 주소를 정하는 함수. 기본은 연결의 원격 주소(`connectionAddress`, 프록시 헤더는 믿지 않는다). `createApp`은 `clientAddress`를 넘긴다. */
   clientKey?: (c: Context) => string;
 };
 
-/** 원격 주소. node 서버가 아닌 환경(app.request 등)에서는 알 수 없어 한 묶음으로 본다. */
-export const remoteAddress = (c: Context): string => {
-  try {
-    return getConnInfo(c).remote.address ?? 'unknown';
-  } catch {
-    return 'unknown';
-  }
-};
-
 // RPC 타입 추론을 위해 체이닝을 유지한다.
-export const createEnergyRoute = (sources: EnergySources, { now, onError = defaultOnError, totalTimeoutMs, rateLimit, clientKey = remoteAddress }: EnergyRouteOptions) => {
+export const createEnergyRoute = (sources: EnergySources, { now, onError = defaultOnError, totalTimeoutMs, rateLimit, clientKey = connectionAddress }: EnergyRouteOptions) => {
   const limiter = createRateLimiter({
     limit: rateLimit?.limit ?? ENERGY_RATE_LIMIT_PER_WINDOW,
     windowMs: rateLimit?.windowMs ?? ENERGY_RATE_LIMIT_WINDOW_MS,

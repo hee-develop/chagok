@@ -64,10 +64,8 @@ export type AppOptions = {
   onEnergyError?: (error: unknown) => void;
   /** 에너지 후보 전체 제한 시간(ms). 테스트에서만 바꾼다. */
   energyTimeoutMs?: number;
-  /** `POST /energy/options`의 요청 주소별 속도 제한. 기본 분당 20회. 테스트에서 바꾼다. */
+  /** `POST /energy/options`의 요청 주소별 속도 제한. 기본 분당 20회. 요청 주소는 `clientAddress`(코드 시도 제한과 같은 판정)다. 테스트에서 바꾼다. */
   energyRateLimit?: { limit?: number; windowMs?: number };
-  /** `POST /energy/options`의 요청 주소를 정하는 함수. 테스트에서만 바꾼다. */
-  energyClientKey?: (c: Context) => string;
 };
 
 export const createApp = ({
@@ -91,7 +89,6 @@ export const createApp = ({
   onEnergyError,
   energyTimeoutMs,
   energyRateLimit,
-  energyClientKey,
 }: AppOptions) => {
   // 일정·선택·자주 가는 곳·가족 요청·보정·채비는 운전자 자리마다 따로 쌓인다. 토큰 없이 기기 id만 있는 폰은 그 기기의 연결 전 버킷을,
   // 식별이 전혀 없는 요청은 기본 자리를 쓴다(픽스처·데모·차량 E2E 경로).
@@ -114,7 +111,7 @@ export const createApp = ({
     .route('/drivers', createDriversRoute(seats))
     .route('/presence', createPresenceRoute(seats))
     .route('/car', createCarRoute(seats))
-    .route('/energy', createEnergyRoute(energy, { now, onError: onEnergyError, totalTimeoutMs: energyTimeoutMs, rateLimit: energyRateLimit, clientKey: energyClientKey }))
+    .route('/energy', createEnergyRoute(energy, { now, onError: onEnergyError, totalTimeoutMs: energyTimeoutMs, rateLimit: energyRateLimit, clientKey: clientAddress }))
     .route('/schedules', createSchedulesRoute(fixture, calendars, places, guard, { members: familyMembers }, now));
 };
 
