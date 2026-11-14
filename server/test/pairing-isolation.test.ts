@@ -558,8 +558,9 @@ describe('F. 남용 방지 (S7)', () => {
 
   it('버킷 하나의 일정 크기 상한을 넘기는 PUT /events는 429 capacity이다', async () => {
     const app = makeApp();
-    const attendees = Array.from({ length: 30 }, (_, i) => `${i}`.padEnd(100, 'a'));
-    const huge = Array.from({ length: 120 }, (_, i) => ev({ id: `h${i}`, title: 'x'.repeat(190), notes: 'n'.repeat(2000), attendees }));
+    // 참석자 이름은 더는 저장하지 않으므로 필드 상한(제목·장소 칸·메모·연락 상대)을 꽉 채운 일정 200건으로 버킷 상한(512KB)을 넘긴다.
+    const contacts = ['a'.repeat(100), 'b'.repeat(100)];
+    const huge = Array.from({ length: 200 }, (_, i) => ev({ id: `h${i}`, title: 'x'.repeat(190), locationText: 'l'.repeat(290), notes: 'n'.repeat(2000), contacts }));
     expect(JSON.stringify(huge).length).toBeGreaterThan(MAX_EVENT_BYTES_PER_BUCKET);
     expect(JSON.stringify({ events: huge }).length).toBeLessThan(MAX_EVENTS_BODY_BYTES);
     expect(await putEvents(app, { device: DEV_A }, huge)).toMatchObject({ status: 429, body: { reason: 'capacity' } });

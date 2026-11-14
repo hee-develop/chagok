@@ -1,8 +1,8 @@
 import { api } from '../../api/client';
 import { HttpError } from '../../api/request';
-import type { DeviceEvent } from '../calendar-select/calendarSource';
+import type { WireEvent } from './wireEvent';
 
-export type SendEvents = (events: DeviceEvent[], signal: AbortSignal) => Promise<unknown>;
+export type SendEvents = (events: WireEvent[], signal: AbortSignal) => Promise<unknown>;
 
 /** 오늘·내일 일정 전체를 서버에 바꿔 넣는다(PUT /events). */
 export const putEvents: SendEvents = async (events, signal) => {

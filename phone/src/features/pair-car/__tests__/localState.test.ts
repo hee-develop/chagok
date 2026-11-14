@@ -50,6 +50,7 @@ describe('clearLocalCarState', () => {
     const filtered = createFilteredEventsStore();
     filtered.set([{ id: 'x', title: '회의', start: 'a', end: 'b', reason: 'online' } as never]);
     const sync = createEventSync({
+      contacts: { prepare: async () => null },
       source: { kind: 'device', list: async () => [], listEvents: async () => [] } as CalendarSource,
       fetchSelection: jest.fn().mockResolvedValue({ selectedIds: null, source: null }),
       send: jest.fn().mockResolvedValue({}),
@@ -132,6 +133,7 @@ describe('EventSync.reset', () => {
     const send = jest.fn().mockResolvedValue({});
     const saveSelection = jest.fn().mockResolvedValue({});
     const sync = createEventSync({
+      contacts: { prepare: async () => null },
       source: { kind: 'device', list: async () => [], listEvents: async () => [event()] } as CalendarSource,
       fetchSelection, send, saveSelection, fetchReceivedAt: jest.fn().mockResolvedValue('2026-11-11T00:00:00.000Z'), log: jest.fn(),
       now: () => new Date(1_000_000),
@@ -195,6 +197,7 @@ describe('EventSync.hold', () => {
     const fetchSelection = jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' });
     const send = jest.fn().mockResolvedValue({});
     const sync = createEventSync({
+      contacts: { prepare: async () => null },
       source: { kind: 'device', list: async () => [], listEvents: async () => [event()] } as CalendarSource,
       fetchSelection, send, saveSelection: jest.fn(), fetchReceivedAt: jest.fn().mockResolvedValue(null), log: jest.fn(), now: () => new Date(1_000_000),
     });

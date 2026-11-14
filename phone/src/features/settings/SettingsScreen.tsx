@@ -7,6 +7,7 @@ import { Card, ErrorBlock, LoadingBlock, OutlineButton, Section } from '../../ui
 import { TabScreen } from '../../ui/TabScreen';
 import { colors, useFont } from '../../ui/theme';
 import { defaultContactsSource, type ContactsSource } from '../contacts/contactsSource';
+import { appEventSync } from '../calendar-sync/eventSync';
 import { useContactsPermission } from '../contacts/useContactsPermission';
 import type { PairingApi } from '../pair-car/pairingApi';
 import { carConnectionSource, useCarConnection, type CarConnectionSource } from '../today/carConnection';
@@ -18,6 +19,9 @@ import { SettingSwitches } from './SettingSwitches';
 import { settingsApi, type SettingsApi } from './settingsApi';
 import { useSettings } from './useSettings';
 
+/** 일정을 다시 읽어 서버로 보낸다(연락 상대를 새로 찾거나 지운 채로). */
+const runEventSync = () => { void appEventSync.run(); };
+
 type Props = {
   connectionSource?: CarConnectionSource;
   permissionsSource?: PermissionsSource;
@@ -26,7 +30,7 @@ type Props = {
   pairing?: Pick<PairingApi, 'disconnect'>;
   contactsSource?: ContactsSource;
   timeoutMs?: number;
-  /** 늦을 때 연락을 켜거나 끄고 연락처 권한 결정까지 끝난 뒤 부른다(일정을 다시 읽어 상대를 찾게 한다). */
+  /** 늦을 때 연락을 켜거나 끄고 연락처 권한 결정까지 끝난 뒤 부른다. 기본은 일정을 다시 읽어 보내 상대를 찾거나(켠 경우) 지운다(끈 경우). */
   onLateContactChanged?: () => void;
 };
 
@@ -43,7 +47,7 @@ export function SettingsScreen({
   pairing,
   contactsSource = defaultContactsSource,
   timeoutMs = REQUEST_TIMEOUT_MS,
-  onLateContactChanged,
+  onLateContactChanged = runEventSync,
 }: Props) {
   const router = useRouter();
   const font = useFont();
@@ -57,7 +61,7 @@ export function SettingsScreen({
     onSaved: (key, value) => {
       if (key !== 'lateContact') return;
       // 켜면 연락처 권한을 묻는다(처음 한 번만 창이 뜬다). 끝나면 일정을 다시 읽어 상대를 찾거나(켠 경우) 지우게(끈 경우) 알린다.
-      void (value ? contacts.request() : Promise.resolve()).finally(() => onLateContactChanged?.());
+      void (value ? contacts.request() : Promise.resolve()).finally(() => onLateContactChanged());
     },
   });
   const openPlaces = () => router.navigate('/places');

@@ -339,8 +339,9 @@ appId: ${APP_ID}
 - assertNotVisible: '건너뛰기'
 - takeScreenshot: 09-pair-from-tab
 - back
+# 돌아온 설정 탭은 스크롤 위치가 남아 있어 맨 위 안내가 안 보일 수 있다. 연결 입구로 돌아온 것을 확인한다.
 - extendedWaitUntil:
-    visible: '주행 중에는 차곡이 먼저 말하지 않아요.'
+    visible: '차 연결하기'
     timeout: 15000
 
 # 11) 캘린더 고르기 입구도 단계 표시('1 / 5') 없이 열리고 [닫기]로 설정 탭에 돌아온다.
@@ -358,7 +359,7 @@ appId: ${APP_ID}
 - takeScreenshot: 10-calendar-from-tab
 - tapOn: '닫기'
 - extendedWaitUntil:
-    visible: '주행 중에는 차곡이 먼저 말하지 않아요.'
+    visible: '캘린더 고르기'
     timeout: 15000
 
 # 12) 차 연결 끊기(정책 10.9): 차와 연결하면 설정 탭에 [차 연결 끊기]가 생기고, 확인을 거쳐 끊으면 연결 전 상태로 돌아온다.

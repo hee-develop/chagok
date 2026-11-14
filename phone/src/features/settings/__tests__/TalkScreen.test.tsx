@@ -18,7 +18,7 @@ jest.mock('expo-router', () => {
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
 const renderWith = (ui: ReactElement) => render(<SafeAreaProvider initialMetrics={insets}>{ui}</SafeAreaProvider>);
 const setup = (props: Partial<React.ComponentProps<typeof TalkScreen>> = {}) =>
-  renderWith(<TalkScreen api={makeSettingsApi()} contactsSource={makeContacts('granted')} {...props} />);
+  renderWith(<TalkScreen api={makeSettingsApi()} contactsSource={makeContacts('granted')} onLateContactChanged={jest.fn()} {...props} />);
 
 beforeEach(() => mockPush.mockReset());
 

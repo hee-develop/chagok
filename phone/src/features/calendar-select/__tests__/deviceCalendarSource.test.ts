@@ -1,5 +1,5 @@
 import { CalendarPermissionError } from '../calendarSource';
-import { ATTENDEE_LOOKUP_LIMIT, deviceCalendarSource, isDefaultSelected, MAX_EVENTS } from '../deviceCalendarSource';
+import { ATTENDEE_LOOKUP_LIMIT, attendeeEmails, deviceCalendarSource, isDefaultSelected, MAX_EVENTS } from '../deviceCalendarSource';
 
 const mockCalendar = {
   getCalendarPermissionsAsync: jest.fn(),
@@ -198,7 +198,7 @@ describe('listEvents', () => {
     expect(mockCalendar.getEventsAsync).not.toHaveBeenCalled();
   });
 
-  it('제목·시작·종료·장소 칸·메모·참석자 이름만 서버 형식으로 옮긴다', async () => {
+  it('제목·시작·종료·장소 칸·메모와 참석자 이름·이메일을 옮긴다(참석자는 폰 안에서 연락 상대를 찾는 데만 쓰고 서버로 보내지 않는다)', async () => {
     mockCalendar.getEventsAsync.mockResolvedValue([raw()]);
     mockCalendar.getAttendeesForEventAsync.mockResolvedValue([
       { name: '김철수', email: 'kim@example.com' },
@@ -216,6 +216,7 @@ describe('listEvents', () => {
         locationText: '광주 육전집',
         notes: '자료 챙기기',
         attendees: ['김철수', '이영희'],
+        attendeeEmails: ['kim@example.com', 'nobody@example.com'],
       },
     ]);
   });
@@ -234,7 +235,7 @@ describe('listEvents', () => {
     mockCalendar.getEventsAsync.mockResolvedValue([raw({ location: '', notes: '  ' })]);
     mockCalendar.getAttendeesForEventAsync.mockRejectedValue(new Error('x'));
     const [event] = await deviceCalendarSource.listEvents(['1'], now);
-    expect(event).toMatchObject({ locationText: null, notes: null, attendees: [] });
+    expect(event).toMatchObject({ locationText: null, notes: null, attendees: [], attendeeEmails: [] });
   });
 
   it('종일 일정은 UTC 날짜를 서울 날짜 자정으로 바꾸고 끝은 다음 날 자정(미포함)', async () => {
@@ -264,5 +265,30 @@ describe('listEvents', () => {
   it('날짜를 읽을 수 없는 일정은 건너뛴다', async () => {
     mockCalendar.getEventsAsync.mockResolvedValue([raw({ startDate: 'garbage' }), raw({ id: '12' })]);
     expect((await deviceCalendarSource.listEvents(['1'], now)).map((e) => e.id.split('@')[0])).toEqual(['12']);
+  });
+});
+
+describe('attendeeEmails', () => {
+  it('소문자·중복 없음으로 모으고 본인·주최자·이메일 모양이 아닌 값은 뺀다', () => {
+    expect(
+      attendeeEmails(
+        [
+          { email: 'Kim@Example.com' },
+          { email: ' kim@example.com ' },
+          { email: 'me@example.com', isCurrentUser: true },
+          { email: 'ORG@example.com' },
+          { email: 'not-an-email' },
+          { email: '' },
+          {},
+          { email: 'lee@example.com' },
+        ],
+        'org@example.com',
+      ),
+    ).toEqual(['kim@example.com', 'lee@example.com']);
+  });
+
+  it('참석자 상한(50명)까지만 모은다', () => {
+    const many = Array.from({ length: 80 }, (_, i) => ({ email: `p${i}@example.com` }));
+    expect(attendeeEmails(many)).toHaveLength(50);
   });
 });

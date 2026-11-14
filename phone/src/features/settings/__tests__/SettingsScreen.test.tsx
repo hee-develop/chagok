@@ -26,6 +26,7 @@ const setup = (props: Partial<React.ComponentProps<typeof SettingsScreen>> = {})
       permissionsSource={makePermissions()}
       settingsApi={makeSettingsApi()}
       contactsSource={makeContacts('granted')}
+      onLateContactChanged={jest.fn()}
       {...props}
     />,
   );

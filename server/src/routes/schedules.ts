@@ -37,7 +37,10 @@ type Row = {
   /** 애매한 기억(`ambiguous: true`)은 확정하지 않고 확인 필요로만 내린다. 아니면 null. */
   memorySuggestion: MemorySuggestion | null;
   memo: string | null;
+  /** 옛 차 앱 호환 필드: 픽스처 일정의 값이고 폰 일정에서는 늘 빈 목록이다(참석자 이름은 저장하지 않는다, 정책서 11장). */
   attendees: string[];
+  /** 폰이 미리 찾아 둔 연락 상대 표시 이름(0~2개). 픽스처 일정은 빈 목록이다. */
+  contacts: string[];
   /** 온라인 회의·건물 안이라 저절로 '이동 없음'인 이유. 종일 일정은 거르지 않는다(차가 첫 탑승 인사에 이름을 쓴다). 보정(장소 넣기·이동 없음)이 있으면 보정이 이긴다. */
   autoNoTravel: NoTravelReason | null;
   /**
@@ -132,6 +135,7 @@ export const createSchedulesRoute = (
           memorySuggestion: memory?.memorySuggestion ?? null,
           memo: s.memo,
           attendees: s.attendees,
+          contacts: [],
           autoNoTravel: s.allDay ? null : detectNoTravel({ title: s.title, locationText: s.locationText, notes: s.memo }),
           skipped: !s.allDay && sc.data.skips.has(s.title),
         };
@@ -154,7 +158,8 @@ export const createSchedulesRoute = (
         placeMemory: memory.placeMemory,
         memorySuggestion: memory.memorySuggestion,
         memo: e.notes,
-        attendees: e.attendees,
+        attendees: [],
+        contacts: e.contacts,
         autoNoTravel: e.travelConfirmed || e.allDay ? null : detectNoTravel({ title: e.title, locationText: e.locationText, notes: e.notes }),
         skipped: !e.allDay && sc.data.skips.has(e.title),
       };
@@ -233,7 +238,7 @@ export const createSchedulesRoute = (
           const { noTravel: _, noTravelReason: _reason, corrected: _corrected, ...place } = view(d, s);
           const memorySuggestion = memorySuggestionOf(d, s);
           return {
-            ...place, ...memoryFlag(d, s), ...(memorySuggestion ? { suggestion: memorySuggestion } : {}), title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, care: d.cares.get(s.id) ?? null, attendees: s.attendees,
+            ...place, ...memoryFlag(d, s), ...(memorySuggestion ? { suggestion: memorySuggestion } : {}), title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, care: d.cares.get(s.id) ?? null, attendees: s.attendees, contacts: s.contacts,
           };
         }),
         // 도착 횟수는 명시 식별(폰 토큰·차 토큰 + driver)로 정해진 자리에서만 반영한다. 옛 호환 읽기(식별 없음·차 토큰만)와 기본 자리(데모·E2E)는 등록한 곳만 준다.
