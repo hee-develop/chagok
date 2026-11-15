@@ -3,7 +3,7 @@
   "note": "시연용 가상 충전소. 이름·좌표·상태는 실제와 무관하다. speed는 slow(완속)·fast(급속), state는 available·charging·unavailable·unknown.",
   "stations": [
     {
-      "stationId": "EX-GJ-001", "name": "예시 챔필 주차장 충전소", "address": "가상시 가상구 예시로 12", "lat": 35.1692, "lng": 126.887,
+      "stationId": "EX-GJ-001", "name": "챔필 옆 충전소", "address": "가상시 가상구 예시로 12", "lat": 35.1711, "lng": 126.8888,
       "operator": "예시충전", "parkingFree": true,
       "chargers": [
         { "chargerId": "01", "speed": "slow", "state": "available", "powerKw": 7 },

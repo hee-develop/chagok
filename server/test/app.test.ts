@@ -121,6 +121,14 @@ describe('GET /schedules/today 캘린더 선택 반영', () => {
     expect(doosan).toMatchObject({ title: 'KIA vs 두산', start: '2026-11-06T09:30:00.000Z', locationText: '광주-기아 챔피언스필드' });
   });
 
+  it('일정 장소의 별칭(alias)을 그대로 내려준다(차가 버튼·말에 짧은 이름으로 쓴다)', async () => {
+    const res = await newApp().request(`/schedules/today?at=${at}`);
+    const body = (await res.json()) as { schedules: { id: string; place: { name: string; alias?: string } | null }[] };
+    expect(body.schedules.find((x) => x.id === 'gwangju-kia')?.place).toMatchObject({ name: '광주-기아 챔피언스필드', alias: '챔필' });
+    // 별칭이 없는 장소는 필드가 없다
+    expect(body.schedules.find((x) => x.id === 'gwangju-lunch')?.place).not.toHaveProperty('alias');
+  });
+
   it('저장한 캘린더의 일정만 내려준다', async () => {
     const a = newApp();
     await select(a, ['mock-kia']);

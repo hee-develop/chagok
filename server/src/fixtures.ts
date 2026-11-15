@@ -77,6 +77,7 @@ function isPlace(v: unknown): boolean {
   return (
     !!p &&
     typeof p.name === 'string' &&
+    (p.alias === undefined || (typeof p.alias === 'string' && p.alias !== '')) &&
     typeof p.lat === 'number' &&
     Number.isFinite(p.lat) &&
     typeof p.lng === 'number' &&

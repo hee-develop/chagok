@@ -47,7 +47,7 @@
       "endOffsetMinutes": 670,
       "allDay": false,
       "locationText": "광주-기아 챔피언스필드",
-      "place": { "name": "광주-기아 챔피언스필드", "lat": 35.1681, "lng": 126.8888 },
+      "place": { "name": "광주-기아 챔피언스필드", "alias": "챔필", "lat": 35.1681, "lng": 126.8888 },
       "memo": null,
       "attendees": []
     },

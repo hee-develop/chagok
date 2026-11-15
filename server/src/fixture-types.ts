@@ -1,4 +1,5 @@
-export type PlaceFixture = { name: string; lat: number; lng: number };
+/** `alias`는 말·버튼에 쓰는 짧은 이름(예: 광주-기아 챔피언스필드 → 챔필). 없으면 차는 `name`을 쓴다. */
+export type PlaceFixture = { name: string; alias?: string; lat: number; lng: number };
 
 export type ScheduleFixture = {
   id: string;
@@ -35,6 +36,8 @@ export type MockCalendar = {
 export type MockPlace = {
   id: string;
   name: string;
+  /** 말·버튼에 쓰는 짧은 이름. 없으면 `name`. 일정 장소(`PlaceFixture.alias`)로 그대로 내려간다. */
+  alias?: string;
   address: string;
   lat: number;
   lng: number;
