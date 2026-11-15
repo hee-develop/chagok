@@ -3,11 +3,15 @@
 # 초기화(09:20)는 맨 처음 한 번뿐이고 그 뒤로는 데모 시계를 앞으로만 보낸다(advance):
 #   09:20 첫 탑승 브리핑 → 육전집 길안내 → 도착 하차 카드 → 13:30 재탑승(KIA 직관) → 도착 → 20:30 재탑승(콩물 픽업) → 도착 → 21:10 갈 곳 묻기(집) → 집 하차 카드
 # 단계마다 신호를 넣고 debug 빌드가 남기는 ChagokFlow 로그를 읽어 정책서 기준 기대 동작과 맞는지 ✓/✗로 알려 준다(docs/fake-navi.md).
-# 사용: pnpm demo:car   (에뮬레이터가 떠 있어야 한다. 화면은 직접 보면서 Enter로 넘긴다)
+# 사용: pnpm demo:car   (에뮬레이터가 떠 있어야 한다. 화면은 직접 보면서 Enter로 한 단계씩 넘긴다)
+#   각 단계는 "무엇을 볼지" 설명을 먼저 보이고 Enter를 기다린 뒤에야 신호를 넣는다. Enter 입력은 표준 입력이 아니라 /dev/tty에서 읽는다
+#   (pnpm 경유·파이프·표준 입력 상태와 무관). 터미널이 없으면(tty 없음) 안내하고 멈춘다. 그때는 DEMO_AUTO=1로 자동 진행한다.
+#   언제든 중단: Enter 대기에서 q+Enter, 어디서든 Ctrl-C(또는 TERM/HUP) 한 번. 주입값 되돌림·서버·logcat 종료·집 해제를 하고
+#   "중단했습니다"와 그때까지의 요약을 보인다. 정리 중에 또 눌러도 반쯤 정리된 채 끊기지 않는다(정리가 끝날 때까지 신호를 무시).
 # 환경 변수:
 #   ANDROID_SERIAL  대상 기기(기본 emulator-5554). adb는 항상 -s로 지정한다.
 #   DEMO_INSTALL=1  시작 전에 debug 앱을 설치한다.
-#   DEMO_AUTO=1     Enter를 기다리지 않고 바로 진행한다.
+#   DEMO_AUTO=1     Enter를 기다리지 않고 자동으로 끝까지 진행한다(tty 없이 돌릴 때). Ctrl-C로는 똑같이 중단된다.
 #   DEMO_EXTRA=1    이야기 뒤에 '추가 점검'을 붙인다(내비 도착 없이 위치만으로 일정 장소 도착, 집 하차 인사 '오늘도 수고했어요.', 같은 날 다시 들러도 말 없음).
 #                   이 점검들은 이어지는 하루에 못 넣어서 단계마다 상태를 초기화한다(시작할 때 화면에 알린다). 기본 실행은 이어지는 하루만 보인다.
 #   PORT            서버 포트(기본 8787). 이미 떠 있으면 그대로 쓰고, 없으면 tsx src/index.ts로 띄웠다가 끝날 때 내린다.
@@ -20,8 +24,15 @@
 # 같은 에뮬레이터를 다른 세션이 쓰는 중일 수 있어 그 에뮬레이터를 대상으로 한 Maestro가 돌고 있으면 멈춘다. 이 스크립트는 e2e-car.sh와 달리 flow를 돌리지 않는다.
 # 로그 문구는 car/app/src/debug/.../FlowLog.kt가 정한다. 바꾸면 아래 기대 패턴도 함께 고친다.
 set -uo pipefail
-# 백그라운드로 띄운 서버가 자기 프로세스 그룹을 갖도록 job control을 켠다(그룹 전체를 한 번에 종료하려고 쓴다)
-set -m
+# job control(set -m)은 서버를 띄우는 순간에만 켠다(서버가 자기 프로세스 그룹을 갖게 해 그룹째 종료하려고).
+# 스크립트 내내 켜 두면 포그라운드 명령(sleep·adb 등)이 터미널을 따로 받아 Ctrl-C가 bash에 안 닿고 trap이 안 돈다(아래 '중단 처리').
+
+# 한 단계씩 Enter로 넘기려면 터미널(/dev/tty)이 필요하다. 없으면 기기를 건드리기 전에 안내하고 끝낸다.
+if [ "${DEMO_AUTO:-}" != "1" ] && ! ( : </dev/tty ) 2>/dev/null; then
+  echo "이 실행에는 터미널(/dev/tty)이 없어 Enter로 한 단계씩 진행할 수 없습니다." >&2
+  echo "자동으로 끝까지 돌리려면 DEMO_AUTO=1 pnpm demo:car 로 실행하세요(터미널에서 직접 돌리면 Enter 단계 진행이 됩니다)." >&2
+  exit 2
+fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${PORT:-8787}"
@@ -43,6 +54,34 @@ if ! "${ADB[@]}" get-state >/dev/null 2>&1; then
   exit 1
 fi
 mkdir -p "$RUN_DIR"
+
+# ---- 단계 결과 기록·중단 처리에 쓰는 상태(정리·요약이 어느 시점에 불려도 안전하게 앞에서 정의한다) ----
+PASS_COUNT=0
+FAIL_COUNT=0
+SUMMARY=()
+STEP_NO=0
+PREV_START=0
+CURRENT_TITLE=""
+CURRENT_PHASE=""        # Enter 대기 | 진행 중
+INTERRUPTED=0
+ABORT_REASON=""
+NAP_PID=""
+CLEANED=0
+
+print_summary() {
+  echo
+  echo "━━ 요약"
+  if [ "${#SUMMARY[@]}" -gt 0 ]; then printf '%s\n' "${SUMMARY[@]}"; fi
+  echo "통과 $PASS_COUNT, 실패 $FAIL_COUNT"
+}
+
+# 신호를 받으면 바로 깨어나는 대기. 백그라운드 sleep을 wait로 기다리면 trap이 걸린 신호가 wait를 즉시 끝낸다(포그라운드 sleep은 끝나야 trap이 돈다).
+nap() {
+  sleep "$1" &
+  NAP_PID=$!
+  wait "$NAP_PID" 2>/dev/null
+  NAP_PID=""
+}
 
 # ---- 기기 시간대·서버·logcat 준비와 정리 (e2e-car.sh와 같은 방식) ----
 PREV_TZ="$("${ADB[@]}" shell getprop persist.sys.timezone | tr -d '\r')"
@@ -77,7 +116,7 @@ restore_timezone() {
 reset_injection() {
   [ "$APP_STARTED" = "1" ] || return 0
   "${ADB[@]}" shell "am start -a android.intent.action.VIEW -d 'chagok-debug://signal?trip=real&route=real&listen=real&navi=fake&drive=4.5&loc=real&exitcard=real'" </dev/null >/dev/null 2>&1 || true
-  sleep 1
+  nap 1
 }
 
 # 서버 자주 가는 곳의 집을 정한다(placeId가 null이면 지운다). 이 스크립트가 등록했을 때만 끝나면 지운다.
@@ -93,15 +132,66 @@ home_visible() {
     python3 -c 'import sys,json; sys.exit(0 if any(f.get("kind")=="home" for f in json.load(sys.stdin).get("favorites",[])) else 1)' 2>/dev/null
 }
 
+# 정리. 중단 때 정리 도중 Ctrl-C를 또 눌러도 끊기지 않게 정리 내내 INT·TERM·HUP을 무시한다(이 안에서 띄우는 명령도 같이 무시한다).
+# 중단(Ctrl-C·q·TERM)으로 끝나면 정리를 마친 뒤에 "중단했습니다"와 그때까지의 요약을 보인다.
+say() {
+  [ "$INTERRUPTED" = "1" ] || return 0
+  local ts
+  ts="$(date +%H:%M:%S)"
+  echo "   · $1" 2>/dev/null || true   # 터미널이 이미 닫혔어도(EIO) 정리는 계속한다
+  echo "$ts $1" >>"$RUN_DIR/cleanup.log" 2>/dev/null || true
+  return 0
+}
 cleanup() {
-  [ "$HOME_SET" = "1" ] && set_home null
-  reset_injection
-  [ -n "$LOGCAT_PID" ] && kill "$LOGCAT_PID" 2>/dev/null
+  trap '' INT TERM HUP
+  [ "$CLEANED" = "1" ] && return 0
+  CLEANED=1
+  if [ "$INTERRUPTED" = "1" ]; then echo; echo "== 정리 중입니다(끝날 때까지 잠시 기다려 주세요)" 2>/dev/null; echo "$(date +%H:%M:%S) 정리 시작: $ABORT_REASON" >>"$RUN_DIR/cleanup.log" 2>/dev/null; fi
+  [ -n "$NAP_PID" ] && kill "$NAP_PID" 2>/dev/null
+  if [ "$HOME_SET" = "1" ]; then set_home null; say "서버 자주 가는 곳의 집 등록 해제"; fi
+  if [ "$APP_STARTED" = "1" ]; then reset_injection; say "주입값 되돌림(trip·route·listen·drive·loc·exitcard 실제 값, navi 기본값 fake)"; fi
+  if [ -n "$LOGCAT_PID" ]; then kill "$LOGCAT_PID" 2>/dev/null; wait "$LOGCAT_PID" 2>/dev/null; say "logcat 종료"; fi
   restore_timezone
-  stop_server
+  say "기기 시간대 복원"
+  if [ -n "$SERVER_PGID" ]; then stop_server; say "이 스크립트가 띄운 서버 종료"; fi
+  if [ "$INTERRUPTED" = "1" ]; then
+    echo
+    echo "== 중단했습니다 ($ABORT_REASON)"
+    if [ -n "$CURRENT_TITLE" ]; then echo "   멈춘 곳: $STEP_NO) $CURRENT_TITLE ($CURRENT_PHASE)"; fi
+    print_summary
+    echo "   (중단했으므로 요약은 여기까지 본 단계만입니다. 휴대폰 연결 상태는 되돌리지 않습니다)"
+  fi
 }
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+
+# ---- 중단 처리 ----
+# Ctrl-C(INT)·TERM·HUP이 오면 표시를 남기고 exit한다. exit가 EXIT trap(cleanup)을 부른다.
+# bash는 포그라운드 명령이 끝나야 trap을 돌리지만, 터미널의 Ctrl-C는 같은 프로세스 그룹의 그 명령에게도 가서 바로 끝난다.
+# (kill -INT <bash pid>처럼 bash에만 보내도 긴 대기는 nap/wait로 즉시 깨어난다.)
+on_signal() {
+  trap '' INT TERM HUP
+  INTERRUPTED=1
+  ABORT_REASON="$1"
+  echo
+  echo "!! 중단 요청을 받았습니다($1)"
+  exit "$2"
+}
+trap 'on_signal "Ctrl-C" 130' INT
+trap 'on_signal "종료 신호" 143' TERM
+trap 'on_signal "터미널 닫힘" 129' HUP
+
+# Enter 대기. 입력은 표준 입력이 아니라 /dev/tty에서 읽는다. q를 넣으면 중단한다. 대기 중에 미리 눌러 둔 Enter가 다음 단계를 건너뛰지 않게 먼저 비운다.
+wait_enter() {
+  local answer=""
+  python3 -c 'import sys,termios; termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)' </dev/tty >/dev/null 2>&1 || true
+  printf '   ▶ Enter: 이 단계 진행  /  q + Enter: 중단  (Ctrl-C도 됩니다) '
+  if ! IFS= read -r answer </dev/tty; then
+    INTERRUPTED=1; ABORT_REASON="입력이 끝남(Ctrl-D)"; echo; exit 130
+  fi
+  case "$answer" in
+    q|Q|quit|exit) INTERRUPTED=1; ABORT_REASON="q 입력"; exit 130 ;;
+  esac
+}
 
 if [ "${DEMO_INSTALL:-}" = "1" ]; then
   echo "== debug 앱 설치"
@@ -122,24 +212,27 @@ elif lsof -ti "tcp:$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   exit 1
 else
   echo "== 서버 시작 (포트 $PORT)"
+  set -m   # 이 서버만 자기 프로세스 그룹을 갖게 한다(터미널 Ctrl-C가 서버에 닿지 않고 정리에서 그룹째 내린다)
   (cd "$ROOT/server" && PORT="$PORT" exec ./node_modules/.bin/tsx src/index.ts >"$RUN_DIR/server.log" 2>&1) &
   SERVER_PGID=$!
+  set +m
   for _ in $(seq 1 30); do
     curl -fs "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break
-    sleep 1
+    nap 1
   done
   curl -fs "http://127.0.0.1:$PORT/health" >/dev/null || { echo "서버가 뜨지 않았습니다. $RUN_DIR/server.log 를 확인하세요." >&2; exit 1; }
 fi
 
 # 집 하차 단계는 서버에 집을 등록해야 한다. 서버를 직접 띄웠거나 DEMO_HOME=1일 때만 한다.
 if [ -n "$SERVER_PGID" ] || [ "${DEMO_HOME:-}" = "1" ]; then
+  HOME_SET=1   # 등록 중에 끊겨도 정리에서 해제하도록 먼저 표시한다
   if set_home '"mock-home-apt"'; then
-    HOME_SET=1
     if ! home_visible; then
       echo "경고: 집을 등록했지만 차가 읽는 자리에 보이지 않아(폰이 연결된 서버) 집 하차 단계를 건너뜁니다. 등록한 집은 되돌립니다." >&2
       set_home null; HOME_SET=0
     fi
   else
+    HOME_SET=0
     echo "경고: 서버에 집을 등록하지 못해 집 하차 단계를 건너뜁니다." >&2
   fi
 else
@@ -149,21 +242,16 @@ fi
 # 시작 이후 줄만 보려고 현재 위치(줄 수)를 단계마다 적어 둔다. 오래된 줄이 한 줄 섞여도 시작 위치 뒤만 읽어 영향이 없다.
 "${ADB[@]}" logcat -v brief -T 1 -s ChagokFlow:I ChagokFakeNavi:I </dev/null >"$FLOW_LOG" 2>&1 &
 LOGCAT_PID=$!
-sleep 1
+nap 1
 
 # 시간대를 바꾼 뒤 앱을 새로 띄운다. 떠 있던 프로세스는 옛 시간대를 쓰고, MainActivity가 앞에 없으면 가짜 내비가 움직이지 않는다.
 echo "== 앱 다시 시작 (시간대 반영)"
 "${ADB[@]}" shell am force-stop com.chagok.car </dev/null >/dev/null 2>&1
 "${ADB[@]}" shell am start -n com.chagok.car/.MainActivity </dev/null >/dev/null 2>&1 || { echo "앱을 시작하지 못했습니다. debug 앱이 설치돼 있는지 확인하세요(DEMO_INSTALL=1)." >&2; exit 1; }
 APP_STARTED=1
-sleep 5
+nap 5
 
 # ---- 단계 실행 ----
-PASS_COUNT=0
-FAIL_COUNT=0
-SUMMARY=()
-STEP_NO=0
-PREV_START=0
 
 send_signal() {
   echo "   → 신호: $1"
@@ -180,13 +268,16 @@ show_lines() { sed -E 's/^[A-Z]\/(ChagokFlow|ChagokFakeNavi) *\( *[0-9]+\): /   
 step() {
   local title="$1" expect="$2" see="$3" signals="$4" wait_re="$5" max_wait="$6" musts="$7" mustnot="$8" from_prev="${9:-0}"
   STEP_NO=$((STEP_NO + 1))
+  CURRENT_TITLE="$title"
+  CURRENT_PHASE="Enter 대기 중, 아직 신호를 넣지 않음"
   echo
   echo "━━ $STEP_NO) $title"
   echo "   기대: $expect"
   echo "   화면: $see"
   if [ "${DEMO_AUTO:-}" != "1" ]; then
-    read -r -p "   Enter를 누르면 진행합니다 " _ || true
+    wait_enter
   fi
+  CURRENT_PHASE="진행 중"
   local start
   start=$(wc -l <"$FLOW_LOG" | tr -d ' ')
   local from=$start
@@ -210,18 +301,18 @@ step() {
     esac
     send_signal "$s"
     case "$s" in now=*|*"&now="*) RESET_EPOCH=$(date +%s); ADVANCED_TOTAL=0 ;; esac
-    sleep 1
+    nap 1
   done
   if [ -n "$wait_re" ]; then
     local waited=0
     while [ "$waited" -lt "$max_wait" ]; do
       log_lines_since "$from" | tr '\n' '\t' | grep -Eq "$wait_re" && break
-      sleep 1
+      nap 1
       waited=$((waited + 1))
     done
-    sleep 1
+    nap 1
   else
-    sleep "$SETTLE"
+    nap "$SETTLE"
   fi
   echo "   로그:"
   local lines
@@ -254,6 +345,8 @@ step() {
     FAIL_COUNT=$((FAIL_COUNT + 1))
     SUMMARY+=("✗ $STEP_NO) $title —$reason")
   fi
+  CURRENT_TITLE=""
+  CURRENT_PHASE=""
 }
 
 SILENT='말함:|카드 칩='
@@ -265,6 +358,11 @@ YES='heard=%EC%9D%91'            # "응"
 echo "== 차곡 차량 앱 시나리오 데모 (기기 $SERIAL, 서버 :$PORT)"
 echo "   로그: $FLOW_LOG"
 echo "   하루가 이어지는 이야기입니다: 초기화는 맨 처음 한 번뿐이고 그 뒤로는 시계를 앞으로만 보냅니다(09:20 → 13:30 → 20:30 → 21:10)."
+if [ "${DEMO_AUTO:-}" = "1" ]; then
+  echo "   자동 진행(DEMO_AUTO=1)입니다. 중단은 Ctrl-C."
+else
+  echo "   단계마다 설명을 보여 드리고 Enter를 누르면 그 단계를 실행합니다. 중단은 q+Enter 또는 Ctrl-C(정리 후 종료)."
+fi
 
 # ================= 이어지는 하루 (광주 직관 픽스처, 기준 09:20) =================
 
@@ -277,12 +375,12 @@ step "초기화(09:20)" \
   ""
 
 step "첫 탑승(09:20): 전체 브리핑" \
-  "정책서 5장 첫 탑승: 종일 일정 인사 + 대상 일정까지 남은 시간 + 메모 + 출발할까요? 앞 단계의 초기화가 그날 첫 진입이라 브리핑은 이미 떠 있다(그 단계부터 이어서 본다). 대상은 13:00 육전집 점심" \
-  "'광주 직관 날이에요! 1시 육전집 점심까지 3시간 40분이에요.', 오늘 일정·채비 타일, [응, 출발][잠깐만]" \
+  "정책서 5장 첫 탑승: 종일 일정 인사 + 대상 일정까지 남은 시간 + 출발할까요? 앞 단계의 초기화가 그날 첫 진입이라 브리핑은 이미 떠 있다(그 단계부터 이어서 본다). 대상은 13:00 육전집 점심이고, 점심에는 챙길 것이 없어 메모·채비 문장이 없다(유니폼·응원봉·티켓은 17:00 KIA 직관의 메모이고 첫 탑승은 다른 일정의 메모를 읽지 않는다)" \
+  "'광주 직관 날이에요! 1시 육전집 점심까지 3시간 40분이에요.' + '출발할까요?', 오늘 일정 타일(채비 타일 없음), [응, 출발][잠깐만]" \
   "" \
   "" 0 \
-  "카드 칩=정차 중 · 출발 전 \\| voice=광주 직관 날이에요!.*1시 육전집 점심까지 3시간.40분이에요;;sub=.*출발할까요;;말함: .*1시 육전집 점심까지 3시간.40분이에요.*출발할까요" \
-  "" 1
+  "카드 칩=정차 중 · 출발 전 \\| voice=광주 직관 날이에요!.*1시 육전집 점심까지 3시간.40분이에요;;sub=출발할까요;;말함: .*1시 육전집 점심까지 3시간.40분이에요.*출발할까요" \
+  "메모에|유니폼|채비" 1
 
 step "수락: 육전집 길안내 시작" \
   "정책서 7장: '응' → 길안내 요청 + 결과 한 줄 '길안내를 시작할게요.'" \
@@ -293,15 +391,16 @@ step "수락: 육전집 길안내 시작" \
   ""
 
 # 하차 카드(일정 장소): 주행 중 내비 도착 순간에 바로 뜬다(사용자 결정 2026-11-15, 주행 중 카드 금지의 유일한 예외. Pleos 주행 규제와 충돌할 수 있어 실차 전 확인 필요).
-# 한 번 말하고(듣지 않음) 5초(Rules.EXIT_CARD) 뒤 닫힌다. 육전집 점심 메모는 '유니폼·응원봉·티켓'이라 챙길 것 카드다.
+# 한 번 말하고(듣지 않음) 5초(Rules.EXIT_CARD) 뒤 닫힌다. 육전집 점심은 챙길 것·메모가 없어(유니폼·응원봉·티켓은 KIA 직관의 것) 도착 기록 한 줄이고 버튼이 없다
+# ("{일정}, 도착으로 기록했어요.", 사용자 결정 2026-11-15, 정책서 9장의 "잘 다녀오세요."를 대신함).
 # 닫힌 뒤에 다음 단계가 오도록 "카드 접음"까지 기다린다(카드가 떠 있는 채 탑승 신호가 오면 잠깐 정차 규칙을 따른다).
 step "주행(09:20): 도착하면 바로 하차 카드" \
   "정책서 6장: 주행 중에는 먼저 말하지 않고(카드 접기) 다음 일정 칩만 남긴다. 단 가짜 내비가 목적지에 닿아 내비 도착 알림이 들어오는 순간만 예외로 일정 장소 하차 카드(docs/exit-card.md)를 바로 띄워 한 번 말한다(듣지 않음). 카드가 떠 있는 동안 칩은 숨고 5초 뒤 닫히면 칩이 다음 일정으로 바뀐다. 점심이 도착으로 기록돼 대상은 17:00 KIA 직관으로 넘어간다" \
-  "카드·말 없이 왼쪽 위에 칩 '다음 13:00 육전집 점심'(누를 수 없음), 지도에서 차가 곡선 경로를 따라 움직이고 남은 거리가 줄어듦(약 3초). 도착하는 순간 칩이 사라지고 '도착 · 내리기 전' 칩, '유니폼·응원봉·티켓 챙기세요!', 채비 타일, [챙겼어요], '5초 뒤 자동으로 닫혀요', 지도 덮개 72%(패널은 카드가 떠 있는 동안 숨음). 5초 뒤 카드가 접히고 패널이 '광주 육전집 도착', 칩이 '다음 17:00 KIA 직관'" \
+  "카드·말 없이 왼쪽 위에 칩 '다음 13:00 육전집 점심'(누를 수 없음), 지도에서 차가 곡선 경로를 따라 움직이고 남은 거리가 줄어듦(약 3초). 도착하는 순간 칩이 사라지고 '도착 · 내리기 전' 칩, '육전집 점심, 도착으로 기록했어요.'(버튼·채비 타일 없음, 유니폼 얘기 없음), '5초 뒤 자동으로 닫혀요', 지도 덮개 72%(패널은 카드가 떠 있는 동안 숨음). 5초 뒤 카드가 접히고 패널이 '광주 육전집 도착', 칩이 '다음 17:00 KIA 직관'" \
   "gear=D" \
   "카드 칩=도착 · 내리기 전.*카드 접음.*다음 일정 칩: 17:00 KIA 직관" 50 \
-  "GearChanged\\(gear=DRIVE\\);;다음 일정 칩: 13:00 육전집 점심;;ChagokFakeNavi.*도착: 광주 육전집;;이벤트 DestinationArrived.*카드 칩=도착 · 내리기 전 \\| voice=유니폼·응원봉·티켓 챙기세요!;;각주=‘육전집 점심’ 일정 메모: 유니폼·응원봉·티켓;;버튼=챙겼어요;;이벤트 DestinationArrived.*말함: 유니폼·응원봉·티켓 챙기세요!;;다음 일정 칩 숨김;;저장: gwangju-lunch 예정→도착;;카드 접음.*다음 일정 칩: 17:00 KIA 직관" \
-  "\\(듣기\\)|sub=|소요 시간 요청|결과 한 줄:"
+  "GearChanged\\(gear=DRIVE\\);;다음 일정 칩: 13:00 육전집 점심;;ChagokFakeNavi.*도착: 광주 육전집;;이벤트 DestinationArrived.*카드 칩=도착 · 내리기 전 \\| voice=육전집 점심, 도착으로 기록했어요\\.;;이벤트 DestinationArrived.*말함: 육전집 점심, 도착으로 기록했어요\\.;;다음 일정 칩 숨김;;저장: gwangju-lunch 예정→도착;;카드 접음.*다음 일정 칩: 17:00 KIA 직관" \
+  "\\(듣기\\)|sub=|소요 시간 요청|결과 한 줄:|voice=육전집 점심, 도착으로 기록했어요\\..*(버튼=|각주=)|유니폼|챙기세요"
 
 step "정차(P, 09:2x): 같은 카드는 다시 뜨지 않음" \
   "도착 때 하차 카드를 이미 한 번 보였으므로 이어지는 P단에는 말도 카드도 없다. 주행 중 칩은 같은 이벤트에서 바로 숨는다" \
@@ -366,14 +465,14 @@ step "수락: 단골 콩물집 길안내(20:30)" \
   "길안내 요청: 단골 콩물집;;결과 한 줄: 길안내를 시작할게요" \
   ""
 
-# 콩물 픽업은 메모가 없어 하차 카드가 '잘 다녀오세요.'(버튼 없음)다. 도착하면 다음 일정은 22:20 친구 약속(장소 없음)이다.
+# 콩물 픽업은 메모가 없어 하차 카드가 '콩물 픽업, 도착으로 기록했어요.'(버튼 없음)다. 도착하면 다음 일정은 22:20 친구 약속(장소 없음)이다.
 step "주행(20:30): 도착하면 하차 카드, 칩은 장소 없는 친구 약속으로" \
-  "내비 도착 → 콩물 픽업 도착 기록 + 하차 카드(메모가 없어 '잘 다녀오세요.', 버튼 없음, 한 번 말하고 듣지 않음). 5초 뒤 닫히면 칩은 남은 마지막 일정인 22:20 친구 약속이다(칩은 장소가 없어도 다음 일정을 그대로 보인다)" \
-  "주행 중 칩 '다음 21:00 콩물 픽업' → 도착하는 순간 '도착 · 내리기 전' 카드와 '잘 다녀오세요.'(버튼 없음) → 5초 뒤 접히고 패널 '단골 콩물집 도착', 칩 '다음 22:20 친구 약속'" \
+  "내비 도착 → 콩물 픽업 도착 기록 + 하차 카드(메모가 없어 '콩물 픽업, 도착으로 기록했어요.', 버튼 없음, 한 번 말하고 듣지 않음). 5초 뒤 닫히면 칩은 남은 마지막 일정인 22:20 친구 약속이다(칩은 장소가 없어도 다음 일정을 그대로 보인다)" \
+  "주행 중 칩 '다음 21:00 콩물 픽업' → 도착하는 순간 '도착 · 내리기 전' 카드와 '콩물 픽업, 도착으로 기록했어요.'(버튼 없음) → 5초 뒤 접히고 패널 '단골 콩물집 도착', 칩 '다음 22:20 친구 약속'" \
   "gear=D" \
   "카드 칩=도착 · 내리기 전.*카드 접음.*다음 일정 칩: 22:20 친구 약속" 50 \
-  "GearChanged\\(gear=DRIVE\\);;다음 일정 칩: 21:00 콩물 픽업;;ChagokFakeNavi.*도착: 단골 콩물집;;이벤트 DestinationArrived.*카드 칩=도착 · 내리기 전 \\| voice=잘 다녀오세요\\.;;이벤트 DestinationArrived.*말함: 잘 다녀오세요\\.;;저장: gwangju-kongmul 예정→도착;;카드 접음.*다음 일정 칩: 22:20 친구 약속" \
-  "\\(듣기\\)|sub=|소요 시간 요청|결과 한 줄:|voice=잘 다녀오세요\\..*버튼="
+  "GearChanged\\(gear=DRIVE\\);;다음 일정 칩: 21:00 콩물 픽업;;ChagokFakeNavi.*도착: 단골 콩물집;;이벤트 DestinationArrived.*카드 칩=도착 · 내리기 전 \\| voice=콩물 픽업, 도착으로 기록했어요\\.;;이벤트 DestinationArrived.*말함: 콩물 픽업, 도착으로 기록했어요\\.;;저장: gwangju-kongmul 예정→도착;;카드 접음.*다음 일정 칩: 22:20 친구 약속" \
+  "\\(듣기\\)|sub=|소요 시간 요청|결과 한 줄:|voice=콩물 픽업, 도착으로 기록했어요\\..*버튼="
 
 step "정차(P, 20:3x): 같은 카드는 다시 뜨지 않음" \
   "하차 카드는 한 번 보였고 위치 판정도 지금은 시간 창 밖(콩물 픽업 21:00 시작 60분 전~22:00 종료 안이지만 이미 도착 기록됨)이라 말도 카드도 없다" \
@@ -435,12 +534,12 @@ if [ "${DEMO_EXTRA:-}" = "1" ]; then
   # 첫 위치 주입을 달리기 전(D 앞)에 한다: 주입이 켜지면 어댑터의 실제 위치(에뮬레이터 GPS)는 세션에 들어가지 않는다. 주입 전에는 에뮬레이터 GPS가 집 근처 등에
   # 있으면 그 위치가 이번 주행의 믿을 만한 위치로 먼저 쓰여 P단 판정이 달라질 수 있다(에뮬레이터 GPS 상태와 무관하게 돌게 한다).
   step "추가: 위치로 도착(내비 도착 알림 없이 육전집 300m 안에서 P단)" \
-    "정책서 3·4장: 달린 뒤 P단에 넣은 곳이 대상 일정 장소 300m 안이면 도착으로 기록하고 그 시점에 바로 하차 카드를 띄운다(docs/exit-card.md). 내비 도착 알림은 없다(길안내를 하지 않았다)" \
-    "가짜 지도가 사라지고 '도착 · 내리기 전' 칩, '유니폼·응원봉·티켓 챙기세요!', 채비 타일, [챙겼어요]. 5초 뒤 접힘(초기화 직후라 첫 탑승 브리핑 카드가 먼저 떠 있을 수 있음)" \
+    "정책서 3·4장: 달린 뒤 P단에 넣은 곳이 대상 일정 장소 300m 안이면 도착으로 기록하고 그 시점에 바로 하차 카드를 띄운다(docs/exit-card.md). 내비 도착 알림은 없다(길안내를 하지 않았다). 육전집 점심은 챙길 것이 없어 도착 기록 한 줄이다" \
+    "가짜 지도가 사라지고 '도착 · 내리기 전' 칩, '육전집 점심, 도착으로 기록했어요.'(버튼 없음). 5초 뒤 접힘(초기화 직후라 첫 탑승 브리핑 카드가 먼저 떠 있을 수 있음)" \
     "now=$FIRST_AT&advance=170&navi=real&listen=off&trip=none&exitcard=real&gear=P loc=$LUNCH_LOC gear=D loc=$LUNCH_LOC&gear=P" \
     "카드 칩=도착 · 내리기 전.*카드 접음" 15 \
-    "저장: [^ ,]+ 예정→도착;;카드 칩=도착 · 내리기 전 \\| voice=유니폼·응원봉·티켓 챙기세요!;;버튼=챙겼어요;;말함: 유니폼·응원봉·티켓 챙기세요!.*카드 접음" \
-    "DestinationArrived"
+    "저장: [^ ,]+ 예정→도착;;카드 칩=도착 · 내리기 전 \\| voice=육전집 점심, 도착으로 기록했어요\\.;;말함: 육전집 점심, 도착으로 기록했어요\\..*카드 접음" \
+    "DestinationArrived|voice=육전집 점심, 도착으로 기록했어요\\..*(버튼=|각주=)"
 
   # 집 하차(docs/home-exit.md): 집 반경(300m) 밖 위치를 한 번 이상 받은 뒤 집에 P단을 넣었을 때만 한다. 집은 서버 자주 가는 곳 mock-home-apt(35.1743,126.9121)다.
   AWAY_LOC='35.1378,126.7912'   # 광주송정역 근처(집·일정 장소 어디도 아님)
@@ -473,8 +572,5 @@ step "끝: 기본값(가짜 내비 켬)으로 되돌림" \
   "" \
   ""
 
-echo
-echo "━━ 요약"
-printf '%s\n' "${SUMMARY[@]}"
-echo "통과 $PASS_COUNT, 실패 $FAIL_COUNT"
+print_summary
 [ "$FAIL_COUNT" -eq 0 ]
