@@ -12,7 +12,7 @@
 #   집 하차는 집 반경 밖 위치를 한 번 이상 받은 뒤 돌아왔을 때만 한다(마지막 집 P단·초기화 뒤): 집 앞 loc 전에 집 밖 loc(광주송정역 35.1378,126.7912)을 넣는다.
 #   '말 없음' 확인은 카드가 뜰 시간을 준 뒤(waitForAnimationToEnd) assertNotVisible 한다.
 #   exitcard=12: 하차 카드가 정책상 5초 뒤 닫혀 확인에 빠듯해 이 flow에서만 12초 떠 있게 한다(Rules.EXIT_CARD·release는 그대로, 5초는 단위 테스트가 고정).
-# 장면 시각 09:20 KST(now=2026-11-06T00:20:00Z). 일정은 픽스처(gwangju-day): 육전집 점심 13:00(메모 '유니폼·응원봉·티켓'), 콩물 픽업 21:00(메모 없음).
+# 장면 시각 09:20 KST(now=2026-11-06T00:20:00Z). 일정은 픽스처(gwangju-day): 육전집 점심 13:00(메모 없음), 콩물 픽업 21:00(메모 없음). 유니폼·응원봉·티켓은 KIA 직관(17:00)의 메모다.
 # 21:10은 같은 기준 시각에서 advance=710분이다(일정은 기준 시각(09:20) 기준으로 받고 시계만 앞으로 보낸다).
 # 스크린샷은 ${SHOT_DIR} 아래에 남긴다. 기기 시간대는 Asia/Seoul 이어야 한다(스크립트가 맞춘다).
 appId: com.chagok.car
@@ -49,20 +49,20 @@ env:
 # 1. 초기화(12:10 = 09:20 + 170분). 신호 화면이 '앱 진입'으로 잡혀 브리핑이 뜰 수 있어도 달리면 접힌다
 - openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&advance=170&navi=real&listen=off&trip=12000&route=ok&exitcard=12&gear=P
 
-# 2. 위치 도착(12:10, 점심 시간 창 12:00~14:00 안): 육전집(35.1595,126.8526) 안에서 달린 뒤 P단 → 내비 도착 없이 도착으로 기록되고 일정 장소 하차 카드(메모 '유니폼·응원봉·티켓')
+# 2. 위치 도착(12:10, 점심 시간 창 12:00~14:00 안): 육전집(35.1595,126.8526) 안에서 달린 뒤 P단 → 내비 도착 없이 도착으로 기록되고 일정 장소 하차 카드(챙길 것·메모가 없어 '육전집 점심, 도착으로 기록했어요.', 버튼 없음)
 - openLink: chagok-debug://signal?gear=D
 - openLink: chagok-debug://signal?loc=35.1595,126.8526
 - openLink: chagok-debug://signal?gear=P
 - extendedWaitUntil:
-    visible: ".*유니폼·응원봉·티켓 챙기세요!.*"
+    visible: ".*육전집 점심, 도착으로 기록했어요.*"
     timeout: 8000
 - assertVisible: "도착.*내리기 전"
-- assertVisible: "챙겼어요"
+- assertNotVisible: "챙겼어요"
+- assertNotVisible: ".*유니폼.*"
 - takeScreenshot: ${SHOT_DIR}/home-01-location-arrival-exit-card
-- tapOn: "챙겼어요"
 - extendedWaitUntil:
-    notVisible: "챙겼어요"
-    timeout: 5000
+    notVisible: "도착.*내리기 전"
+    timeout: 20000
 
 # 3. 시간 창 밖: KIA 직관(17:00)은 12:10에 시작 60분 전(16:00)이 아니라서 경기장(35.1681,126.8888) 앞 P단도 도착이 아니다(말 없음)
 - openLink: chagok-debug://signal?gear=D

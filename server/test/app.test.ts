@@ -33,7 +33,7 @@ describe('GET /schedules/today', () => {
       allDay: false,
       locationText: '광주 육전집',
       place: { name: '광주 육전집', lat: 35.1595, lng: 126.8526 },
-      memo: '유니폼·응원봉·티켓',
+      memo: null,
       attendees: [],
     });
     const allDay = body.schedules.find((s) => s.allDay);

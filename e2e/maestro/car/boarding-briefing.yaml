@@ -21,7 +21,8 @@ env:
 - assertVisible: "오늘 일정"
 - assertVisible: "KIA 직관"
 - assertVisible: "콩물 픽업"
-- assertVisible: "유니폼"
+# 육전집 점심에는 챙길 것이 없어 채비 타일이 없다(유니폼·응원봉·티켓은 KIA 직관의 메모이고 첫 탑승은 다른 일정의 메모를 읽지 않는다)
+- assertNotVisible: "유니폼"
 - assertVisible: "응, 출발"
 - assertVisible: "잠깐만"
 - takeScreenshot: ${SHOT_DIR}/01-briefing-card

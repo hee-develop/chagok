@@ -434,10 +434,10 @@ class PhrasesTest {
         assertEquals("KIA 직관 메모가 있어요.", exit(memo = "유니폼\n응원봉").voice)
     }
 
-    @Test fun `하차 카드 메모가 없거나 항목이 모두 비면 인사만 하고 버튼이 없다`() {
+    @Test fun `하차 카드 메모가 없거나 항목이 모두 비면 도착으로 기록했다고만 하고 버튼이 없다`() {
         listOf(null, "", "  ", "·", "·,/").forEach { memo ->
             val card = exit(memo = memo)
-            assertEquals("잘 다녀오세요.", card.voice)
+            assertEquals("KIA 직관, 도착으로 기록했어요.", card.voice)
             assertTrue(card.alert)
             assertNull(card.primary)
             assertTrue(card.tiles.isEmpty())
@@ -484,7 +484,19 @@ class PhrasesTest {
         assertEquals("유니폼·응원봉·티켓·보조배터리·손수건·물티슈·모자 챙기세요!", exit(memo = memo).voice)
         // 짧으면 그대로 읽는다
         assertEquals("유니폼·응원봉·티켓 챙기세요!", spokenOf(memo = "유니폼·응원봉·티켓"))
-        assertEquals("잘 다녀오세요.", spokenOf())
+        assertEquals("KIA 직관, 도착으로 기록했어요.", spokenOf())
+    }
+
+    @Test fun `하차 카드 도착 기록 문장은 큰 문구에서 제목을 12자로 줄이고 말에서는 전체 제목을 쓴다`() {
+        val title = "가나다라마바사아자차카타파하"  // 14자
+        val short = Phrases.shortTitle(title)
+        assertEquals("$short, 도착으로 기록했어요.", exit(title = title).voice)
+        // 말은 전체 제목이되 30자를 넘으면 줄인 제목으로 말한다
+        assertEquals("$title, 도착으로 기록했어요.", spokenOf(title = title))
+        val longTitle = "가".repeat(20)
+        assertEquals("${Phrases.shortTitle(longTitle)}, 도착으로 기록했어요.", spokenOf(title = longTitle))
+        assertEquals("육전집 점심, 도착으로 기록했어요.", exit(title = "육전집 점심").voice)
+        assertEquals("콩물 픽업, 도착으로 기록했어요.", spokenOf(title = "콩물 픽업"))
     }
 
     @Test fun `하차 카드 문장형이 길면 챙길 것이 아니라 메모가 있다고만 말한다`() {
@@ -519,7 +531,7 @@ class PhrasesTest {
         assertEquals("유니폼·티켓 챙기세요!", exit(memo = "유니폼!, 티켓.").voice)
         // 문장부호만 있는 항목은 빈 항목이다.
         assertEquals("우산 챙기세요!", exit(memo = "우산·!").voice)
-        assertEquals("잘 다녀오세요.", exit(memo = "!").voice)
+        assertEquals("KIA 직관, 도착으로 기록했어요.", exit(memo = "!").voice)
         // 문장은 문장부호가 있어도 문장형이다.
         assertEquals("KIA 직관 메모에 ‘비 와요!’가 있어요.", exit(memo = "비 와요!").voice)
     }

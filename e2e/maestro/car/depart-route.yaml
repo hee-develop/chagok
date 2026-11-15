@@ -19,7 +19,9 @@ env:
 - assertVisible: "응, 출발"
 - assertVisible: "잠깐만"
 - assertVisible: "“응”이라고 말해도 돼요"
-- assertVisible: ".*메모에.*이 있어요.*출발할까요.*"
+# 육전집 점심은 챙길 것·메모가 없어 메모 문장 없이 질문 하나뿐이다(유니폼·응원봉·티켓은 KIA 직관의 메모)
+- assertVisible: "출발할까요?"
+- assertNotVisible: ".*메모에.*"
 - assertNotVisible: ".*챙기셨어요.*"
 - takeScreenshot: ${SHOT_DIR}/01-depart-offer
 

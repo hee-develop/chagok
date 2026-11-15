@@ -467,16 +467,16 @@ class DriveSessionExitCardTest {
     }
 
     @Test
-    fun 메모가_없으면_인사만_하고_버튼이_없다() {
+    fun 메모가_없으면_도착으로_기록했다고만_하고_버튼이_없다() {
         schedules = listOf(schedule("a", "고객 미팅", 40, gangnam), schedule("b", "점심 약속", 180, cityHall))
         newSession()
         driveAndArrive()
         val parked = park()
         val card = parked.exitCard()!!
-        assertEquals("잘 다녀오세요.", card.voice)
+        assertEquals("고객 미팅, 도착으로 기록했어요.", card.voice)
         assertTrue(card.alert)
         assertNull(card.primary)
-        assertEquals("잘 다녀오세요.", parked.one<Effect.Speak>().text)
+        assertEquals("고객 미팅, 도착으로 기록했어요.", parked.one<Effect.Speak>().text)
     }
 
     @Test
