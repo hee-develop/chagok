@@ -316,7 +316,7 @@ class DriveSession(
         private set
 
     /**
-     * 도착이 기록됐고 하차 카드를 아직 보이지 않은 일정 ID(4장: 도착 뒤 실제로 달린 다음 P단에서만 말한다).
+     * 도착이 기록됐고 하차 카드를 아직 보이지 않은 일정 ID(4장: 도착 뒤 실제로 달린 다음 P단에서 말한다. 단 주행 중 내비 도착은 그 순간 바로 보이고 대기를 지운다).
      * 카드를 보이거나 버리거나, 새 길안내를 수락하거나, 초기화·날짜 변경·시동 끔·연결 해제·실제 탑승 판단이 시작되면 지운다.
      */
     private var exitTargetId: String? = restored?.exitTargetId
@@ -398,6 +398,11 @@ class DriveSession(
         val isPairing: Boolean = false,
         /** 하차 카드인가. 질문이 없고 [챙겼어요] 또는 [Rules.EXIT_CARD] 뒤 닫힌다. */
         val isExit: Boolean = false,
+        /**
+         * 주행 중 내비 도착 순간에 띄운 하차 카드인가(사용자 결정 2026-11-15, 주행 중 카드 금지의 유일한 예외).
+         * 이 카드는 주행 제한 알림이 다시 와도 [enforceDriving]이 접지 않고 [Rules.EXIT_CARD] 뒤 또는 [챙겼어요]로만 닫힌다.
+         */
+        val drivingExit: Boolean = false,
         /** 이 카드의 질문을 판단한 브리핑. 대안으로 카드를 다시 만들 때 쓴다. */
         val briefing: Briefing? = null,
         /** 접힌 질문을 다시 묻는 카드인가. 이 카드가 또 무응답으로 접혀도 다시 묻지 않는다(한 번만). */
@@ -865,7 +870,11 @@ class DriveSession(
         pending = null
         heldBoarding = false
         clearResult(out)
-        if (card != null) {
+        val current = card
+        if (current?.drivingExit == true) {
+            // 주행 중 내비 도착 순간에 띄운 하차 카드는 접지 않는다(사용자 결정 2026-11-15, [showExitCard]의 유일한 예외). 5초 뒤 또는 [챙겼어요]로 닫힌다.
+            drivingHandled = true
+        } else if (current != null) {
             // 주행 제한으로 접을 때는 애니메이션 없이 바로 접는다.
             closeCard(out, instant = true)
             drivingHandled = true
@@ -1247,7 +1256,8 @@ class DriveSession(
     /**
      * 일정을 도착으로 바꾼다(내비 도착과 P단 위치 도착이 모두 여기를 지난다). 도착 알림 자체에는 말이 없고, 하차 카드가 그 말이다.
      * 새로 도착이 된 일정만 하차 대기([exitTargetId])로 세운다(이미 도착·건너뜀이거나 모르는 일정이면 상태도 카드도 그대로).
-     * 이미 P단이면([settleExitAtPark]) 바로 카드를 띄우거나 버리고, 아니면 도착 뒤 달린 다음 P단까지 기다린다.
+     * 이미 P단이면([settleExitAtPark]) 바로 카드를 띄우거나 버리고, 주행 중 내비 도착이면 그 자리에서 띄운다([showExitCard]의 `whileDriving` 예외, 사용자 결정 2026-11-15).
+     * 못 띄웠으면 도착 뒤 달린 다음 P단까지 기다린다.
      * 다시 탈 때 다음 일정을 한 줄로 묻는 것(재탑승, 잠깐 정차 10분 안은 침묵)은 이와 별개다.
      */
     private fun arrive(id: String, out: MutableList<Effect>, byLocation: Boolean = false) {
@@ -1264,7 +1274,8 @@ class DriveSession(
             exitArrivedAt = now()
             exitByLocation = byLocation
         }
-        settleExitAtPark(out)
+        // 주행 중 내비 도착은 그 자리에서 하차 카드를 띄운다(아래 [showExitCard]의 예외). 위치 도착은 P단에서만 판정하므로 해당 없다.
+        if (gear != Gear.PARK && !byLocation && motion() == Motion.DRIVING) showExitCard(out, whileDriving = true) else settleExitAtPark(out)
     }
 
     /**
@@ -1293,15 +1304,22 @@ class DriveSession(
      * (권한 설명 카드는 세션 밖 `MainActivity` 소관이라 세션은 모른다.)
      * 집 하차는 오늘 이미 알린 픽업 일정을 빼고, 남은 물건이 없는데 오늘 이미 인사했으면 카드를 보이지 않는다(`docs/home-exit.md`).
      * 말은 [Phrases.exitSpoken]([Phrases.homeExitSpoken]) 한 번뿐이고 듣지 않는다. 앱이 뒤에 있어도 말은 한다. 카드는 [exitCardTimeout] 뒤 닫히고, 말은 닫힐 때 멈춘다.
+     *
+     * [whileDriving]은 **주행 중 말하기·카드 금지의 유일한 예외**다. 사용자 결정(2026-11-15): 길안내하던 일정의 내비 도착 순간에는 주행 중이어도
+     * 일정 장소 하차 카드를 바로 띄우고 한 번 말한다(듣기는 열지 않는다). Pleos 주행 규제와 충돌할 수 있어 실차 전 확인이 필요하다.
+     * 이 경로는 다른 카드·탑승 판단이 떠 있어 못 띄우면 대기를 버리지 않고 남겨 뒤의 P단에서 기존대로 띄운다. 띄우면 대기를 지워 그 P단에서 같은 카드가 다시 뜨지 않는다.
      */
-    private fun showExitCard(out: MutableList<Effect>) {
+    private fun showExitCard(out: MutableList<Effect>, whileDriving: Boolean = false) {
         val id = exitTargetId
         val atHome = exitHome
         if (id == null && !atHome) return
-        if (suspended || motion() != Motion.STOPPED) return
-        clearExit()
+        if (suspended) return
+        if (!whileDriving && motion() != Motion.STOPPED) return
         // 탑승 판단이 진행 중(소요 시간을 기다리는 중)이어도 하차 카드는 보이지 않는다(곧 탑승 카드가 뜬다).
-        if (!paired || card != null || pending != null) return
+        val blocked = !paired || card != null || pending != null
+        if (whileDriving && blocked) return
+        clearExit()
+        if (blocked) return
         val timeout = exitCardTimeout()
         val view: CardContent
         val spoken: String
@@ -1320,10 +1338,11 @@ class DriveSession(
         }
         exitCardShownThisPark = true
         val timerId = ++seq
-        card = CardState(view, null, timerId, isExit = true)
+        card = CardState(view, null, timerId, isExit = true, drivingExit = whileDriving)
         resultTimerId = null
         out += Effect.ShowCard(view)
-        speak(out, spoken, thenListen = false)
+        // 주행 중 예외는 [canSpeak]를 거치지 않는다(위 KDoc). 그 밖에는 정차 중일 때만 말한다.
+        if (whileDriving) out += Effect.Speak(spoken, false) else speak(out, spoken, thenListen = false)
         out += Effect.ScheduleCardTimeout(timerId, timeout)
     }
 
@@ -1386,7 +1405,8 @@ class DriveSession(
      * 자정은 따로 깨우지 않는다: 자정을 넘겨도 아직 끝나지 않은 일정은 [rollDate]가 남겨 칩이 그대로이기 때문이다.
      */
     private fun syncChip(out: MutableList<Effect>) {
-        val visible = motion() == Motion.DRIVING && paired && !suspended
+        // 주행 중 도착 하차 카드([CardState.drivingExit])가 떠 있는 동안은 숨긴다(카드 열과 같은 왼쪽 위라 겹친다). 카드가 닫히면 다음 일정으로 다시 보인다.
+        val visible = motion() == Motion.DRIVING && paired && !suspended && card?.drivingExit != true
         if (visible && loadingSchedules) return
         val target = if (visible) chipTarget() else null
         val chip = target?.let { Phrases.nextChipBody(it, zone) } ?: ""

@@ -100,14 +100,107 @@ class DriveSessionExitCardTest {
         session.handle(Event.GearChanged(Gear.DRIVE))
     }
 
-    /** 내비 도착 알림까지 보낸 상태(주행 중). 아직 P단이 아니라 카드가 없다. */
+    /**
+     * 내비 도착 알림까지 보낸 상태. 달린 뒤 N단(정차 쪽, 주행 제한 없음)에서 알림이 와 아직 P단이 아니라 카드가 없고 P단을 기다린다.
+     * (D·R 주행 중에 도착하면 그 자리에서 카드가 뜬다: [driveAndArriveWhileDriving])
+     */
     private fun driveAndArrive(afterMinutes: Long = 30): List<Effect> {
+        departAndDrive()
+        session.handle(Event.GearChanged(Gear.NEUTRAL))
+        clock.now += Duration.ofMinutes(afterMinutes)
+        return session.handle(Event.DestinationArrived)
+    }
+
+    /** 주행(D) 중에 내비 도착 알림을 보낸다(사용자 결정 2026-11-15: 이 순간 하차 카드가 바로 뜬다). */
+    private fun driveAndArriveWhileDriving(afterMinutes: Long = 30): List<Effect> {
         departAndDrive()
         clock.now += Duration.ofMinutes(afterMinutes)
         return session.handle(Event.DestinationArrived)
     }
 
     private fun park() = session.handle(Event.GearChanged(Gear.PARK))
+
+    @Test
+    fun 주행_중_내비_도착이면_그_자리에서_하차_카드를_한_번_말하고_듣지_않는다() {
+        val arrived = driveAndArriveWhileDriving()
+        val card = arrived.exitCard()!!
+        assertEquals("도착 · 내리기 전", card.status)
+        assertEquals("고객 미팅 메모에 ‘계약서 2부’가 있어요.", card.voice)
+        assertEquals("챙겼어요", card.primary)
+        assertEquals(Rules.EXIT_CARD, card.autoDismiss)
+        // 말은 한 번이고 듣기(마이크)는 열지 않는다.
+        val speak = arrived.one<Effect.Speak>()
+        assertEquals("고객 미팅 메모에 계약서 2부가 있어요.", speak.text)
+        assertFalse(speak.thenListen)
+        assertEquals(Rules.EXIT_CARD, arrived.one<Effect.ScheduleCardTimeout>().delay)
+        // 카드를 보였으니 대기는 지운다.
+        assertNull(arrived.savedExitTarget())
+        assertEquals(ScheduleStatus.ARRIVED, arrived.filterIsInstance<Effect.Save>().last().snapshot.statuses["a"])
+    }
+
+    @Test
+    fun 주행_중_도착으로_보인_카드는_이어지는_P단에서_다시_뜨지_않는다() {
+        driveAndArriveWhileDriving()
+        val parked = park()
+        assertTrue(parked.none { it is Effect.Speak || it is Effect.ShowCard })
+        assertNull(parked.savedExitTarget())
+        // 한 번 달렸다 다시 대도 그 도착으로는 뜨지 않는다.
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        assertTrue(park().none { it is Effect.Speak || it is Effect.ShowCard })
+    }
+
+    @Test
+    fun 주행_중_도착_카드는_5초_뒤_닫히고_챙겼어요로도_닫힌다() {
+        val arrived = driveAndArriveWhileDriving()
+        val timer = arrived.one<Effect.ScheduleCardTimeout>()
+        val closed = session.handle(Event.CardTimedOut(timer.timerId))
+        assertTrue(closed.has<Effect.StopVoice>())
+        assertTrue(closed.has<Effect.CollapseCard>())
+
+        newSession(gear = Gear.PARK)
+        driveAndArriveWhileDriving()
+        val pressed = session.handle(Event.PrimaryPressed)
+        assertTrue(pressed.has<Effect.CollapseCard>())
+    }
+
+    @Test
+    fun 주행_중_도착_카드가_떠_있는_동안_주행_제한_알림이_와도_접지_않는다() {
+        driveAndArriveWhileDriving()
+        val again = session.handle(Event.RestrictionChanged(true))
+        assertTrue(again.none { it is Effect.CollapseCard || it is Effect.StopVoice })
+        // 그래도 챙겼어요나 5초 타이머로는 닫힌다.
+        assertTrue(session.handle(Event.PrimaryPressed).has<Effect.CollapseCard>())
+    }
+
+    @Test
+    fun 주행_중_도착_뒤_정차하고_10분이_지나_다시_타면_다음_일정_한_줄이다() {
+        val arrived = driveAndArriveWhileDriving()
+        session.handle(Event.CardTimedOut(arrived.one<Effect.ScheduleCardTimeout>().timerId))
+        park()
+        clock.now += Duration.ofMinutes(20)
+        val request = session.handle(Event.Boarded).one<Effect.RequestTravelTime>()
+        assertEquals(cityHall, request.place)
+        val card = session.handle(Event.TravelTimeResult(request.requestId, null)).one<Effect.ShowCard>().card
+        assertEquals("출발할까요?", card.sub)
+        assertTrue(card.tiles.isEmpty())
+    }
+
+    @Test
+    fun 주행_중이어도_도착_말고_다른_이벤트로는_말도_카드도_없다() {
+        departAndDrive()
+        clock.now += Duration.ofMinutes(30)
+        val effects = listOf(
+            Event.GearChanged(Gear.REVERSE),
+            Event.GearChanged(Gear.DRIVE),
+            Event.RestrictionChanged(true),
+            Event.ForegroundChanged(true),
+            Event.ClockChanged,
+            Event.Boarded,
+            Event.AppEntered,
+            Event.LocationChanged(gangnam.position, 0),
+        ).flatMap { session.handle(it) }
+        assertTrue(effects.none { it is Effect.Speak || it is Effect.ShowCard })
+    }
 
     @Test
     fun 내비_도착_뒤_달린_다음_P단에서_하차_카드를_한_번_말하고_5초_뒤_닫는다() {
@@ -458,6 +551,7 @@ class DriveSessionExitCardTest {
         session.handle(Event.PrimaryPressed).one<Effect.StartRoute>()
         session.handle(Event.RouteRequestResult(true))
         session.handle(Event.GearChanged(Gear.DRIVE))
+        session.handle(Event.GearChanged(Gear.NEUTRAL))
         assertEquals("a", session.handle(Event.DestinationArrived).savedExitTarget())
         // 자정을 넘기고(15분 안) P단에 넣어도 새 날이라 카드가 없다.
         clock.now = Instant.parse("2026-12-04T00:02:00Z")

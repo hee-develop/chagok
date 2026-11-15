@@ -56,14 +56,15 @@ class DriveSessionServiceZoneTest {
         return session.handle(Event.TravelTimeResult(request.requestId, null))
     }
 
-    /** 첫 탑승 → 출발 제안 수락 → 주행 → 내비 도착 → P단(하차 카드). 마지막 효과 목록은 P단 이벤트의 것이다. */
+    /** 첫 탑승 → 출발 제안 수락 → 주행 → 내비 도착(주행 중이라 이 순간 하차 카드가 뜬다) → P단. 돌려주는 효과 목록은 내비 도착 이벤트의 것이다. */
     private fun Rig.driveToArrivalAndPark(): List<Effect> {
         boardWithCard()
         session.handle(Event.PrimaryPressed).one<Effect.StartRoute>()
         session.handle(Event.RouteRequestResult(true))
         session.handle(Event.GearChanged(Gear.DRIVE))
-        session.handle(Event.DestinationArrived)
-        return session.handle(Event.GearChanged(Gear.PARK))
+        val arrived = session.handle(Event.DestinationArrived)
+        session.handle(Event.GearChanged(Gear.PARK))
+        return arrived
     }
 
     /** [시간 +10분]을 [times]번 누르며 나온 효과 전부. */

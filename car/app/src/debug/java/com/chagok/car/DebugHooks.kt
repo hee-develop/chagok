@@ -51,6 +51,12 @@ object DebugInjection {
      */
     @Volatile var injectedLocation: LatLng? = null
 
+    /**
+     * 신호 `now=`로 마지막에 받은 데모 시작 시각. [데모 초기화] 버튼이 시계를 이 시각으로 되돌린다([DebugDemoReset]).
+     * null이면(받은 적 없음) 앱 시작 때의 시계로 되돌린다. 프로세스 메모리에만 있다.
+     */
+    @Volatile var demoStartAt: Instant? = null
+
     /** 가짜 경로 전체를 지나가는 데 걸리는 실제 시간(밀리초). 시연용 시간 압축 값이라 정책 기준값이 아니다. 신호 `drive=<초>`(소수 가능)로 바꾼다. */
     @Volatile var driveMillis: Long = DEFAULT_DRIVE_MILLIS
 

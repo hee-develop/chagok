@@ -874,9 +874,11 @@ class DriveSessionTest {
         clock.now += Duration.ofMinutes(30)
         val arrived = session.handle(Event.DestinationArrived)
         assertEquals(ScheduleStatus.ARRIVED, statusOf(arrived, "a"))
-        // 도착 순간에는 말하지 않는다.
-        assertTrue(arrived.none { it is Effect.Speak || it is Effect.ShowCard })
-        session.handle(Event.GearChanged(Gear.PARK))
+        // 주행 중 도착이라도 이 순간 하차 카드를 한 번 말한다(사용자 결정 2026-11-15). 이어지는 P단에는 같은 카드가 다시 뜨지 않는다.
+        assertEquals(1, arrived.count { it is Effect.ShowCard })
+        assertEquals(1, arrived.count { it is Effect.Speak })
+        val parked = session.handle(Event.GearChanged(Gear.PARK))
+        assertTrue(parked.none { it is Effect.Speak || it is Effect.ShowCard })
 
         // 잠깐 정차(10분)가 지나 다시 타면 다음 일정(점심 약속)을 한 줄로 묻는다.
         clock.now += Duration.ofMinutes(20)
