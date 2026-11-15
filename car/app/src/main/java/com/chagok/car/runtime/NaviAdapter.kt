@@ -2,9 +2,12 @@ package com.chagok.car.runtime
 
 import ai.pleos.playground.navi.constants.NaviErrorCode
 import ai.pleos.playground.navi.constants.RouteOption
+import ai.pleos.playground.navi.constants.WaypointIndex
 import ai.pleos.playground.navi.data.CurrentLocationInfo
 import ai.pleos.playground.navi.data.DestinationArrivedInfo
+import ai.pleos.playground.navi.data.RequestWaypointInfo
 import ai.pleos.playground.navi.data.RouteInfo
+import ai.pleos.playground.navi.data.RouteWithWaypointsRequest
 import ai.pleos.playground.navi.data.TripInfo
 import ai.pleos.playground.navi.data.TripRequest
 import ai.pleos.playground.navi.helper.NaviHelper
@@ -155,29 +158,51 @@ class NaviAdapter(context: Context, private val sink: (Event) -> Unit) : Navigat
     }
 
     override fun startRoute(place: Place): Boolean {
-        val helper = synchronized(lock) {
-            val current = naviHelper ?: return false
-            if (!tracker.ready) return false
-            current
-        }
+        val helper = readyHelper() ?: return false
         return try {
-            helper.requestRoute(
-                RouteInfo(
-                    latitude = place.position.lat,
-                    longitude = place.position.lng,
-                    poiName = place.name,
-                    poiId = "",
-                    address = "",
-                    poiSubId = "",
-                    routeOption = RouteOption.RECOMMENDED,
-                ),
-            )
+            helper.requestRoute(routeInfo(place))
             true
         } catch (e: Exception) {
             Log.w(TAG, "requestRoute 실패", e)
             false
         }
     }
+
+    /** 경유지 한 곳을 넣어 [place]로 길안내를 요청한다(`requestRouteWithWaypoints`, 경유지 최대 2개 중 첫째 자리). 실차 동작은 `docs/sdk-check.md` 확인 항목. */
+    override fun startRouteVia(place: Place, via: Place): Boolean {
+        val helper = readyHelper() ?: return false
+        return try {
+            helper.requestRouteWithWaypoints(
+                RouteWithWaypointsRequest(
+                    destination = routeInfo(place),
+                    waypoints = listOf(
+                        RequestWaypointInfo(via.position.lat, via.position.lng, via.name, WaypointIndex.FIRST, poiId = "", address = "", poiSubId = ""),
+                    ),
+                ),
+            )
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "requestRouteWithWaypoints 실패", e)
+            false
+        }
+    }
+
+    /** 내비에 연결된 helper. 연결 전(시작·재시작 직후)이면 null이라 요청하지 않고 실패로 안내한다. */
+    private fun readyHelper(): NaviHelper? = synchronized(lock) {
+        val current = naviHelper ?: return null
+        if (!tracker.ready) return null
+        current
+    }
+
+    private fun routeInfo(place: Place) = RouteInfo(
+        latitude = place.position.lat,
+        longitude = place.position.lng,
+        poiName = place.name,
+        poiId = "",
+        address = "",
+        poiSubId = "",
+        routeOption = RouteOption.RECOMMENDED,
+    )
 
     private fun resolveTrip(travelTime: Duration?) {
         val id = tracker.resolve() ?: return

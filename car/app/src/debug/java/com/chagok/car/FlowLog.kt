@@ -4,6 +4,7 @@ import android.util.Log
 import com.chagok.car.domain.ScheduleStatus
 import com.chagok.car.flow.Effect
 import com.chagok.car.flow.Event
+import kotlin.math.roundToInt
 
 /**
  * 디버그 빌드 전용 흐름 로그. 세션에 들어간 이벤트와 나온 Effect를 사람이 읽는 한 줄씩 `ChagokFlow` 태그로 남긴다.
@@ -76,7 +77,9 @@ object FlowLog {
         is Effect.ShowResult -> if (effect.text.isEmpty()) "결과 한 줄 지움" else "결과 한 줄: ${effect.text}"
         is Effect.ShowNextChip -> if (effect.text.isEmpty()) "다음 일정 칩 숨김" else "다음 일정 칩: ${effect.text}"
         is Effect.Speak -> "말함: ${oneLine(effect.text)}${if (effect.thenListen) " (듣기)" else ""}"
-        is Effect.StartRoute -> "길안내 요청: ${effect.place.name}"
+        is Effect.StartRoute -> "길안내 요청: ${effect.place.name}${effect.via?.let { " (경유 ${it.name})" }.orEmpty()}"
+        is Effect.RequestEnergyOptions -> "에너지 후보 요청: ${effect.request.fuel.server}"
+        is Effect.EnergyJudged -> "에너지: 필요 ${effect.neededKm.roundToInt()}km, 가능 ${effect.rangeKm.roundToInt()}km → ${if (effect.short) "모자람" else "넉넉함"}"
         is Effect.RequestTravelTime -> "소요 시간 요청: ${effect.place.name}"
         is Effect.Save -> describeSave(effect)
         else -> null

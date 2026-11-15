@@ -43,6 +43,7 @@ class FakeNaviFlowTest {
         override fun stop() { calls += "stop" }
         override fun requestTravelTime(requestId: Int, place: Place) { calls += "travel" }
         override fun startRoute(place: Place): Boolean { calls += "route"; return true }
+        override fun startRouteVia(place: Place, via: Place): Boolean { calls += "via"; return true }
         override fun requestLocation() { calls += "location" }
     }
 

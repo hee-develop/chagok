@@ -81,6 +81,24 @@ object Rules {
     fun overlapTravel(distanceMeters: Double): Duration =
         Duration.ofMillis(Math.round(distanceMeters / (OVERLAP_SPEED_KMH / 3.6) * 1000))
 
+    /**
+     * 에너지 여유(정책서 12장 '에너지 여유 90%', 가안): 필요 거리가 주행 가능 거리의 이 비율을 넘으면 출발 제안을 충전·주유 제안으로 바꾼다.
+     * 정확히 같으면 모자라지 않은 것이다([com.chagok.car.domain.EnergyNeed.isShort]).
+     */
+    const val ENERGY_MARGIN = 0.9
+
+    /**
+     * 필요 거리를 셀 때 구간의 직선거리에 곱하는 도로 보정(가안). 내비가 일정 사이 경로 거리를 주지 않아 직선거리로 근사하고,
+     * 실제 도로는 보통 직선보다 길어 1.3을 곱한다. 정책서 12장에 가안으로 추가할 값이다.
+     */
+    const val ROAD_DETOUR_FACTOR = 1.3
+
+    /**
+     * 서버 `POST /energy/options` 답을 기다리는 시간(가안). 서버는 외부 조회가 느리면 최대 12초까지 쓰지만 카드를 그만큼 막을 수 없어 짧게 끊는다.
+     * 넘으면(또는 429·실패) 원래 출발 제안에 "배터리가 모자랄 수 있어요." 한 문장만 붙인다. 정책서 12장에 가안으로 추가할 값이다.
+     */
+    val ENERGY_ANSWER_TIMEOUT: Duration = Duration.ofSeconds(5)
+
     val DEPARTURE_BUFFER: Duration = Duration.ofMinutes(10)
     const val CHATTER_OVER_WORDS = 4
 

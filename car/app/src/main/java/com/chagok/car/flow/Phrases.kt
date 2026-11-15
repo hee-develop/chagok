@@ -4,6 +4,10 @@ import com.chagok.car.domain.AskReason
 import com.chagok.car.domain.Briefing
 import com.chagok.car.domain.BoardingDecision
 import com.chagok.car.domain.DestinationOption
+import com.chagok.car.domain.EnergyGoal
+import com.chagok.car.domain.EnergyKind
+import com.chagok.car.domain.EnergyStop
+import com.chagok.car.domain.EnergyStopKind
 import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.HomePickup
@@ -21,6 +25,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * 카드와 음성 대사 전부. 디자인 가이드 voice.md의 장면별 대사 틀에 일정 데이터를 채운다.
@@ -67,6 +72,14 @@ object Phrases {
     const val HINT_SAY_JUST_GO = "“그냥 갈게”라고 말해도 돼요"
     const val HINT_AUTO_FOLD = "출발하면 자동으로 접혀요"
     const val HINT_SAY_PICK = "“첫 번째”, “두 번째”라고 말해도 돼요"
+    const val HINT_SAY_OTHER = "“다른 데”라고 하면 다른 곳을 찾아요"
+
+    // 에너지 제안(정책서 5장·9장). 문장은 이 틀에서만 만든다.
+    const val ACCEPT_CHARGE = "응, 충전하고 출발"
+    const val ACCEPT_REFUEL = "응, 넣고 출발"
+
+    /** 충전기 상태를 새로 받지 못해 낡은 데이터로 답했을 때 카드 한 줄(빈 곳을 단정하지 않는다, `docs/energy.md`). */
+    const val ENERGY_STALE = "충전기 상태를 새로 확인하지 못했어요."
 
     const val ASK_DESTINATION = "어디로 갈까요?"
 
@@ -211,9 +224,10 @@ object Phrases {
         memo: MemoNote,
         now: Instant,
         zone: ZoneId,
+        lowEnergy: EnergyKind? = null,
     ): Pair<String, String> {
         val until = untilStart(target, now, zone)
-        val sub = greetingSub(target, memo)
+        val sub = greetingSub(target, memo, lowEnergy)
         if (allDayTitle == null) return until to sub
         val full = "${allDayGreeting(allDayTitle)}\n$until"
         return if (voiceLines(full) <= 2) full to sub else allDayGreeting(allDayTitle) to "$until $sub"
@@ -236,12 +250,76 @@ object Phrases {
         kotlin.math.ceil(units / VOICE_LINE_UNITS).toInt().coerceAtLeast(1)
     }
 
-    /** 채비 문장. 메모가 짧으면 채비를 읽고, 길면 메모가 있다고만 하고, 없으면 출발을 묻는다. */
-    fun greetingSub(target: Schedule, memo: MemoNote): String = when (memo) {
-        is MemoNote.ReadAloud -> "${target.title} 메모에 ‘${memo.text}’${iGaJosa(memo.text)} 있어요. $ASK_DEPART"
-        MemoNote.HasMemo -> "${target.title} 메모가 있어요. $ASK_DEPART"
-        is MemoNote.Care -> "${careSentence(memo)} $ASK_DEPART"
-        MemoNote.None -> ASK_DEPART
+    /**
+     * 채비 문장. 메모가 짧으면 채비를 읽고, 길면 메모가 있다고만 하고, 없으면 출발을 묻는다.
+     * 에너지가 모자란데 충전·주유 후보를 못 얻었으면([lowEnergy]) 묻기 앞에 [energyLow] 한 문장만 붙인다.
+     */
+    fun greetingSub(target: Schedule, memo: MemoNote, lowEnergy: EnergyKind? = null): String {
+        val ask = lowEnergy?.let { "${energyLow(it)} $ASK_DEPART" } ?: ASK_DEPART
+        return when (memo) {
+            is MemoNote.ReadAloud -> "${target.title} 메모에 ‘${memo.text}’${iGaJosa(memo.text)} 있어요. $ask"
+            MemoNote.HasMemo -> "${target.title} 메모가 있어요. $ask"
+            is MemoNote.Care -> "${careSentence(memo)} $ask"
+            MemoNote.None -> ask
+        }
+    }
+
+    // ---- 에너지 제안 ----
+
+    /** 에너지가 모자란데 후보를 못 얻었을 때 출발 제안에 붙이는 한 문장(가안). */
+    fun energyLow(kind: EnergyKind) = if (kind.electric) "배터리가 모자랄 수 있어요." else "기름이 모자랄 수 있어요."
+
+    /** 에너지 제안 큰 문구: "집까지 300km인데 배터리로는 모자라요." 기름 차는 "…기름이 모자라요." 끝이 일정이면 "오늘 일정까지". */
+    fun energyShortage(q: Question.Energy): String {
+        val goal = if (q.goal == EnergyGoal.HOME) HOME else "오늘 일정"
+        val lack = if (q.kind.electric) "배터리로는 모자라요." else "기름이 모자라요."
+        return "${goal}까지 ${q.neededKm}km인데 $lack"
+    }
+
+    /**
+     * 에너지 제안 질문(한 카드에 질문 하나): 충전은 "{충전소}에서 충전하고 갈까요?", 서버가 식사 묶음을 알린 맨 앞 휴게소는
+     * "{휴게소}에서 식사하면서 충전하고 갈까요?", 주유는 "{주유소}에서 넣고 갈까요?".
+     */
+    fun energyAsk(q: Question.Energy): String {
+        val name = q.stop.place.name
+        return when {
+            q.stop.kind == EnergyStopKind.GAS_STATION -> "${name}에서 넣고 갈까요?"
+            q.mealBundle && q.index == 0 -> "${name}에서 식사하면서 충전하고 갈까요?"
+            else -> "${name}에서 충전하고 갈까요?"
+        }
+    }
+
+    /** 에너지 제안을 수락해 길안내를 시작했을 때 결과 한 줄. */
+    fun energyRouteStarted(stopName: String) = "$stopName 들렀다 갈게요."
+
+    /** 후보 타일 머리: 충전·주유 종류. */
+    private fun energyStopLabel(kind: EnergyStopKind) = when (kind) {
+        EnergyStopKind.SLOW_CHARGER -> "일정 근처 충전소"
+        EnergyStopKind.FAST_CHARGER -> "경로상 급속 충전"
+        EnergyStopKind.GAS_STATION -> "주유소"
+    }
+
+    /**
+     * 후보 타일 둘째 줄. 충전은 "완속 7kW · 빈 충전기 2대"(낡은 데이터면 빈 곳을 말하지 않는다), 주유는 "휘발유 1,639원/L". 모르는 값은 뺀다.
+     */
+    private fun energyStopLine(stop: EnergyStop, stale: Boolean): String = when (stop.kind) {
+        EnergyStopKind.GAS_STATION -> {
+            val fuel = if (stop.priceFuel == "diesel") "경유" else "휘발유"
+            stop.priceWon?.let { "$fuel ${java.text.NumberFormat.getInstance(Locale.KOREA).format(it)}원/L" }.orEmpty()
+        }
+        else -> {
+            val speed = if (stop.kind == EnergyStopKind.FAST_CHARGER) "급속" else "완속"
+            val power = stop.powerKw?.let { "$speed ${it}kW" } ?: speed
+            val available = stop.availableCount
+            val total = stop.totalCount
+            val state = when {
+                stale -> null
+                available != null && available > 0 -> "빈 충전기 ${available}대"
+                available == 0 && (total ?: 0) > 0 -> "모두 충전 중"
+                else -> null
+            }
+            listOfNotNull(power, state).joinToString(" · ")
+        }
     }
 
     /**
@@ -342,7 +420,7 @@ object Phrases {
         return when (val q = decision.question) {
             is Question.Depart -> {
                 val target = q.target
-                val (voice, sub) = greeting(briefing.allDayTitle, target, briefing.memo, now, zone)
+                val (voice, sub) = greeting(briefing.allDayTitle, target, briefing.memo, now, zone, q.lowEnergy)
                 base.copy(
                     voice = voice,
                     sub = sub,
@@ -358,6 +436,19 @@ object Phrases {
                 secondary = HOLD,
             )
             is Question.AskDestination -> askDestinationCard(base, q, zone)
+            is Question.Energy -> {
+                // 한 카드에 질문 하나: 출발 제안의 인사·채비 문장은 이 제안으로 대신하고, 후보 타일 하나 + 오늘 일정 타일(첫 탑승)을 보인다.
+                val stopTile = TileView.EnergyStop(energyStopLabel(q.stop.kind), q.stop.place.name, energyStopLine(q.stop, q.stale))
+                base.copy(
+                    voice = energyShortage(q),
+                    sub = energyAsk(q),
+                    tiles = (listOf(stopTile) + boardingTiles(briefing, zone)).take(2),
+                    primary = if (q.kind.electric) ACCEPT_CHARGE else ACCEPT_REFUEL,
+                    secondary = HOLD,
+                    hints = listOf(HINT_SAY_YES, HINT_SAY_OTHER),
+                    footnote = listOfNotNull(footnote, ENERGY_STALE.takeIf { q.stale && q.stop.kind != EnergyStopKind.GAS_STATION }).joinToString(" ").ifEmpty { null },
+                )
+            }
             is Question.Overlap -> base.copy(
                 voice = overlapVoice(q.first, q.second),
                 sub = ASK_DESTINATION,

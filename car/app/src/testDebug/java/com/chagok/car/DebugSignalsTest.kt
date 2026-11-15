@@ -1,6 +1,8 @@
 package com.chagok.car
 
+import com.chagok.car.domain.EnergyKind
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -15,6 +17,25 @@ class DebugSignalsTest {
     @Test fun `advance는 범위를 벗어나거나 숫자가 아니면 거부한다`() {
         for (bad in listOf("0", "-5", "10081", "99999999", "abc", "1.5", "")) {
             assertThrows("advance=$bad", IllegalArgumentException::class.java) { DebugSignals.advanceOf(bad) }
+        }
+    }
+
+    @Test fun `fuel은 ev gas diesel hybrid이고 real이면 주입을 푼다`() {
+        assertEquals(EnergyKind.EV, DebugSignals.fuelOf("ev"))
+        assertEquals(EnergyKind.GASOLINE, DebugSignals.fuelOf("GAS"))
+        assertEquals(EnergyKind.DIESEL, DebugSignals.fuelOf("diesel"))
+        assertEquals(EnergyKind.HYBRID, DebugSignals.fuelOf("hybrid"))
+        assertNull(DebugSignals.fuelOf("real"))
+        assertThrows(IllegalStateException::class.java) { DebugSignals.fuelOf("lpg") }
+    }
+
+    @Test fun `range는 0 이상의 km만 받고 real이면 주입을 푼다`() {
+        assertEquals(150.0, DebugSignals.rangeOf("150")!!, 0.0)
+        assertEquals(0.0, DebugSignals.rangeOf("0")!!, 0.0)
+        assertEquals(12.5, DebugSignals.rangeOf("12.5")!!, 0.0)
+        assertNull(DebugSignals.rangeOf("real"))
+        for (bad in listOf("-1", "abc", "", "NaN", "Infinity")) {
+            assertThrows("range=$bad", IllegalArgumentException::class.java) { DebugSignals.rangeOf(bad) }
         }
     }
 }

@@ -43,6 +43,14 @@ class FakeNavigator(private val post: (Event) -> Unit) : Navigator {
         return routeOk
     }
 
+    /** 경유지가 있는 길안내(에너지 제안 수락). 목적지는 [routes]에, 경유지는 [vias]에 기록한다. */
+    val vias = java.util.concurrent.CopyOnWriteArrayList<Place>()
+
+    override fun startRouteVia(place: Place, via: Place): Boolean {
+        vias += via
+        return startRoute(place)
+    }
+
     /** P단 도착 판단의 위치 답. null이면 답하지 않는다(내비가 연결되지 않은 것처럼). */
     @Volatile var location: com.chagok.car.domain.LatLng? = null
 

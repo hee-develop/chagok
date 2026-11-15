@@ -19,6 +19,9 @@ sealed interface TileView {
     /** 목적지 묻기의 후보 목록 타일(한 줄 가득). 줄 순서가 후보 번호이고 줄을 누르면 그 후보로 길안내한다. */
     data class Candidates(val label: String, val rows: List<CandidateRow>) : TileView
 
+    /** 에너지 제안의 충전소·주유소 후보 타일. [label]은 종류("일정 근처 충전소"), [name]은 이름, [line]은 "완속 7kW · 빈 충전기 2대" 같은 한 줄(비어 있을 수 있다). */
+    data class EnergyStop(val label: String, val name: String, val line: String) : TileView
+
     /** 휴대폰 연결 타일(한 줄 가득): QR 그림 + 연결 번호. [qr]은 QR에 담을 글, [code]는 화면에 보일 번호("123 456"). */
     data class Pairing(val qr: String, val code: String) : TileView
 }

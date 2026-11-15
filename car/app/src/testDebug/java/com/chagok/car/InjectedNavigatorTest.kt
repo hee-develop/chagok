@@ -25,6 +25,7 @@ class InjectedNavigatorTest {
         override fun stop() { calls += "stop" }
         override fun requestTravelTime(requestId: Int, place: Place) { calls += "travel:${place.name}" }
         override fun startRoute(place: Place): Boolean { calls += "route:${place.name}"; return true }
+        override fun startRouteVia(place: Place, via: Place): Boolean { calls += "via:${place.name}:${via.name}"; return true }
         override fun requestLocation() { calls += "location" }
     }
 
@@ -209,5 +210,28 @@ class InjectedNavigatorTest {
     @Test fun `debug 빌드의 가짜 길안내 기본값은 켬이다`() {
         // 다른 테스트가 reset()으로 false로 만들어 두므로 기본값 상수와 선언 초깃값을 따로 확인한다.
         assertTrue(DebugInjection.DEFAULT_FAKE_NAVI)
+    }
+
+    @Test fun `경유 길안내는 가짜 내비를 끄면 실제 내비에 맡기고 켜면 패널에 경유지를 보인다`() {
+        val via = Place("예시 충전소", LatLng(35.17, 126.89))
+        assertTrue(navigator.startRouteVia(place, via))
+        assertEquals(listOf("via:광주 육전집:예시 충전소"), inner.calls)
+        assertNull(fake.trip)
+
+        DebugInjection.fakeNavi = true
+        assertTrue(navigator.startRouteVia(place, via))
+        assertEquals("경로는 목적지로, 경유지는 패널 표시용", via, fake.trip!!.via)
+        assertEquals(place, fake.trip!!.route.destination)
+        assertEquals(1, inner.calls.size)
+        // 일반 길안내는 경유지가 없다
+        assertTrue(navigator.startRoute(place))
+        assertNull(fake.trip!!.via)
+    }
+
+    @Test fun `route=fail이면 경유 길안내도 실패로 답한다`() {
+        DebugInjection.fakeNavi = true
+        DebugInjection.routeOk = false
+        assertFalse(navigator.startRouteVia(place, Place("예시 충전소", LatLng(35.17, 126.89))))
+        assertNull(fake.trip)
     }
 }
