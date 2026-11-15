@@ -187,13 +187,15 @@ class SessionHost(
             resumed = true
             location.setForeground(true)
             updatePairing()
-            // 다시 묻기는 앱이 앞에 있을 때만 한다. 뒤에서 미뤄 둔 다시 묻기는 이 이벤트에서 이어 간다.
-            post(Event.ForegroundChanged(true))
             // 연결이 서버에서 풀렸는지 확인한다(운전자 교체·폰에서 해제). 서버에 닿지 못하면 해제로 보지 않는다.
             pairing.verify()
             // Suspend 중이었다면 어댑터를 다시 켠다. 포커스·재생은 되찾지 않는다.
             post(Event.Resumed)
             if (ignitionSupported == false) post(Event.AppEntered)
+            // 다시 묻기는 앱이 앞에 있을 때만 한다. 뒤에서 미뤄 둔 다시 묻기는 이 이벤트에서 이어 간다.
+            // 반드시 AppEntered 뒤에 넣는다: 먼저 넣으면 미뤄 둔 다시 묻기가 pending을 먼저 세워 뒤따르는 진짜 탑승(AppEntered)이 버려지고,
+            // 그 카드를 거절해도 이번 탑승이 소비되지 않아 내비에 갔다 돌아오면 같은 질문이 또 뜬다(docs/reask.md).
+            post(Event.ForegroundChanged(true))
             // 받기 시작은 위 이벤트를 큐에 넣은 뒤에 한다. 받기가 바로 끝나도 완료가 그 이벤트들 뒤에 오므로 그 이벤트는 받는 동안 보류된다.
             if (source.snapshot().origin != ScheduleOrigin.FRESH && !source.refreshing) refreshSchedules()
         }

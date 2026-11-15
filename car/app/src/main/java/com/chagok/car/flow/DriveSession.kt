@@ -917,6 +917,12 @@ class DriveSession(
             reaskAtPark = false
             return
         }
+        // 같은 이벤트 묶음의 진짜 탑승 판단이 일정을 받느라 보류돼 있으면 그쪽이 이 질문까지 다시 묻는 것으로 치고 소비한다.
+        // 여기서 다시 묻기를 보류하면 보류한 탑승이 '다시 묻기' 판단으로 바뀐다(탑승 종류·잠깐 정차 판단이 달라진다).
+        if (heldBoarding) {
+            reaskAtPark = false
+            return
+        }
         // 주행 제한이 아직 안 풀렸거나(P단 신호가 제한 해제보다 먼저 온 경우) 앱이 뒤에 있으면 기회를 쓰지 않고 기다린다.
         // 제한이 풀리거나 앱이 앞으로 오는 이벤트에서 이 함수가 다시 불려 이어서 묻는다(하차 카드와 같은 방식). D·R이 되거나 P단을 벗어나면 접는다.
         if (motion() != Motion.STOPPED || !foreground) return
@@ -1325,6 +1331,8 @@ class DriveSession(
     private fun onRouteResult(ok: Boolean, out: MutableList<Effect>) {
         if (!acceptedRoute) return
         acceptedRoute = false
+        // 길안내를 시작하지 못했으면 그 일정은 가고 있는 곳이 아니다: 기억을 지워 내비 도착으로 오인하거나 주행 중 칩이 계속 그 일정을 보이지 않게 한다.
+        if (!ok) routeScheduleId = null
         if (!canSpeak()) return
         val text = if (ok) Phrases.ROUTE_STARTED else Phrases.ROUTE_FAILED
         val timerId = ++seq

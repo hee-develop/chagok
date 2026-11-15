@@ -645,6 +645,63 @@ class DriveSessionReaskTest {
     }
 
     @Test
+    fun 뒤에_있던_P단_다시_묻기를_AppEntered_다음_앞으로_오는_순서로_거절하면_다시_앞으로_와도_묻지_않는다() {
+        boardAndIgnore()
+        session.handle(Event.ForegroundChanged(false))
+        driveAndPark(15)
+        // 15분 뒤 앱 진입: SessionHost는 AppEntered를 먼저, 그다음 ForegroundChanged(true)를 넣는다.
+        clock.now += Duration.ofMinutes(15)
+        val entered = session.handle(Event.AppEntered)
+        val front = session.handle(Event.ForegroundChanged(true))
+        assertTrue("진짜 탑승이 이미 판단 중이라 다시 묻기가 따로 끼어들면 안 된다", front.none { it is Effect.RequestTravelTime || it is Effect.ShowCard })
+        val shown = session.handle(Event.TravelTimeResult(entered.one<Effect.RequestTravelTime>().requestId, null))
+        assertTrue(shown.has<Effect.ShowCard>())
+        assertNull("카드를 띄우면 다시 묻을 기회를 쓴 것이다", shown.lastSnapshot().reask)
+        // 거절한다.
+        assertTrue(session.handle(Event.Heard("아니")).has<Effect.CollapseCard>())
+        // 내비에 갔다 돌아온다: 뒤로 갔다 다시 앞으로 오고 앱 진입도 온다. 이미 탑승으로 소비돼 인정되지 않고, 남은 질문도 없다.
+        session.handle(Event.ForegroundChanged(false))
+        val back = session.handle(Event.AppEntered) + session.handle(Event.ForegroundChanged(true))
+        assertTrue("거절한 질문은 다시 묻지 않는다", back.none { it is Effect.RequestTravelTime || it is Effect.ShowCard || it is Effect.Speak })
+    }
+
+    @Test
+    fun 앱_진입_탑승과_뒤에서_미룬_다시_묻기가_같이_와도_카드는_한_번만_뜬다() {
+        boardAndIgnore()
+        session.handle(Event.ForegroundChanged(false))
+        driveAndPark(15)
+        clock.now += Duration.ofMinutes(15)
+        val events = session.handle(Event.AppEntered) + session.handle(Event.ForegroundChanged(true))
+        val request = events.one<Effect.RequestTravelTime>()
+        val shown = session.handle(Event.TravelTimeResult(request.requestId, null))
+        assertEquals(1, shown.filterIsInstance<Effect.ShowCard>().size)
+        assertEquals(1, shown.filterIsInstance<Effect.Speak>().size)
+        // 이미 떠 있는 카드가 있으니 이후 앞으로 오는 이벤트가 또 묻지 않는다.
+        assertTrue(session.handle(Event.ForegroundChanged(true)).none { it is Effect.RequestTravelTime || it is Effect.ShowCard })
+    }
+
+    @Test
+    fun 일정을_받느라_앱_진입_탑승이_보류돼_있어도_뒤이은_앞으로_옴이_다시_묻기로_덮어쓰지_않는다() {
+        boardAndIgnore()
+        session.handle(Event.ForegroundChanged(false))
+        driveAndPark(15)
+        clock.now += Duration.ofMinutes(15)
+        origin = ScheduleOrigin.STORED
+        val entered = session.handle(Event.AppEntered)
+        assertTrue(entered.has<Effect.RefreshSchedules>())
+        val front = session.handle(Event.ForegroundChanged(true))
+        assertTrue(front.none { it is Effect.RefreshSchedules || it is Effect.RequestTravelTime || it is Effect.ShowCard })
+        origin = ScheduleOrigin.FRESH
+        session.handle(Event.ScheduleLoading(1))
+        val loaded = session.handle(Event.ScheduleLoaded(1))
+        val shown = session.handle(Event.TravelTimeResult(loaded.one<Effect.RequestTravelTime>().requestId, null))
+        assertEquals(1, shown.filterIsInstance<Effect.ShowCard>().size)
+        assertNull(shown.lastSnapshot().reask)
+        // 진짜 탑승으로 소비돼 탑승 기록이 남는다(P단 다시 묻기였다면 남지 않는다).
+        assertTrue(!shown.lastSnapshot().log.parkedAfterDriveSinceBoarding)
+    }
+
+    @Test
     fun 연결이_풀리면_보류해_둔_다시_묻기_표시도_지워_다음_연결의_첫_브리핑이_사라지지_않는다() {
         boardAndIgnore()
         origin = ScheduleOrigin.STORED

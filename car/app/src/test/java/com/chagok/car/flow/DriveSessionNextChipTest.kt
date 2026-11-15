@@ -104,14 +104,28 @@ class DriveSessionNextChipTest {
     }
 
     /** 점심(90분)이 고객 미팅(40~100분)과 겹쳐 겹침 카드에서 다음 일정(점심)을 골라 길안내를 시작한다. 길안내 중인 일정이 칩의 '다음 일정'(미팅)과 달라진다. */
-    private fun routeToSecondOfOverlap() {
+    private fun routeToSecondOfOverlap(result: Boolean? = true) {
         val overlapLunch = Schedule("b", "점심 약속", at(90), at(150), place = cityHall)
         begin(meeting, overlapLunch)
         session.handle(Event.Boarded)
         val request = session.handle(Event.SecondaryPressed).filterIsInstance<Effect.RequestTravelTime>().single()
         session.handle(Event.TravelTimeResult(request.requestId, null))
         session.handle(Event.PrimaryPressed)
-        session.handle(Event.RouteRequestResult(true))
+        result?.let { session.handle(Event.RouteRequestResult(it)) }
+    }
+
+    @Test fun `경로 요청이 실패하면 길안내 기억을 지워 칩이 남은 첫 일정이다`() {
+        routeToSecondOfOverlap(result = false)
+        assertEquals("00:40 고객 미팅", session.handle(Event.GearChanged(Gear.DRIVE)).chip())
+        // 실패한 길안내의 도착 알림은 도착으로 보지 않는다(칩이 그대로다).
+        assertEquals(null, session.handle(Event.DestinationArrived).chip())
+    }
+
+    @Test fun `주행 중에 경로 요청 실패 결과가 오면 칩이 길안내 일정에서 남은 첫 일정으로 바뀐다`() {
+        routeToSecondOfOverlap(result = null)
+        // 결과가 오기 전에는 수락한 일정(점심)이 칩이다.
+        assertEquals("01:30 점심 약속", session.handle(Event.GearChanged(Gear.DRIVE)).chip())
+        assertEquals("00:40 고객 미팅", session.handle(Event.RouteRequestResult(false)).chip())
     }
 
     @Test fun `길안내 중에는 칩이 지금 가고 있는 일정이고 도착하면 다음 일정으로 바뀐다`() {
