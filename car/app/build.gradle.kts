@@ -17,8 +17,8 @@ android {
         // Pleos Connect 요구사항: minSdk 28 이상, 플랫폼은 API 34
         minSdk = 28
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "com.chagok.car.E2eRunner"
     }
 
