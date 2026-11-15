@@ -99,6 +99,12 @@ object Rules {
      */
     val ENERGY_ANSWER_TIMEOUT: Duration = Duration.ofSeconds(5)
 
+    /**
+     * 충전소와 일정 장소 사이 걷는 속도(미터/분, 가안). 에너지 제안 문구의 "걸어서 N분"을 두 곳의 직선거리를 이 값으로 나눠 올림해 센다.
+     * 정책서 12장에 가안으로 추가할 값이다.
+     */
+    const val WALK_METERS_PER_MINUTE = 80.0
+
     val DEPARTURE_BUFFER: Duration = Duration.ofMinutes(10)
     const val CHATTER_OVER_WORDS = 4
 

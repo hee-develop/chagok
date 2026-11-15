@@ -1,7 +1,7 @@
 {
   "places": [
     { "id": "mock-yukjeon", "name": "광주 육전집", "address": "광주 서구 상무중앙로 1", "lat": 35.1595, "lng": 126.8526, "fictional": true },
-    { "id": "mock-champions-field", "name": "광주-기아 챔피언스필드", "address": "광주 북구 서림로 10", "lat": 35.1681, "lng": 126.8888 },
+    { "id": "mock-champions-field", "name": "광주-기아 챔피언스필드", "alias": "챔필", "address": "광주 북구 서림로 10", "lat": 35.1681, "lng": 126.8888 },
     { "id": "mock-kongmul", "name": "단골 콩물집", "address": "광주 동구 예시로 5", "lat": 35.146, "lng": 126.922, "fictional": true },
     { "id": "mock-gym", "name": "체육관", "address": "광주 서구 운동로 7", "lat": 35.1527, "lng": 126.8483, "fictional": true },
     { "id": "mock-home-apt", "name": "예시 아파트 101동", "address": "광주 북구 샘플로 12", "lat": 35.1743, "lng": 126.9121, "fictional": true },

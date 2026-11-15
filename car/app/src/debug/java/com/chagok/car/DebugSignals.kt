@@ -40,6 +40,8 @@ import java.time.Instant
  * - `fuel`: `ev`·`gas`·`diesel`·`hybrid`. 차가 읽은 연료 종류 대신 이 값을 에너지 체크에 쓴다. `real`이면 차가 읽은 값([EnergyOverride])
  * - `range`: 주행 가능 거리(km, 소수 가능, 0 이상). 차가 읽은 값 대신 쓴다. `real`이면 차가 읽은 값. 연료 종류와 주행 가능 거리를 둘 다 알아야 에너지 체크를 한다
  *   (`range=150&fuel=ev`). 에너지 신호는 `board`·`enter`·`ignition`·`gear`보다 먼저 세션에 들어가 같은 주소의 탑승 판단이 이 값을 본다
+ * - `battery`: 배터리·연료 잔량(0~100, 소수 가능). 차가 읽은 값 대신 카드의 배터리 타일 "45% · 갈 수 있는 거리 N km"에 쓴다(에너지 체크 판단에는 쓰지 않는다).
+ *   `real`이면 차가 읽은 값(못 읽으면 % 없이 거리만 보인다)
  * - `home`: 집 좌표 `위도,경도`. 서버 자주 가는 곳의 집 대신 쓴다(에너지 체크의 '집까지' 거리를 멀리 두는 시연용). `real`이면 서버 값
  * - `heard`: 들은 말(STT 결과). 빈 값이면 아무것도 못 들은 것(가장 마지막에 처리). 세션이 처리한 뒤 디버그 줄([DebugRow])에 "들은 말 처리: <말>"을 보인다
  */
@@ -74,10 +76,12 @@ object DebugSignals {
         value("home")?.let { DebugInjection.homeOverride = locOf(it) }
         val fuel = value("fuel")
         val range = value("range")
+        val battery = value("battery")
         fuel?.let { DebugInjection.fuel = fuelOf(it) }
         range?.let { DebugInjection.rangeKm = rangeOf(it) }
+        battery?.let { DebugInjection.batteryPercent = batteryOf(it) }
         // 에너지 신호는 같은 주소의 기어·탑승 이벤트보다 먼저 세션에 넣는다(메인 큐 순서).
-        if (fuel != null || range != null) host.post(EnergyOverride.merged())
+        if (fuel != null || range != null || battery != null) host.post(EnergyOverride.merged())
         value("ignition")?.let { host.post(Event.IgnitionChanged(Ignition.valueOf(it.uppercase()))) }
         value("gear")?.let { host.post(Event.GearChanged(gearOf(it))) }
         value("restricted")?.let { host.post(Event.RestrictionChanged(it.toBoolean())) }
@@ -117,6 +121,12 @@ object DebugSignals {
     internal fun rangeOf(text: String): Double? = when (text.lowercase()) {
         "real" -> null
         else -> text.toDouble().also { require(it.isFinite() && it >= 0.0) { "range는 0 이상의 km여야 합니다: $text" } }
+    }
+
+    /** `battery=<0~100>`. 0~100의 숫자만 받는다. `real`이면 null(주입 해제). */
+    internal fun batteryOf(text: String): Double? = when (text.lowercase()) {
+        "real" -> null
+        else -> text.toDouble().also { require(it.isFinite() && it in 0.0..100.0) { "battery는 0~100이어야 합니다: $text" } }
     }
 
     private fun gearOf(name: String) = when (name.uppercase()) {

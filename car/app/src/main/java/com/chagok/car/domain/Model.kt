@@ -17,7 +17,12 @@ data class LatLng(val lat: Double, val lng: Double) {
     }
 }
 
-data class Place(val name: String, val position: LatLng)
+/**
+ * 장소 하나. [alias]는 말·버튼에 쓰는 짧은 이름(광주-기아 챔피언스필드 → 챔필)으로 서버가 줄 때만 있다. 없으면 [name]을 쓴다([shortName]).
+ */
+data class Place(val name: String, val position: LatLng, val alias: String? = null) {
+    val shortName: String get() = alias?.trim()?.takeIf { it.isNotEmpty() } ?: name
+}
 
 /** 폰 첫 설정 2단계에서 정한 자주 가는 곳의 자리. */
 enum class FavoriteKind { HOME, WORK, OTHER }

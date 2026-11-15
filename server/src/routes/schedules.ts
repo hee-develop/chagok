@@ -90,7 +90,7 @@ export const createSchedulesRoute = (
     const key = locationText !== null && normalize(locationText) !== '' ? locationText : title;
     return d.memory.get(key);
   };
-  const toPlace = (p: MockPlace): PlaceFixture => ({ name: p.name, lat: p.lat, lng: p.lng });
+  const toPlace = (p: MockPlace): PlaceFixture => ({ name: p.name, ...(p.alias ? { alias: p.alias } : {}), lat: p.lat, lng: p.lng });
   const memoryPlace = (p: { name: string; lat: number; lng: number }): PlaceFixture => ({ name: p.name, lat: p.lat, lng: p.lng });
   /** 기억 한 줄을 일정 장소로: 애매하지 않으면 확정, 애매하면 확인 필요(suggestion)로만. 기억이 없으면 둘 다 null. */
   const fromMemory = (d: SeatData, locationText: string | null, title: string) => {

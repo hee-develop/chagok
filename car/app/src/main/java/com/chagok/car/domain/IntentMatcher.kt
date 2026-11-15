@@ -34,10 +34,17 @@ object IntentMatcher {
      * @param candidates 화면에 보인 후보 이름(장소 후보, 일정 겹침). 순서가 Pick.index다.
      * @param shortForms 후보의 화면에 보인 줄임 이름(말줄임 앞부분). [candidates]와 같은 순서이고 줄이지 않은 후보는 null이다.
      *   화면에 보인 만큼만 읽어 말해도 그 후보를 고르게 한다(일정 겹침 카드의 긴 제목).
+     * @param rejectPhrases 이 질문에서 거절로 듣는 버튼 라벨(공백 없이 이어 붙인 꼴로 비교). 에너지 제안의 "그냥 챔필로"처럼 질문마다 다르다.
      * @param acceptPick 수락("응")이 가리키는 후보 번호. "응, 서울시청"처럼 수락과 그 후보 고르기가
      *   같이 들리면 같은 결과이므로 Pick(acceptPick) 하나로 합친다. 후보가 없으면 null
      */
-    fun match(utterance: String, candidates: List<String> = emptyList(), acceptPick: Int? = null, shortForms: List<String?> = emptyList()): Intent {
+    fun match(
+        utterance: String,
+        candidates: List<String> = emptyList(),
+        acceptPick: Int? = null,
+        shortForms: List<String?> = emptyList(),
+        rejectPhrases: List<String> = emptyList(),
+    ): Intent {
         val tokens = utterance.lowercase()
             .replace(PUNCTUATION, " ")
             .split(WHITESPACE)
@@ -49,7 +56,7 @@ object IntentMatcher {
         val joined = tokens.joinToString("")
         val found = buildSet {
             WORDS.forEach { (intent, words) -> if (stems.any { it in words }) add(intent) }
-            if (REJECT_PHRASE in joined) add(Intent.Reject)
+            if (REJECT_PHRASE in joined || rejectPhrases.any { it in joined }) add(Intent.Reject)
             if (stems.any { it.startsWith("다른") }) add(Intent.Alternative)
             ORDINALS.forEachIndexed { i, words -> if (words.any { it in joined }) add(Intent.Pick(i)) }
             // 한 후보 이름이 다른 후보 이름 안에 들어 있으면("집"과 "단골 콩물집") 둘 다 들렸을 때 긴 이름만 고른다.

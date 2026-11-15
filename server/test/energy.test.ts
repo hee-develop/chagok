@@ -90,9 +90,9 @@ describe('POST /energy/options 전기차', () => {
     expect(ids(r)).toEqual(['EX-GJ-001', 'EX-GJ-004']);
     expect(r.candidates[0]).toMatchObject({
       kind: 'slow_charger',
-      name: '예시 챔필 주차장 충전소',
+      name: '챔필 옆 충전소',
       routeProgress: null,
-      detourMeters: 204,
+      detourMeters: 334,
       price: null,
       hasFood: null,
       charger: { status: 'available', availableCount: 2, totalCount: 3, powerKw: 7 },

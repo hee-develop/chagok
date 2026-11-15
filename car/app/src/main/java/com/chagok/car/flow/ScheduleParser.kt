@@ -53,7 +53,7 @@ object ScheduleParser {
     )
 
     private fun parsePlace(json: JSONObject) =
-        Place(json.getString("name"), LatLng(json.getDouble("lat"), json.getDouble("lng")))
+        Place(json.getString("name"), LatLng(json.getDouble("lat"), json.getDouble("lng")), json.optStringOrNull("alias"))
 
     private fun names(array: JSONArray) = List(array.length()) { array.getString(it) }
 

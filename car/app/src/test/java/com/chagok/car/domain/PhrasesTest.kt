@@ -660,55 +660,158 @@ class PhrasesTest {
         assertEquals(3, (Phrases.homeExitCard(long).tiles.single() as TileView.Care).items.size)
     }
 
-    private fun energyQuestion(kind: EnergyKind, stop: EnergyStop, goal: EnergyGoal = EnergyGoal.HOME, km: Int = 300, mealBundle: Boolean = false, index: Int = 0, stops: List<EnergyStop> = listOf(stop)) =
-        Question.Energy(game, kind, km, goal, stops, index = index, mealBundle = mealBundle)
+    // 시안(2026-11-15): 챔피언스필드(별칭 챔필)에서 약 334m 떨어진 완속 충전소 → 걸어서 5분
+    private val champions = Place("광주-기아 챔피언스필드", LatLng(35.1681, 126.8888), alias = "챔필")
+    private val kia = game.copy(place = champions)
 
-    private val slow = EnergyStop("s", EnergyStopKind.SLOW_CHARGER, Place("예시 챔필 주차장 충전소", LatLng(0.0, 0.0)), availableCount = 2, totalCount = 3, powerKw = 7)
-    private val fast = EnergyStop("f", EnergyStopKind.FAST_CHARGER, Place("예시 백양 휴게소", LatLng(0.0, 0.0)), availableCount = 0, totalCount = 2)
-    private val gas = EnergyStop("g", EnergyStopKind.GAS_STATION, Place("예시 서구 알뜰주유소", LatLng(0.0, 0.0)), priceWon = 1639, priceFuel = "gasoline")
+    private fun energyQuestion(
+        kind: EnergyKind,
+        stop: EnergyStop,
+        goal: EnergyGoal = EnergyGoal.HOME,
+        km: Int = 300,
+        mealBundle: Boolean = false,
+        index: Int = 0,
+        stops: List<EnergyStop> = listOf(stop),
+        percent: Int? = 45,
+        target: Schedule = kia,
+    ) = Question.Energy(target, EnergyShort(kind, km, goal, 150, percent), stops, index = index, mealBundle = mealBundle)
 
-    @Test fun `에너지 제안 큰 문구는 전기차와 기름 차가 다르다`() {
-        assertEquals("집까지 300km인데 배터리로는 모자라요.", Phrases.energyShortage(energyQuestion(EnergyKind.EV, slow)))
-        assertEquals("집까지 300km인데 기름이 모자라요.", Phrases.energyShortage(energyQuestion(EnergyKind.GASOLINE, gas)))
-        assertEquals("집까지 300km인데 기름이 모자라요.", Phrases.energyShortage(energyQuestion(EnergyKind.DIESEL, gas)))
-        assertEquals("집까지 300km인데 기름이 모자라요.", Phrases.energyShortage(energyQuestion(EnergyKind.HYBRID, gas)))
-        assertEquals("오늘 일정까지 41km인데 배터리로는 모자라요.", Phrases.energyShortage(energyQuestion(EnergyKind.EV, slow, EnergyGoal.LAST_SCHEDULE, 41)))
+    private val slow = EnergyStop("s", EnergyStopKind.SLOW_CHARGER, Place("챔필 옆 충전소", LatLng(35.1711, 126.8888)), availableCount = 2, totalCount = 3, powerKw = 7)
+    private val fast = EnergyStop("f", EnergyStopKind.FAST_CHARGER, Place("예시 백양 휴게소", LatLng(35.4, 126.87)), availableCount = 0, totalCount = 2)
+    private val gas = EnergyStop("g", EnergyStopKind.GAS_STATION, Place("예시 서구 알뜰주유소", LatLng(35.17, 126.9)), priceWon = 1639, priceFuel = "gasoline")
+
+    @Test fun `에너지 제안 큰 문구는 대상 일정 안내다`() {
+        assertEquals("다음은 5시 KIA 직관이에요.", Phrases.energyVoice(kia, SEOUL))
+        assertEquals("다음은 9시 콩물 픽업이에요.", Phrases.energyVoice(pickup, SEOUL))
+        assertEquals("다음은 1시 40분 점심 약속이에요.", Phrases.energyVoice(sched("x", "점심 약속", "13:40"), SEOUL))
     }
 
-    @Test fun `에너지 제안 질문은 충전 식사 묶음 주유가 다르다`() {
-        assertEquals("예시 챔필 주차장 충전소에서 충전하고 갈까요?", Phrases.energyAsk(energyQuestion(EnergyKind.EV, slow)))
+    @Test fun `머무는 동안 충전 질문은 별칭과 걸어서 걸리는 분과 머무는 표현이 들어간다`() {
+        assertEquals(
+            "챔필에서 걸어서 5분 거리에 빈 완속 충전기가 있어요. 경기 보는 동안 충전할까요?",
+            Phrases.energyAsk(energyQuestion(EnergyKind.EV, slow)),
+        )
+        // 직관·경기가 아니면 머무는 동안
+        val lunchAtChampions = sched("m", "회식", "17:00").copy(place = champions)
+        assertEquals(
+            "챔필에서 걸어서 5분 거리에 빈 완속 충전기가 있어요. 머무는 동안 충전할까요?",
+            Phrases.energyAsk(energyQuestion(EnergyKind.EV, slow, target = lunchAtChampions)),
+        )
+        // 별칭이 없으면 장소 이름, 낡은 데이터면 '빈'을 뺀다
+        val noAlias = kia.copy(place = champions.copy(alias = null))
+        assertEquals(
+            "광주-기아 챔피언스필드에서 걸어서 5분 거리에 완속 충전기가 있어요. 경기 보는 동안 충전할까요?",
+            Phrases.energyAsk(energyQuestion(EnergyKind.EV, slow, target = noAlias).copy(stale = true)),
+        )
+    }
+
+    @Test fun `걸어서 걸리는 분은 분속 80m로 올리고 1분이 최소다`() {
+        assertEquals(5, Phrases.walkMinutes(slow, champions))
+        assertEquals(1, Phrases.walkMinutes(slow, Place("바로 옆", LatLng(35.1711, 126.8888))))
+        assertEquals(1, Phrases.walkMinutes(slow, Place("40m", LatLng(35.17146, 126.8888))))
+        // 160m 딱 맞으면 2분, 넘으면 3분
+        val at160 = Place("160m", LatLng(35.1711 + 160 / 111_195.0, 126.8888))
+        assertEquals(2, Phrases.walkMinutes(slow, at160))
+        assertEquals(3, Phrases.walkMinutes(slow, Place("161m", LatLng(35.1711 + 161 / 111_195.0, 126.8888))))
+    }
+
+    @Test fun `경로상 급속과 주유 질문은 기존 톤이다`() {
         assertEquals("예시 백양 휴게소에서 충전하고 갈까요?", Phrases.energyAsk(energyQuestion(EnergyKind.EV, fast)))
         assertEquals("예시 백양 휴게소에서 식사하면서 충전하고 갈까요?", Phrases.energyAsk(energyQuestion(EnergyKind.EV, fast, mealBundle = true)))
         // 식사 묶음은 맨 앞 후보에만 뜻이 있다(대안으로 바꾼 뒤에는 충전만)
-        assertEquals("예시 챔필 주차장 충전소에서 충전하고 갈까요?", Phrases.energyAsk(energyQuestion(EnergyKind.EV, fast, mealBundle = true, index = 1, stops = listOf(fast, slow))))
+        val other = fast.copy(id = "f2", place = Place("예시 정읍 휴게소", LatLng(35.57, 126.87)))
+        assertEquals("예시 정읍 휴게소에서 충전하고 갈까요?", Phrases.energyAsk(energyQuestion(EnergyKind.EV, fast, mealBundle = true, index = 1, stops = listOf(fast, other))))
         assertEquals("예시 서구 알뜰주유소에서 넣고 갈까요?", Phrases.energyAsk(energyQuestion(EnergyKind.GASOLINE, gas)))
     }
 
-    @Test fun `에너지 제안 카드는 버튼 힌트 후보 타일을 둔다`() {
-        val b = briefing(Briefing.Level.ONE_LINE, game)
-        val ev = card(b, energyQuestion(EnergyKind.EV, slow), "16:00")
-        assertEquals("응, 충전하고 출발", ev.primary)
-        assertEquals("잠깐만", ev.secondary)
-        assertEquals(listOf(Phrases.HINT_SAY_YES, Phrases.HINT_SAY_OTHER), ev.hints)
-        assertEquals(TileView.EnergyStop("일정 근처 충전소", "예시 챔필 주차장 충전소", "완속 7kW · 빈 충전기 2대"), ev.tiles.single())
-        val g = card(b, energyQuestion(EnergyKind.GASOLINE, gas), "16:00")
-        assertEquals("응, 넣고 출발", g.primary)
-        assertEquals(TileView.EnergyStop("주유소", "예시 서구 알뜰주유소", "휘발유 1,639원/L"), g.tiles.single())
-        // 모두 충전 중이면 그렇게 말하고, 낡은 데이터면 빈 곳을 말하지 않는다
-        assertEquals("급속 · 모두 충전 중", (card(b, energyQuestion(EnergyKind.EV, fast), "16:00").tiles.single() as TileView.EnergyStop).line)
-        val stale = card(b, energyQuestion(EnergyKind.EV, slow).copy(stale = true), "16:00")
-        assertEquals("완속 7kW", (stale.tiles.single() as TileView.EnergyStop).line)
-        assertEquals(Phrases.ENERGY_STALE, stale.footnote)
-        // 경유 길안내를 시작한 결과 한 줄
-        assertEquals("예시 챔필 주차장 충전소 들렀다 갈게요.", Phrases.energyRouteStarted("예시 챔필 주차장 충전소"))
+    @Test fun `배터리 타일은 잔량과 갈 수 있는 거리와 이유 한 줄이다`() {
+        assertEquals(
+            TileView.EnergyLevel("배터리", "45%", "· 갈 수 있는 거리 150km", "집까지 300km라 한 번 충전이 필요해요"),
+            Phrases.energyLevelTile(EnergyShort(EnergyKind.EV, 300, EnergyGoal.HOME, 150, 45)),
+        )
+        // 잔량을 모르면 % 없이 거리만
+        assertEquals(
+            TileView.EnergyLevel("배터리", null, "갈 수 있는 거리 150km", "집까지 300km라 한 번 충전이 필요해요"),
+            Phrases.energyLevelTile(EnergyShort(EnergyKind.EV, 300, EnergyGoal.HOME, 150, null)),
+        )
+        // 기름 차는 '연료'와 주유, 끝이 집이 아니면 오늘 일정
+        assertEquals(
+            TileView.EnergyLevel("연료", "20%", "· 갈 수 있는 거리 80km", "오늘 일정까지 41km라 주유가 필요해요"),
+            Phrases.energyLevelTile(EnergyShort(EnergyKind.GASOLINE, 41, EnergyGoal.LAST_SCHEDULE, 80, 20)),
+        )
+        assertEquals("연료", Phrases.energyLevelTile(EnergyShort(EnergyKind.HYBRID, 300, EnergyGoal.HOME, 150, null)).title)
     }
 
-    @Test fun `충전·주유 후보를 얻지 못했을 때 출발 제안에 붙는 한 문장`() {
+    @Test fun `에너지 제안 카드는 시안대로 큰 문구 질문 두 타일 버튼 힌트다`() {
+        val b = briefing(Briefing.Level.ONE_LINE, kia)
+        val ev = card(b, energyQuestion(EnergyKind.EV, slow), "16:00")
+        assertEquals("정차 중 · 출발 전", ev.status)
+        assertEquals("다음은 5시 KIA 직관이에요.", ev.voice)
+        assertEquals("챔필에서 걸어서 5분 거리에 빈 완속 충전기가 있어요. 경기 보는 동안 충전할까요?", ev.sub)
+        assertEquals("응, 거기로", ev.primary)
+        assertEquals("그냥 챔필로", ev.secondary)
+        assertEquals(listOf(Phrases.HINT_SAY_YES, Phrases.HINT_AUTO_FOLD), ev.hints)
+        assertEquals(
+            listOf(
+                TileView.EnergyStop("챔필 옆 충전소", "지금 비어 있음", "완속 2대", "경기장까지 걸어서 5분", "충전기 현황 · 환경부 충전소 정보"),
+                TileView.EnergyLevel("배터리", "45%", "· 갈 수 있는 거리 150km", "집까지 300km라 한 번 충전이 필요해요"),
+            ),
+            ev.tiles,
+        )
+        // 말하는 문장은 큰 문구 → 질문 순서이고 배터리 타일 내용은 말하지 않는다
+        assertEquals("다음은 5시 KIA 직관이에요. 챔필에서 걸어서 5분 거리에 빈 완속 충전기가 있어요. 경기 보는 동안 충전할까요?", Phrases.spoken(ev))
+        // 이전 방식("집까지 300km인데 배터리로는 모자라요.")은 큰 문구에 쓰지 않는다
+        assertFalse(ev.voice.contains("모자라"))
+    }
+
+    @Test fun `경로상 급속과 주유 카드는 들렀다 가는 버튼이고 오른쪽 타일은 배터리 또는 연료다`() {
+        val b = briefing(Briefing.Level.ONE_LINE, kia)
+        val gasCard = card(b, energyQuestion(EnergyKind.GASOLINE, gas, percent = null), "16:00")
+        assertEquals("응, 들렀다 가요", gasCard.primary)
+        assertEquals("그냥 챔필로", gasCard.secondary)
+        assertEquals(TileView.EnergyStop("예시 서구 알뜰주유소", null, "휘발유 1,639원/L", "가는 길에 있어요", "가격 · 오피넷"), gasCard.tiles[0])
+        assertEquals(TileView.EnergyLevel("연료", null, "갈 수 있는 거리 150km", "집까지 300km라 주유가 필요해요"), gasCard.tiles[1])
+        val fastCard = card(b, energyQuestion(EnergyKind.EV, fast), "16:00")
+        assertEquals("응, 들렀다 가요", fastCard.primary)
+        // 모두 충전 중이면 그렇게 말한다
+        assertEquals(TileView.EnergyStop("예시 백양 휴게소", "모두 충전 중", "급속 2대", "가는 길에 있어요", "충전기 현황 · 환경부 충전소 정보"), fastCard.tiles[0])
+    }
+
+    @Test fun `낡은 충전기 데이터는 빈 곳을 말하지 않고 확인 문구를 붙인다`() {
+        val stale = card(briefing(Briefing.Level.ONE_LINE, kia), energyQuestion(EnergyKind.EV, slow).copy(stale = true), "16:00")
+        assertEquals(TileView.EnergyStop("챔필 옆 충전소", null, "완속", "경기장까지 걸어서 5분", "충전기 현황 · 환경부 충전소 정보"), stale.tiles[0])
+        assertEquals(Phrases.ENERGY_STALE, stale.footnote)
+    }
+
+    @Test fun `보조 버튼 이름은 조사를 맞추고 별칭이 없으면 장소 이름이다`() {
+        val q = energyQuestion(EnergyKind.EV, slow)
+        assertEquals("그냥 챔필로", Phrases.energyJustGo(q))
+        assertEquals("그냥 광주-기아 챔피언스필드로", Phrases.energyJustGo(q.copy(target = kia.copy(place = champions.copy(alias = null)))))
+        // ㄹ 받침은 '로'
+        assertEquals("그냥 서울로", Phrases.energyJustGo(q.copy(target = kia.copy(place = Place("광주", LatLng(0.0, 0.0), alias = "서울")))))
+        assertEquals("그냥 집으로", Phrases.energyJustGo(q.copy(target = kia.copy(place = Place("광주", LatLng(0.0, 0.0), alias = "집")))))
+        assertEquals(listOf("그냥챔필로", "그냥가"), Phrases.rejectPhrases(q))
+        assertTrue(Phrases.rejectPhrases(Question.Depart(kia)).isEmpty())
+    }
+
+    @Test fun `수락 결과 한 줄은 완속 충전소는 안내할게요 경유지는 들렀다 갈게요다`() {
+        assertEquals("챔필 옆 충전소로 안내할게요.", Phrases.energyChargeRouteStarted("챔필 옆 충전소"))
+        assertEquals("예시 백양 휴게소 들렀다 갈게요.", Phrases.energyRouteStarted("예시 백양 휴게소"))
+    }
+
+    @Test fun `충전·주유 후보를 얻지 못했을 때 출발 제안에 붙는 한 문장과 배터리 타일`() {
         assertEquals("배터리가 모자랄 수 있어요.", Phrases.energyLow(EnergyKind.EV))
         assertEquals("기름이 모자랄 수 있어요.", Phrases.energyLow(EnergyKind.GASOLINE))
         val b = briefing(Briefing.Level.ONE_LINE, game, memo = MemoNote.ReadAloud("유니폼"))
-        val c = card(b, Question.Depart(game, lowEnergy = EnergyKind.EV), "16:00")
+        val short = EnergyShort(EnergyKind.EV, 300, EnergyGoal.HOME, 150, 45)
+        val c = card(b, Question.Depart(game, lowEnergy = short), "16:00")
         assertEquals("KIA 직관 메모에 ‘유니폼’이 있어요. 배터리가 모자랄 수 있어요. 출발할까요?", c.sub)
+        // 큰 문구와 버튼은 평소 출발 제안이고, 배터리 타일이 이유 한 줄과 함께 앞에 선다(채비 타일과 함께 두 칸)
+        assertEquals("5시 KIA 직관까지 1시간이에요.", c.voice)
+        assertEquals("응, 출발", c.primary)
+        assertEquals(Phrases.energyLevelTile(short), c.tiles[0])
+        assertTrue(c.tiles[1] is TileView.Care)
         assertEquals("출발할까요?", card(b.copy(memo = MemoNote.None), Question.Depart(game), "16:00").sub)
+        assertTrue(card(b.copy(memo = MemoNote.None), Question.Depart(game), "16:00").tiles.isEmpty())
     }
 }

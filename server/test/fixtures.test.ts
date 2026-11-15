@@ -29,6 +29,12 @@ describe('parseDayFixture', () => {
     expect(parseDayFixture(day({ ...schedule, place: null, locationText: null }))).toBeTruthy();
   });
 
+  it('place.alias(말·버튼에 쓰는 짧은 이름)는 비어 있지 않은 문자열만 받는다', () => {
+    expect(parseDayFixture(day({ ...schedule, place: { name: '광주-기아 챔피언스필드', alias: '챔필', lat: 35.1, lng: 126.8 } })).schedules[0]!.place).toMatchObject({ alias: '챔필' });
+    expect(() => parseDayFixture(day({ ...schedule, place: { name: 'x', alias: '', lat: 1, lng: 2 } }))).toThrow(/픽스처 일정 형식/);
+    expect(() => parseDayFixture(day({ ...schedule, place: { name: 'x', alias: 3, lat: 1, lng: 2 } }))).toThrow(/픽스처 일정 형식/);
+  });
+
   it.each([
     ['place.lat이 문자열', { ...schedule, place: { name: 'x', lat: '35.1', lng: 126.8 } }],
     ['place.lng가 없음', { ...schedule, place: { name: 'x', lat: 35.1 } }],

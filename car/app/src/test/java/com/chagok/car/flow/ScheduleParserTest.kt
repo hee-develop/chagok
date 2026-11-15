@@ -123,4 +123,25 @@ class ScheduleParserTest {
         assertEquals("유니폼·응원봉·티켓", a.care)
         assertNull(b.care)
     }
+
+    @Test fun `장소 별칭을 읽고 없으면 장소 이름이 짧은 이름이다`() {
+        val body = """
+            {"schedules":[
+              {"id":"a","title":"KIA 직관","start":"2026-11-06T08:00:00.000Z","end":"2026-11-06T11:00:00.000Z",
+               "allDay":false,"locationText":null,"place":{"name":"광주-기아 챔피언스필드","alias":"챔필","lat":35.1681,"lng":126.8888},"memo":null,"attendees":[]},
+              {"id":"b","title":"점심","start":"2026-11-06T04:00:00.000Z","end":"2026-11-06T05:00:00.000Z",
+               "allDay":false,"locationText":null,"place":{"name":"광주 육전집","lat":35.1595,"lng":126.8526},"memo":null,"attendees":[]}
+            ]}
+        """.trimIndent()
+        val (a, b) = ScheduleParser.parse(body)
+        assertEquals("챔필", a.place!!.alias)
+        assertEquals("챔필", a.place!!.shortName)
+        assertNull(b.place!!.alias)
+        assertEquals("광주 육전집", b.place!!.shortName)
+    }
+
+    @Test fun `광주 직관 하루 픽스처의 챔피언스필드는 챔필 별칭을 준다`() {
+        val kia = ScheduleParser.parse(FixtureResponses.response(fixture, anchor)).first { it.id == "gwangju-kia" }
+        assertEquals("챔필", kia.place!!.shortName)
+    }
 }

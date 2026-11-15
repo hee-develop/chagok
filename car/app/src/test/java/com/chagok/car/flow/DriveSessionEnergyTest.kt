@@ -80,8 +80,8 @@ class DriveSessionEnergyTest {
     private fun List<Effect>.card() = filterIsInstance<Effect.ShowCard>().last().card
 
     /** 연료 종류·주행 가능 거리·지금 위치를 알린다. */
-    private fun know(kind: EnergyKind? = EnergyKind.EV, range: Double? = 150.0, at: LatLng? = here) {
-        session.handle(Event.EnergyChanged(kind, range))
+    private fun know(kind: EnergyKind? = EnergyKind.EV, range: Double? = 150.0, at: LatLng? = here, battery: Double? = 45.0) {
+        session.handle(Event.EnergyChanged(kind, range, battery))
         at?.let { session.handle(Event.LocationChanged(it)) }
     }
 
@@ -133,15 +133,20 @@ class DriveSessionEnergyTest {
         know()
         val out = energyCard()
         val card = out.card()
-        assertEquals("집까지 ${neededKm()}km인데 배터리로는 모자라요.", card.voice)
-        assertEquals("예시 강남 충전소에서 충전하고 갈까요?", card.sub)
-        assertEquals("응, 충전하고 출발", card.primary)
-        assertEquals("잠깐만", card.secondary)
+        // 큰 문구는 대상 일정 안내, 그 아래가 충전 제안(별칭이 없는 장소는 이름), '집까지 N km'는 배터리 타일의 이유 한 줄이다.
+        assertEquals("다음은 12시 40분 고객 미팅이에요.", card.voice)
+        assertEquals("강남역에서 걸어서 1분 거리에 빈 완속 충전기가 있어요. 머무는 동안 충전할까요?", card.sub)
+        assertEquals("응, 거기로", card.primary)
+        assertEquals("그냥 강남역으로", card.secondary)
+        assertEquals(listOf(Phrases.HINT_SAY_YES, Phrases.HINT_AUTO_FOLD), card.hints)
         assertEquals(Phrases.STATUS_BEFORE_DEPARTURE, card.status)
-        val tile = card.tiles.first() as TileView.EnergyStop
-        assertEquals("일정 근처 충전소", tile.label)
-        assertEquals("예시 강남 충전소", tile.name)
-        assertEquals("완속 7kW · 빈 충전기 2대", tile.line)
+        assertEquals(
+            listOf(
+                TileView.EnergyStop("예시 강남 충전소", "지금 비어 있음", "완속 2대", "강남역까지 걸어서 1분", "충전기 현황 · 환경부 충전소 정보"),
+                TileView.EnergyLevel("배터리", "45%", "· 갈 수 있는 거리 150km", "집까지 ${neededKm()}km라 한 번 충전이 필요해요"),
+            ),
+            card.tiles,
+        )
         val speak = out.one<Effect.Speak>()
         assertTrue(speak.thenListen)
         assertEquals("${card.voice} ${card.sub}", speak.text)
@@ -149,12 +154,26 @@ class DriveSessionEnergyTest {
     }
 
     @Test
-    fun 필요_거리_숫자는_반올림한_값을_말한다() {
+    fun 필요_거리_숫자는_반올림한_값이_배터리_타일_이유에_들어간다() {
         know()
-        val voice = energyCard().card().voice
+        val reason = (energyCard().card().tiles[1] as TileView.EnergyLevel).reason
         // 지금 위치 → 강남역 → 서울시청 → 부산 집
-        assertTrue(voice, voice.startsWith("집까지 ${neededKm()}km인데"))
+        assertTrue(reason, reason.startsWith("집까지 ${neededKm()}km라"))
         assertTrue(neededKm() > 400)
+    }
+
+    @Test
+    fun 배터리_잔량을_모르면_타일은_퍼센트_없이_갈_수_있는_거리만_보인다() {
+        know(battery = null)
+        val tile = energyCard().card().tiles[1] as TileView.EnergyLevel
+        assertNull(tile.percent)
+        assertEquals("갈 수 있는 거리 150km", tile.level)
+    }
+
+    @Test
+    fun 범위_밖_잔량은_모름으로_본다() {
+        know(battery = 120.0)
+        assertNull((energyCard().card().tiles[1] as TileView.EnergyLevel).percent)
     }
 
     @Test
@@ -164,10 +183,12 @@ class DriveSessionEnergyTest {
         assertEquals(EnergyKind.GASOLINE, ask.request.fuel)
         assertNull("머무는 시간은 전기차에만 보낸다", ask.request.stay)
         val card = answer(EnergyOptions(listOf(gas)), ask).card()
-        assertEquals("집까지 ${neededKm()}km인데 기름이 모자라요.", card.voice)
+        assertEquals("다음은 12시 40분 고객 미팅이에요.", card.voice)
         assertEquals("예시 서구 알뜰주유소에서 넣고 갈까요?", card.sub)
-        assertEquals("응, 넣고 출발", card.primary)
-        assertEquals("휘발유 1,639원/L", (card.tiles.first() as TileView.EnergyStop).line)
+        assertEquals("응, 들렀다 가요", card.primary)
+        assertEquals("그냥 강남역으로", card.secondary)
+        assertEquals("휘발유 1,639원/L", (card.tiles.first() as TileView.EnergyStop).detail)
+        assertEquals(TileView.EnergyLevel("연료", "45%", "· 갈 수 있는 거리 150km", "집까지 ${neededKm()}km라 주유가 필요해요"), card.tiles[1])
     }
 
     @Test
@@ -175,7 +196,7 @@ class DriveSessionEnergyTest {
         know(EnergyKind.HYBRID)
         val ask = boardAndTravel().one<Effect.RequestEnergyOptions>()
         assertEquals(EnergyKind.HYBRID, ask.request.fuel)
-        assertTrue(answer(EnergyOptions(listOf(gas)), ask).card().voice.endsWith("기름이 모자라요."))
+        assertEquals("연료", (answer(EnergyOptions(listOf(gas)), ask).card().tiles[1] as TileView.EnergyLevel).title)
     }
 
     @Test
@@ -185,7 +206,7 @@ class DriveSessionEnergyTest {
         know(range = 10.0)
         val card = energyCard().card()
         val km = EnergyNeed.of(here, listOf(gangnam.position, cityHall.position), null)!!.spokenKm
-        assertEquals("오늘 일정까지 ${km}km인데 배터리로는 모자라요.", card.voice)
+        assertEquals("오늘 일정까지 ${km}km라 한 번 충전이 필요해요", (card.tiles[1] as TileView.EnergyLevel).reason)
     }
 
     @Test
@@ -193,29 +214,53 @@ class DriveSessionEnergyTest {
         know()
         val card = energyCard(EnergyOptions(listOf(chargerB, charger), mealBundle = true)).card()
         assertEquals("예시 양재 휴게소에서 식사하면서 충전하고 갈까요?", card.sub)
-        assertEquals("경로상 급속 충전", (card.tiles.first() as TileView.EnergyStop).label)
-        assertEquals("급속 100kW · 빈 충전기 1대", (card.tiles.first() as TileView.EnergyStop).line)
+        assertEquals("응, 들렀다 가요", card.primary)
+        assertEquals(TileView.EnergyStop("예시 양재 휴게소", "지금 비어 있음", "급속 1대", "가는 길에 있어요", "충전기 현황 · 환경부 충전소 정보"), card.tiles.first())
     }
 
     @Test
     fun 충전기_상태가_낡았으면_빈_곳을_말하지_않고_확인_문구를_붙인다() {
         know()
         val card = energyCard(EnergyOptions(listOf(charger), stale = true)).card()
-        assertEquals("완속 7kW", (card.tiles.first() as TileView.EnergyStop).line)
+        val tile = card.tiles.first() as TileView.EnergyStop
+        assertNull(tile.badge)
+        assertEquals("완속", tile.detail)
+        assertEquals("강남역에서 걸어서 1분 거리에 완속 충전기가 있어요. 머무는 동안 충전할까요?", card.sub)
         assertEquals(Phrases.ENERGY_STALE, card.footnote)
     }
 
     @Test
-    fun 수락하면_충전소를_경유지로_넣어_대상_일정으로_길안내하고_들렀다_간다고_알린다() {
+    fun 완속_충전소_수락은_충전소를_목적지로_길안내하고_안내할게요라고_알린다() {
         know()
         energyCard()
         val out = session.handle(Event.Heard("응"))
         val route = out.one<Effect.StartRoute>()
-        assertEquals(gangnam, route.place)
-        assertEquals(charger.place, route.via)
+        assertEquals("경유지가 아니라 충전소가 목적지", charger.place, route.place)
+        assertNull(route.via)
         val result = session.handle(Event.RouteRequestResult(true))
-        assertEquals("예시 강남 충전소 들렀다 갈게요.", result.one<Effect.ShowResult>().text)
-        assertEquals("예시 강남 충전소 들렀다 갈게요.", result.one<Effect.Speak>().text)
+        assertEquals("예시 강남 충전소로 안내할게요.", result.one<Effect.ShowResult>().text)
+        assertEquals("예시 강남 충전소로 안내할게요.", result.one<Effect.Speak>().text)
+    }
+
+    @Test
+    fun 경로상_급속_수락은_경유지로_넣어_대상_일정으로_길안내하고_들렀다_간다고_알린다() {
+        know()
+        energyCard(EnergyOptions(listOf(chargerB)))
+        val route = session.handle(Event.Heard("응")).one<Effect.StartRoute>()
+        assertEquals(gangnam, route.place)
+        assertEquals(chargerB.place, route.via)
+        assertEquals("예시 양재 휴게소 들렀다 갈게요.", session.handle(Event.RouteRequestResult(true)).one<Effect.ShowResult>().text)
+    }
+
+    @Test
+    fun 주유_수락도_경유지다() {
+        know(EnergyKind.GASOLINE)
+        val ask = boardAndTravel().one<Effect.RequestEnergyOptions>()
+        answer(EnergyOptions(listOf(gas)), ask)
+        val route = session.handle(Event.PrimaryPressed).one<Effect.StartRoute>()
+        assertEquals(gangnam, route.place)
+        assertEquals(gas.place, route.via)
+        assertEquals("예시 서구 알뜰주유소 들렀다 갈게요.", session.handle(Event.RouteRequestResult(true)).one<Effect.ShowResult>().text)
     }
 
     @Test
@@ -223,37 +268,33 @@ class DriveSessionEnergyTest {
         know()
         energyCard()
         val route = session.handle(Event.PrimaryPressed).one<Effect.StartRoute>()
-        assertEquals(charger.place, route.via)
+        assertEquals(charger.place, route.place)
+        assertNull(route.via)
     }
 
     @Test
-    fun 경유_길안내가_실패하면_실패를_알린다() {
+    fun 보조_버튼은_충전_없이_원래_장소로_길안내한다() {
         know()
         energyCard()
-        session.handle(Event.PrimaryPressed)
-        val result = session.handle(Event.RouteRequestResult(false))
-        assertEquals(Phrases.ROUTE_FAILED, result.one<Effect.ShowResult>().text)
-    }
-
-    @Test
-    fun 수락하지_않은_길안내는_경유_문구를_쓰지_않는다() {
-        // 에너지를 따지지 않는 일반 출발 제안의 결과 한 줄은 그대로다.
-        val request = session.handle(Event.Boarded).one<Effect.RequestTravelTime>()
-        session.handle(Event.TravelTimeResult(request.requestId, null))
-        val route = session.handle(Event.PrimaryPressed).one<Effect.StartRoute>()
+        val out = session.handle(Event.SecondaryPressed)
+        val route = out.one<Effect.StartRoute>()
+        assertEquals(gangnam, route.place)
         assertNull(route.via)
+        assertTrue("카드가 접힌다", out.has<Effect.CollapseCard>())
+        // 평소 길안내와 같은 결과 한 줄
         assertEquals(Phrases.ROUTE_STARTED, session.handle(Event.RouteRequestResult(true)).one<Effect.ShowResult>().text)
     }
 
     @Test
-    fun 수락한_뒤_내비_도착은_대상_일정의_도착으로_본다() {
-        know()
-        energyCard()
-        session.handle(Event.PrimaryPressed)
-        session.handle(Event.RouteRequestResult(true))
-        session.handle(Event.GearChanged(Gear.DRIVE))
-        val out = session.handle(Event.DestinationArrived)
-        assertTrue("대상 일정 도착이 하차 카드로 이어진다", out.has<Effect.ShowCard>())
+    fun 아니와_그냥_가도_충전_없이_원래_장소로_길안내한다() {
+        for (said in listOf("아니", "그냥 가", "그냥 강남역으로")) {
+            newSession()
+            know()
+            energyCard()
+            val route = session.handle(Event.Heard(said)).one<Effect.StartRoute>()
+            assertEquals(said, gangnam, route.place)
+            assertNull(said, route.via)
+        }
     }
 
     @Test
@@ -263,7 +304,8 @@ class DriveSessionEnergyTest {
         val out = session.handle(Event.Heard("다른 데"))
         val card = out.card()
         assertEquals("예시 양재 휴게소에서 충전하고 갈까요?", card.sub)
-        assertTrue("카드의 큰 문구는 그대로", card.voice.contains("배터리로는 모자라요"))
+        assertEquals("카드의 큰 문구는 그대로", "다음은 12시 40분 고객 미팅이에요.", card.voice)
+        assertEquals("응, 들렀다 가요", card.primary)
         assertTrue(out.one<Effect.Speak>().thenListen)
         assertEquals(chargerB.place, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().via)
     }
@@ -276,8 +318,8 @@ class DriveSessionEnergyTest {
         assertEquals(Phrases.NO_ALTERNATIVE, out.card().notice)
         assertEquals(Phrases.NO_ALTERNATIVE, out.one<Effect.Speak>().text)
         assertTrue(out.none { it is Effect.StartRoute })
-        // 카드는 그대로라 원래 후보로 수락할 수 있다
-        assertEquals(charger.place, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().via)
+        // 카드는 그대로라 원래 후보로 수락할 수 있다(완속 충전소는 목적지)
+        assertEquals(charger.place, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place)
     }
 
     @Test
@@ -291,26 +333,16 @@ class DriveSessionEnergyTest {
     }
 
     @Test
-    fun 거절하면_원래_출발_제안의_거절과_같이_카드만_접는다() {
-        know()
-        energyCard()
-        val out = session.handle(Event.Heard("아니"))
-        assertTrue(out.has<Effect.CollapseCard>())
-        assertTrue("길안내를 시작하지 않는다", out.none { it is Effect.StartRoute })
-        assertTrue("되묻지 않는다", out.none { it is Effect.Speak || it is Effect.ShowCard })
-    }
-
-    @Test
     fun 잠깐만은_카드를_둔_채_기다린다() {
         know()
         energyCard()
-        val out = session.handle(Event.SecondaryPressed)
+        val out = session.handle(Event.Heard("잠깐만"))
         assertTrue(out.none { it is Effect.CollapseCard || it is Effect.StartRoute })
         assertTrue(out.has<Effect.ScheduleCardTimeout>())
     }
 
     @Test
-    fun 거절한_날은_다시_탑승해도_에너지를_묻지_않는다() {
+    fun 충전_없이_간_날은_다시_탑승해도_에너지를_묻지_않는다() {
         know()
         energyCard()
         session.handle(Event.Heard("아니"))
@@ -356,14 +388,18 @@ class DriveSessionEnergyTest {
     }
 
     @Test
-    fun 서버가_실패하면_원래_출발_제안에_한_문장만_붙인다() {
+    fun 서버가_실패하면_원래_출발_제안에_한_문장과_배터리_타일만_붙인다() {
         know()
         val ask = boardAndTravel().one<Effect.RequestEnergyOptions>()
         val card = answer(null, ask).card()
         assertEquals("배터리가 모자랄 수 있어요. 출발할까요?", card.sub)
         assertEquals("응, 출발", card.primary)
+        assertEquals("잠깐만", card.secondary)
         assertTrue(card.tiles.none { it is TileView.EnergyStop })
         assertEquals("12시 40분 고객 미팅까지 40분이에요.", card.voice)
+        // 배터리 타일이 이유 한 줄과 함께 앞에 서고 오늘 일정 타일이 이어진다
+        assertEquals(TileView.EnergyLevel("배터리", "45%", "· 갈 수 있는 거리 150km", "집까지 ${neededKm()}km라 한 번 충전이 필요해요"), card.tiles[0])
+        assertTrue(card.tiles[1] is TileView.Schedules)
     }
 
     @Test
@@ -474,22 +510,25 @@ class DriveSessionEnergyTest {
         session.handle(Event.Heard("아니"))
         driveAndPark()
         // 이제 모자라다
-        session.handle(Event.EnergyChanged(EnergyKind.EV, 150.0))
+        session.handle(Event.EnergyChanged(EnergyKind.EV, 150.0, 45.0))
         session.handle(Event.LocationChanged(here))
         val card = energyCard().card()
-        assertEquals("예시 강남 충전소에서 충전하고 갈까요?", card.sub)
-        // 한 줄이라 오늘 일정 타일은 없고 후보 타일만 있다
-        assertEquals(1, card.tiles.size)
-        assertTrue(card.tiles.single() is TileView.EnergyStop)
+        assertEquals("다음은 12시 40분 고객 미팅이에요.", card.voice)
+        assertEquals("강남역에서 걸어서 1분 거리에 빈 완속 충전기가 있어요. 머무는 동안 충전할까요?", card.sub)
+        // 재탑승도 후보 타일 + 배터리 타일 두 칸이다
+        assertEquals(2, card.tiles.size)
+        assertTrue(card.tiles[0] is TileView.EnergyStop)
+        assertTrue(card.tiles[1] is TileView.EnergyLevel)
     }
 
     @Test
-    fun 첫_탑승_브리핑에서는_오늘_일정_타일이_후보_타일과_함께_보인다() {
+    fun 첫_탑승_브리핑에서도_큰_문구는_대상_일정_안내이고_타일은_후보와_배터리다() {
         know()
         val card = energyCard().card()
+        assertEquals("다음은 12시 40분 고객 미팅이에요.", card.voice)
         assertEquals(2, card.tiles.size)
         assertTrue(card.tiles[0] is TileView.EnergyStop)
-        assertTrue(card.tiles[1] is TileView.Schedules)
+        assertTrue(card.tiles[1] is TileView.EnergyLevel)
     }
 
     @Test

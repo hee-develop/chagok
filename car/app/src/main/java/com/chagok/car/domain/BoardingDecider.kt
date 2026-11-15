@@ -63,27 +63,33 @@ sealed interface Question {
 
     /**
      * 출발 제안. arrival은 지금 출발하면 도착할 시각(소요 시간을 알 때만).
-     * lowEnergy는 에너지가 모자란데 충전·주유 후보를 얻지 못해(서버 실패·후보 없음) 원래 제안에 "배터리가 모자랄 수 있어요." 한 문장만 붙일 때의 연료 종류다(없으면 null).
+     * lowEnergy는 에너지가 모자란데 충전·주유 후보를 얻지 못해(서버 실패·후보 없음) 원래 제안에 "배터리가 모자랄 수 있어요." 한 문장과 배터리·연료 타일(이유 한 줄)만 붙일 때의 판단 결과다(없으면 null).
      */
-    data class Depart(val target: Schedule, val arrival: Instant? = null, val lowEnergy: EnergyKind? = null) : Question
+    data class Depart(val target: Schedule, val arrival: Instant? = null, val lowEnergy: EnergyShort? = null) : Question
 
     /**
      * 에너지 제안(정책서 5장·9장): 남은 일정과 귀가 거리가 주행 가능 거리보다 길어 출발 제안을 충전·주유를 넣은 제안 하나로 바꾼 것.
-     * 수락하면 [stop]을 경유지로 넣고 [target]으로 길안내한다. 대안("다른 데")은 다음 후보 하나만 바꿔 보인다([nextAlternative]).
-     * [neededKm]는 말하는 필요 거리(반올림), [goal]은 그 거리를 센 끝(집 또는 오늘 일정).
+     * 큰 문구는 대상 일정 안내("다음은 5시 KIA 직관이에요.")이고 충전·주유 제안이 그 아래, 판단 결과([short])는 배터리·연료 타일의 이유 한 줄이다.
+     * 수락하면 완속 충전소([EnergyStopKind.SLOW_CHARGER], 머무는 동안 충전)는 [stop]을 **목적지로** 길안내하고(대상 일정은 그대로 [target]이라 도착하면 그 일정 도착),
+     * 경로상 급속·주유는 [stop]을 경유지로 넣고 [target]으로 길안내한다. 보조 버튼("그냥 {장소}로")은 충전 없이 [target]으로 길안내한다.
+     * 대안("다른 데")은 다음 후보 하나만 바꿔 보인다([nextAlternative]).
      * [mealBundle]은 서버가 알린 '식사 + 급속 충전' 묶음으로, 맨 앞 후보(index 0)에만 뜻이 있다.
      */
     data class Energy(
         val target: Schedule,
-        val kind: EnergyKind,
-        val neededKm: Int,
-        val goal: EnergyGoal,
+        val short: EnergyShort,
         val stops: List<EnergyStop>,
         val index: Int = 0,
         val mealBundle: Boolean = false,
         val stale: Boolean = false,
     ) : Question {
         val stop: EnergyStop get() = stops[index]
+        val kind: EnergyKind get() = short.kind
+        val neededKm: Int get() = short.neededKm
+        val goal: EnergyGoal get() = short.goal
+
+        /** 이 후보를 목적지로 길안내하는가(머무는 동안 충전하는 완속 충전소). 아니면 경유지다. */
+        val stopIsDestination: Boolean get() = stop.kind == EnergyStopKind.SLOW_CHARGER
 
         /** 다음 후보 하나만 보이는 같은 제안. 더 보여 줄 후보가 없으면 null("다른 곳은 찾지 못했어요."). */
         fun nextAlternative(): Energy? = (index + 1).takeIf { it < stops.size }?.let { copy(index = it) }

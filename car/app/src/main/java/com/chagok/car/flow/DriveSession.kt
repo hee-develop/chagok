@@ -12,6 +12,7 @@ import com.chagok.car.domain.EnergyKind
 import com.chagok.car.domain.EnergyNeed
 import com.chagok.car.domain.EnergyOptions
 import com.chagok.car.domain.EnergyRequest
+import com.chagok.car.domain.EnergyShort
 import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.Gear
@@ -32,6 +33,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import kotlin.math.roundToInt
 
 /** 세션에 들어오는 입력. 어댑터가 차량·SDK·화면 신호를 이 이벤트로 바꿔 넣는다. */
 sealed interface Event {
@@ -133,9 +135,10 @@ sealed interface Event {
 
     /**
      * 차가 알려 준 연료 종류와 주행 가능 거리(km). 어댑터가 읽은 값(debug 주입 값으로 덮은 것 포함)이고, 모르는 쪽은 null이다.
-     * 둘 다 알아야 에너지 체크를 한다. 새 값이 와서 모자라지 않게 됐으면(충전한 뒤 등) 그날 이미 물었다는 표시를 푼다.
+     * [batteryPercent]는 배터리(전기차)·연료(그 밖) 잔량 0~100이고 모르면 null이다(카드 타일이 % 없이 거리만 보인다. 에너지 체크에는 쓰지 않는다).
+     * 연료 종류와 주행 가능 거리를 둘 다 알아야 에너지 체크를 한다. 새 값이 와서 모자라지 않게 됐으면(충전한 뒤 등) 그날 이미 물었다는 표시를 푼다.
      */
-    data class EnergyChanged(val kind: EnergyKind?, val rangeKm: Double?) : Event
+    data class EnergyChanged(val kind: EnergyKind?, val rangeKm: Double?, val batteryPercent: Double? = null) : Event
 
     /**
      * [Effect.RequestEnergyOptions]의 답. 서버가 실패했거나 제한 시간 안에 못 받았거나 429면 null(타임아웃은 요청을 실행한 쪽이 건다).
@@ -395,14 +398,17 @@ class DriveSession(
     private var energyKind: EnergyKind? = null
     private var rangeKm: Double? = null
 
+    /** 차가 알려 준 배터리·연료 잔량(%). 카드의 배터리 타일에만 쓴다. 모르면 null. */
+    private var batteryPercent: Double? = null
+
     /**
      * 오늘 에너지 제안 카드를 이미 띄웠는가(하루 한 번). 거절·무시·수락 모두 그날 다시 묻지 않는다. 날짜 변경·초기화·연결 해제나
      * 주행 가능 거리가 다시 넉넉해지면([Event.EnergyChanged]·탑승 판단) 지운다. 저장한다.
      */
     private var energyOffered: Boolean = restored?.energyOffered ?: false
 
-    /** 방금 수락한 에너지 제안의 경유지. 길안내 결과 한 줄 "{이름} 들렀다 갈게요."에 쓴다. */
-    private var acceptedVia: Place? = null
+    /** 방금 수락한 에너지 제안의 길안내 결과 한 줄("{충전소}로 안내할게요." · "{이름} 들렀다 갈게요."). 에너지 제안이 아니면 null이고 평소 문구를 쓴다. */
+    private var acceptedNote: String? = null
 
     private var paired = paired
 
@@ -646,7 +652,7 @@ class DriveSession(
         suspended = true
         pending = null
         acceptedRoute = false
-        acceptedVia = null
+        acceptedNote = null
         heldBoarding = false
         reaskAtPark = false
         // 위치 답을 기다리던 중이면 그만둔다(어댑터·내비도 멈추므로 답이 와도 쓰지 않는다).
@@ -785,7 +791,7 @@ class DriveSession(
         paired = false
         pending = null
         acceptedRoute = false
-        acceptedVia = null
+        acceptedNote = null
         heldBoarding = false
         heldReaskNow = false
         reask = null
@@ -925,7 +931,8 @@ class DriveSession(
         }
         if (energyOffered) return EnergyStep.Plain
         val destination = depart.target.place ?: return EnergyStep.Plain
-        val lowEnergy = EnergyStep.Replace(depart.copy(lowEnergy = kind))
+        val judged = EnergyShort(kind, need.spokenKm, need.goal, range.roundToInt(), batteryPercent?.roundToInt()?.coerceIn(0, 100))
+        val lowEnergy = EnergyStep.Replace(depart.copy(lowEnergy = judged))
         if (answer == null) {
             val here = hereForBoarding() ?: return lowEnergy
             // 서버의 오래 머무는 일정(2시간) 판단은 전기차에만 쓰므로 머무는 시간은 전기차일 때만 보낸다.
@@ -935,13 +942,14 @@ class DriveSession(
         val options = answer.options
         if (options == null || options.stops.isEmpty()) return lowEnergy
         return EnergyStep.Replace(
-            Question.Energy(depart.target, kind, need.spokenKm, need.goal, options.stops, mealBundle = options.mealBundle, stale = options.stale),
+            Question.Energy(depart.target, judged, options.stops, mealBundle = options.mealBundle, stale = options.stale),
         )
     }
 
     private fun onEnergyChanged(event: Event.EnergyChanged) {
         energyKind = event.kind
         rangeKm = event.rangeKm?.takeIf { it.isFinite() && it >= 0.0 }
+        batteryPercent = event.batteryPercent?.takeIf { it.isFinite() && it in 0.0..100.0 }
         // 주행 가능 거리가 다시 넉넉해졌으면(충전한 뒤) 그날 이미 물었다는 표시를 푼다. 셀 구간이 없어 판단할 수 없으면 그대로 둔다.
         val range = rangeKm ?: return
         if (energyOffered && energyKind != null && energyNeed()?.isShort(range) == false) energyOffered = false
@@ -1109,7 +1117,9 @@ class DriveSession(
             // 일정 겹침의 보조 버튼은 다음 일정을 고르는 것이다.
             question is Question.Overlap -> accept(state, out, 1)
             // 출발 제안·늦게 탐의 보조 버튼은 "잠깐만"(보류), 목적지 묻기의 보조 버튼은 "그냥 갈게"(거절)
-            question is Question.Depart || question is Question.DepartLate || question is Question.Energy -> hold(state, out)
+            question is Question.Depart || question is Question.DepartLate -> hold(state, out)
+            // 에너지 제안의 보조 버튼 "그냥 {장소}로"는 충전 없이 원래 장소로 길안내를 시작한다(보류가 아니다. 보류는 "잠깐만" 말로).
+            question is Question.Energy -> accept(state, out, plain = true)
             else -> reject(out)
         }
     }
@@ -1154,12 +1164,13 @@ class DriveSession(
         val candidates = Phrases.choiceNames(question)
         // 수락("응")은 1번 후보(주 버튼)를 고르는 것과 같은 결과다.
         val acceptPick = if (candidates.isNotEmpty()) 0 else null
-        when (val intent = IntentMatcher.match(text, candidates, acceptPick, Phrases.choiceShortForms(question))) {
+        when (val intent = IntentMatcher.match(text, candidates, acceptPick, Phrases.choiceShortForms(question), Phrases.rejectPhrases(question))) {
             Intent.Accept ->
                 // 후보가 없는 목적지 묻기에서 "응"은 갈 곳을 정하지 못한 말이다.
                 if (question is Question.AskDestination && candidates.isEmpty()) unrecognized(state, out) else accept(state, out)
             is Intent.Pick -> if (intent.index in candidates.indices) accept(state, out, intent.index) else unrecognized(state, out)
-            Intent.Reject -> reject(out)
+            // 에너지 제안의 "아니"·"그냥 가"는 충전 없이 원래 장소로 길안내를 시작한다(카드만 접던 출발 제안의 거절과 다르다).
+            Intent.Reject -> if (question is Question.Energy) accept(state, out, plain = true) else reject(out)
             Intent.Hold -> hold(state, out)
             Intent.Alternative -> alternative(state, out)
             Intent.Unrecognized -> unrecognized(state, out)
@@ -1219,17 +1230,22 @@ class DriveSession(
         out += Effect.CollapseCard()
     }
 
-    /** 수락. 목적지 묻기는 [pick]번 후보로(주 버튼·"응"은 0번), 출발 제안·늦게 탐은 대상 일정 장소로 길안내한다. */
-    private fun accept(state: CardState, out: MutableList<Effect>, pick: Int = 0) {
+    /**
+     * 수락. 목적지 묻기는 [pick]번 후보로(주 버튼·"응"은 0번), 출발 제안·늦게 탐은 대상 일정 장소로 길안내한다.
+     * 에너지 제안은 완속 충전소면 그 충전소를 **목적지로**(대상 일정은 그대로라 도착하면 그 일정 도착), 경로상 급속·주유면 경유지로 넣어 대상 일정 장소로 길안내한다.
+     * [plain]이면(에너지 제안의 "그냥 {장소}로"·"아니") 충전 없이 대상 일정 장소로 바로 길안내한다.
+     */
+    private fun accept(state: CardState, out: MutableList<Effect>, pick: Int = 0, plain: Boolean = false) {
         val question = state.question
         if (question is Question.Overlap) {
             chooseOverlap(state, question, pick, out)
             return
         }
+        val energy = (question as? Question.Energy)?.takeUnless { plain }
         val place = when (question) {
             is Question.Depart -> question.target.place
             is Question.DepartLate -> question.target.place
-            is Question.Energy -> question.target.place
+            is Question.Energy -> if (energy?.stopIsDestination == true) energy.stop.place else question.target.place
             is Question.AskDestination -> question.candidates.getOrNull(pick)
             is Question.Overlap, null -> null
         }
@@ -1241,8 +1257,8 @@ class DriveSession(
             is Question.AskDestination -> (question.options.getOrNull(pick) as? DestinationOption.OfSchedule)?.schedule?.id
             is Question.Overlap, null -> null
         }
-        // 에너지 제안을 수락하면 충전소·주유소를 경유지로 넣어 대상 일정으로 길안내한다.
-        val via = (question as? Question.Energy)?.stop?.place
+        // 경로상 급속·주유는 경유지로 넣는다. 완속 충전소는 목적지로 안내하므로 경유지가 없다.
+        val via = energy?.takeUnless { it.stopIsDestination }?.stop?.place
         card = null
         out += Effect.StopVoice
         out += Effect.CollapseCard()
@@ -1251,7 +1267,7 @@ class DriveSession(
         clearExit()
         reask = null
         acceptedRoute = true
-        acceptedVia = via
+        acceptedNote = energy?.let { if (it.stopIsDestination) Phrases.energyChargeRouteStarted(it.stop.place.name) else Phrases.energyRouteStarted(it.stop.place.name) }
         routeScheduleId = scheduleId
         out += Effect.StartRoute(place, via)
     }
@@ -1516,12 +1532,12 @@ class DriveSession(
         acceptedRoute = false
         // 길안내를 시작하지 못했으면 그 일정은 가고 있는 곳이 아니다: 기억을 지워 내비 도착으로 오인하거나 주행 중 칩이 계속 그 일정을 보이지 않게 한다.
         if (!ok) routeScheduleId = null
-        val via = acceptedVia
-        acceptedVia = null
+        val note = acceptedNote
+        acceptedNote = null
         if (!canSpeak()) return
         val text = when {
             !ok -> Phrases.ROUTE_FAILED
-            via != null -> Phrases.energyRouteStarted(via.name)
+            note != null -> note
             else -> Phrases.ROUTE_STARTED
         }
         val timerId = ++seq
@@ -1544,7 +1560,7 @@ class DriveSession(
         statusDate = today()
         pending = null
         acceptedRoute = false
-        acceptedVia = null
+        acceptedNote = null
         routeScheduleId = null
         energyOffered = false
         forgetLocation()

@@ -11,6 +11,7 @@ import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.Gear
 import com.chagok.car.domain.LatLng
 import com.chagok.car.domain.Place
+import com.chagok.car.ui.TileView
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -38,14 +39,14 @@ class FixtureEnergyDemoTest {
     }
 
     /** `range`·`fuel`·`loc`을 넣고 탑승해 `trip=none`(소요 시간 모름)으로 에너지 후보 요청까지 간다. */
-    private fun ask(session: DriveSession, kind: EnergyKind, range: Double): Effect.RequestEnergyOptions {
-        session.handle(Event.EnergyChanged(kind, range))
+    private fun ask(session: DriveSession, kind: EnergyKind, range: Double, battery: Double? = null): Effect.RequestEnergyOptions {
+        session.handle(Event.EnergyChanged(kind, range, battery))
         session.handle(Event.LocationChanged(here))
         val travel = session.handle(Event.Boarded).filterIsInstance<Effect.RequestTravelTime>().single()
         return session.handle(Event.TravelTimeResult(travel.requestId, null)).filterIsInstance<Effect.RequestEnergyOptions>().single()
     }
 
-    @Test fun `주유 시연은 09시 20분 첫 탑승에서 집까지 300km인데 기름이 모자라요를 말한다`() {
+    @Test fun `주유 시연은 09시 20분 첫 탑승에서 다음 일정 안내와 주유 제안을 말하고 연료 타일에 집까지 300km를 둔다`() {
         // home=37.11,127.0 range=150 fuel=gas: 지금 → 육전집 → 챔피언스필드 → 콩물집 → 집
         val s = session(anchor, LatLng(37.11, 127.0))
         val request = ask(s, EnergyKind.GASOLINE, 150.0)
@@ -53,21 +54,39 @@ class FixtureEnergyDemoTest {
         assertEquals(LatLng(35.1595, 126.8526), request.request.destination)
         val gas = EnergyStop("EX-FS-002", EnergyStopKind.GAS_STATION, Place("예시 서구 알뜰주유소", LatLng(35.165, 126.87)), priceWon = 1639, priceFuel = "gasoline")
         val card = s.handle(Event.EnergyOptionsResult(request.requestId, EnergyOptions(listOf(gas)))).filterIsInstance<Effect.ShowCard>().single().card
-        assertEquals("집까지 300km인데 기름이 모자라요.", card.voice)
+        assertEquals("다음은 1시 육전집 점심이에요.", card.voice)
         assertEquals("예시 서구 알뜰주유소에서 넣고 갈까요?", card.sub)
+        assertEquals("집까지 300km라 주유가 필요해요", (card.tiles[1] as TileView.EnergyLevel).reason)
     }
 
-    @Test fun `충전 시연은 육전집이 끝난 뒤 챔피언스필드를 대상으로 집까지 300km인데 배터리로는 모자라요를 말한다`() {
+    @Test fun `충전 시연은 육전집이 끝난 뒤 시안대로 다음은 5시 KIA 직관이에요와 챔필 옆 충전소 제안을 말한다`() {
         // 14:50: 육전집 점심(14:00 종료)은 건너뜀. home=37.16,127.0 range=150 fuel=ev: 지금 → 챔피언스필드 → 콩물집 → 집
         val s = session(anchor + Duration.ofMinutes(330), LatLng(37.16, 127.0))
-        val request = ask(s, EnergyKind.EV, 150.0)
+        val request = ask(s, EnergyKind.EV, 150.0, battery = 45.0)
         assertEquals(LatLng(35.1681, 126.8888), request.request.destination)
         // KIA 직관은 3시간(180분) 머문다: 서버가 목적지 근처 완속 충전기를 찾는 조건(2시간 이상)
         assertEquals(Duration.ofMinutes(180), request.request.stay)
-        val charger = EnergyStop("EX-GJ-001", EnergyStopKind.SLOW_CHARGER, Place("예시 챔필 주차장 충전소", LatLng(35.1692, 126.887)), availableCount = 2, totalCount = 3, powerKw = 7)
-        val card = s.handle(Event.EnergyOptionsResult(request.requestId, EnergyOptions(listOf(charger)))).filterIsInstance<Effect.ShowCard>().single().card
-        assertEquals("집까지 300km인데 배터리로는 모자라요.", card.voice)
-        assertEquals("예시 챔필 주차장 충전소에서 충전하고 갈까요?", card.sub)
+        // 서버 목 데이터(fixtures/energy/chargers.json EX-GJ-001)가 주는 값
+        val charger = EnergyStop("EX-GJ-001", EnergyStopKind.SLOW_CHARGER, Place("챔필 옆 충전소", LatLng(35.1711, 126.8888)), availableCount = 2, totalCount = 3, powerKw = 7)
+        val out = s.handle(Event.EnergyOptionsResult(request.requestId, EnergyOptions(listOf(charger))))
+        val card = out.filterIsInstance<Effect.ShowCard>().single().card
+        assertEquals("정차 중 · 출발 전", card.status)
+        assertEquals("다음은 5시 KIA 직관이에요.", card.voice)
+        assertEquals("챔필에서 걸어서 5분 거리에 빈 완속 충전기가 있어요. 경기 보는 동안 충전할까요?", card.sub)
+        assertEquals("응, 거기로", card.primary)
+        assertEquals("그냥 챔필로", card.secondary)
+        assertEquals(
+            listOf(
+                TileView.EnergyStop("챔필 옆 충전소", "지금 비어 있음", "완속 2대", "경기장까지 걸어서 5분", "충전기 현황 · 환경부 충전소 정보"),
+                TileView.EnergyLevel("배터리", "45%", "· 갈 수 있는 거리 150km", "집까지 300km라 한 번 충전이 필요해요"),
+            ),
+            card.tiles,
+        )
+        assertEquals("다음은 5시 KIA 직관이에요. 챔필에서 걸어서 5분 거리에 빈 완속 충전기가 있어요. 경기 보는 동안 충전할까요?", out.filterIsInstance<Effect.Speak>().single().text)
+        // 수락: 충전소를 목적지로 길안내(대상 일정은 KIA 직관), 보조 버튼은 충전 없이 챔피언스필드로
+        val accepted = s.handle(Event.Heard("응")).filterIsInstance<Effect.StartRoute>().single()
+        assertEquals(charger.place, accepted.place)
+        assertEquals(null, accepted.via)
     }
 
     @Test fun `집을 두지 않고 range만 짧게 주면 오늘 일정까지로 말한다`() {
@@ -75,7 +94,7 @@ class FixtureEnergyDemoTest {
         val s = DriveSession(Clock.fixed(anchor, seoul), { ScheduleSnapshot(schedules) }).also { it.handle(Event.GearChanged(Gear.PARK)) }
         val request = ask(s, EnergyKind.GASOLINE, 5.0)
         val gas = EnergyStop("EX-FS-002", EnergyStopKind.GAS_STATION, Place("예시 서구 알뜰주유소", LatLng(35.165, 126.87)), priceWon = 1639, priceFuel = "gasoline")
-        val voice = s.handle(Event.EnergyOptionsResult(request.requestId, EnergyOptions(listOf(gas)))).filterIsInstance<Effect.ShowCard>().single().card.voice
-        assertEquals("오늘 일정까지 16km인데 기름이 모자라요.", voice)
+        val card = s.handle(Event.EnergyOptionsResult(request.requestId, EnergyOptions(listOf(gas)))).filterIsInstance<Effect.ShowCard>().single().card
+        assertEquals("오늘 일정까지 16km라 주유가 필요해요", (card.tiles[1] as TileView.EnergyLevel).reason)
     }
 }
