@@ -18,8 +18,8 @@
 
 | 탭 | 라우트 | 구현 | 내용 |
 | --- | --- | --- | --- |
-| 오늘 | `(tabs)/index.tsx` | `features/today/TodayScreen` | 알림함(읽지 않은 알림), 꺼진 권한·일정을 보낼 수 없는 이유 안내, 차 연결 상태, 장소 빈 일정 배너, 오늘 일정, 다른 날 장소 빈 일정, 받은 가족 요청(빈 상태만) |
-| 가족 | `(tabs)/family.tsx` | `features/family/FamilyTabScreen` | 보내기 입구(→ 오늘 탭), 보낸 요청 목록, 가족 묶기 자리 |
+| 오늘 | `(tabs)/index.tsx` | `features/today/TodayScreen` | 알림함(읽지 않은 알림), 꺼진 권한·일정을 보낼 수 없는 이유 안내, 차 연결 상태, 오늘 일정, 받은 가족 요청(`features/family/ReceivedRequestsSection`, J10b), 장소 빈 일정 배너, 다른 날 장소 빈 일정(정책 10.7 순서) |
+| 가족 | `(tabs)/family.tsx` | `features/family/FamilyTabScreen` | 가족 묶기(만들기·초대 코드·구성원·이름·나가기), 요청 만들기 입구(→ `setup/family-request`), 보낸·받은 요청 상태, 도착 예정 공유, 일정으로 보내기(기존 '전달됨' 입구). 계약·화면·문구 표는 [가족 요청 문서](family-requests.md)의 '폰 가족 탭 화면과 저장 방식' |
 | 장소 | `(tabs)/places.tsx` | `features/places/PlacesScreen mode="tab"` | 자주 가는 곳(2단계 화면 재사용, **단골 줄마다 [삭제]·확인**, `RemoveOtherConfirm`), **기억한 장소 목록·지우기**(`RememberedPlaces`), **이동 없음 목록·지우기**(`features/skips/SkipList`, 정책 10.8) |
 | 설정 | `(tabs)/settings.tsx` | `features/settings/SettingsScreen` | 주행 중 고정 안내, 스위치(플러스 모드·늦을 때 연락·화면 없이 음성만), 차 연결 상태·끊기, 캘린더 고르기·장소 탭 입구, 권한 상태 (`docs/settings.md`) |
 
@@ -37,17 +37,18 @@
 - **차 연결 상태**: 폰 토큰으로 `GET /pair`(`pairingApi.status()`)를 묻는다. 200이면 '✓ 차와 연결돼 있어요'와 자리 이름(이 폰의 기기 이름)·연결 시각, 401(토큰이 없거나 서버가 모름·끊김)이면 '연결되지 않았어요'. 그 밖의 확인 실패는 '연결 안 됨'으로 단정하지 않고 오류 상태(다시 확인)로 둔다. J1부터 폰 응답에 차 id가 없어 폰은 차 id를 저장하지 않는다. 예전 버전이 남긴 `chagok.pairedCarId.v1`는 상태를 처음 확인할 때 한 번 지운다(`LEGACY_PAIRED_CAR_KEY`). 이미 결과가 있으면 다시 확인하는 동안 직전 결과를 둔다.
 - **맨 위(위에서 아래 순서)**: ① **알림함**(`InboxSection`, J7 `useInbox()`의 읽지 않은 알림. 줄을 누르면 `handleNotificationTap`으로 종류별 처리(예: `events-stale`은 일정을 다시 보내 보고 못 보내면 캘린더 고르기로)와 읽음, 읽으면 줄이 사라진다. 둘 이상이면 [모두 읽음]. 없으면 구역이 없다) ② **권한·보낼 수 없는 이유 안내** ③ 차 연결 상태. 알림 권한을 거부해도 알림은 이 ①에 쌓인다.
 - **꺼진 권한 안내**(정책 10.4: **홈 맨 위**): 홈에는 **거부한 권한만** 보인다. **연락처**는 '늦을 때 연락'이 **켜져 있을 때만**, 거부했을 때 '연락처를 켜면 늦을 때 연락할 상대를 미리 찾아 둘 수 있어요…' + [설정 열기]로 보인다(`useContactsGuide`: 설정을 읽는 중·못 읽음·아직 안 물음·꺼 둠이면 보이지 않는다). 캘린더는 홈에 꼭 필요하므로 아직 묻지 않은 상태(`ask`)에서도 [켜기]를 두고, 카메라는 한 번도 묻지 않았으면 보이지 않으며 거부(`denied`)했고 아직 연결 전일 때만 [설정 열기]로 보인다. **알림**도 같은 규칙이다: 첫 설정 끝에 한 번 묻고, 거부(`denied`)했을 때만 '켜면 이게 돼요' 한 줄과 [설정 열기]가 남는다(아직 안 물었으면 홈에는 안 보임, 설정 탭은 모두 보임). 일정 동기화가 일정을 보낼 수 없는 이유를 알려 오면(`useEventSendBlock()`) 같은 구역에 보인다: `no-selection`은 '고른 캘린더가 없어요' + [캘린더 고르기](설정 탭과 같은 standalone 화면), `permission-denied`는 권한 목록이 아직 켜짐이어도 캘린더 안내(`events-stale` 알림은 이 폰에서 쌓지 않고 이 안내로 대신한다, `docs/notifications.md`). 앱이 앞으로 돌아올 때(설정에서 켜고 온 경우)와 탭이 포커스를 얻을 때 다시 읽고, 다시 읽다 실패해도 직전 결과를 유지해 화면이 출렁이지 않는다. 설정 탭은 켜진 것까지 모두 보인다. `EXPO_PUBLIC_CALENDAR_SOURCE=mock`이면 캘린더는 권한이 필요 없다.
-- **받은 가족 요청**: 서버에 받는 쪽 API가 없어 빈 상태 문구만 둔다(J10b가 채움).
+- **구역 순서**(정책 10.7 '홈'): 알림함 → 꺼진 권한·일정을 보낼 수 없는 이유 안내 → 차 연결 상태 → 오늘 일정 → 받은 가족 요청 → 장소 빈 일정(배너 '장소가 빈 일정이 N개 있어요'와 '다른 날 장소가 빈 일정'). 배너는 받은 가족 요청 아래에 있다.
+- **받은 가족 요청**(`family-inbox`, J10b): `GET /requests`의 받은 요청을 최대 3개(진행 중인 것 먼저, 나머지는 'N개 더 보기' → 가족 탭) 보이고 누르면 가족 탭의 그 요청(`/family?request=<id>`)으로 간다. 줄은 '보낸 사람 엄마 · 약속 가기', 요약, 받는 사람 폰의 상태 문구다. **받는 사람 폰에는 알림을 보내지 않으므로**(정책 10.6) 이 구역이 전부다. 가족이 없거나 식별이 없으면 서버에 묻지 않고 빈 상태, 로딩·오류([다시 시도])는 이 구역에서만 보이고 일정 구역은 그대로다. 포커스 때와 앱이 앞에 있는 동안 45초마다 다시 읽는다(`useFamilyRequests`). 가족에서 나가면 알림함의 `family-status`를 지운다(`familyInboxCleanup.ts`).
 
 ### 상태 5종
 
 | 상태 | 오늘 | 가족 | 장소 | 설정 |
 | --- | --- | --- | --- | --- |
-| 로딩 | 일정·연결 구역별 진행 표시 | 보낸 요청 진행 표시 | 기존(2단계), 기억한 장소 진행 표시 | 스위치·연결·권한 구역별 진행 표시 |
-| 빈 | '오늘은 차로 갈 일정이 없어요.'(알림함은 비면 구역이 없음) | '아직 보낸 요청이 없어요.' | 기억한 장소·이동 없음 빈 문구('이동 없음으로 기억한 일정이 없어요.') | 해당 없음 |
-| 오류 | [다시 시도], 연결은 [다시 확인] | [다시 시도] | 기존(2단계), 기억한 장소 [다시 시도]·지우기 실패 안내 | 스위치 [다시 시도]·저장 실패(되돌림), 연결 [다시 확인]·끊기 실패, 권한 [다시 확인] |
-| 권한 없음 | 캘린더 꺼짐이면 일정을 요청하지 않고 [켜기]/[설정 열기] | 같음 | 해당 없음(서버 검색만 씀) | 권한 구역에 상태와 버튼, 연락처는 '늦을 때 연락' 줄 아래 안내 |
-| 정상 | 알림함·일정·배너·연결 상태 | 보낸 요청 목록 | 자주 가는 곳·기억한 장소(지우기는 확인을 거침) | 안내·스위치·연결 끊기·입구·권한(캘린더·카메라·알림) |
+| 로딩 | 일정·연결·받은 요청 구역별 진행 표시 | 가족·요청·일정으로 보낸 것 구역별 진행 표시 | 기존(2단계), 기억한 장소 진행 표시 | 스위치·연결·권한 구역별 진행 표시 |
+| 빈 | '오늘은 차로 갈 일정이 없어요.'(알림함은 비면 구역이 없음), 받은 요청 '아직 받은 요청이 없어요.' | 가족이 없으면 가족 묶기, '아직 보낸/받은 요청이 없어요.' | 기억한 장소·이동 없음 빈 문구('이동 없음으로 기억한 일정이 없어요.') | 해당 없음 |
+| 오류 | [다시 시도], 연결은 [다시 확인], 받은 요청 [다시 시도] | 가족·요청·일정 구역마다 [다시 시도] | 기존(2단계), 기억한 장소 [다시 시도]·지우기 실패 안내 | 스위치 [다시 시도]·저장 실패(되돌림), 연결 [다시 확인]·끊기 실패, 권한 [다시 확인] |
+| 권한 없음 | 캘린더 꺼짐이면 일정을 요청하지 않고 [켜기]/[설정 열기] | 일정으로 보낸 것 구역만 같음(가족 묶기·요청은 캘린더와 무관) | 해당 없음(서버 검색만 씀) | 권한 구역에 상태와 버튼, 연락처는 '늦을 때 연락' 줄 아래 안내 |
+| 정상 | 알림함·일정·받은 요청·배너·연결 상태 | 구성원·초대 코드·보낸·받은 요청·도착 예정 공유 | 자주 가는 곳·기억한 장소(지우기는 확인을 거침) | 안내·스위치·연결 끊기·입구·권한(캘린더·카메라·알림) |
 
 ## 파일
 
@@ -55,20 +56,22 @@
 - 오늘 탭 줄: `features/today/ScheduleHead.tsx`(머리), `ScheduleRow.tsx`(서버 일정), `FilteredRow.tsx`(폰이 거른 일정).
 - `SetupHeader`의 `step`은 선택값이다. 없으면 로고만 보인다. 첫 설정은 **5단계**다(캘린더 → 자주 가는 곳 → 장소 빈 일정 → 말 거는 방법(`setup/talk`) → 차 연결, `SETUP_TOTAL_STEPS`).
 - **탭에서 연 화면은 단계 표시 없이 열리고 끝나면 탭으로 돌아온다**(`standalone`): `ScheduleCareScreen`·`FamilySendScreen`·`PlaceSearchScreen`(오늘·장소 탭), `CalendarSelectScreen`(설정 탭 [캘린더 고르기], `from=tab`, 저장하면 2단계 대신 이전 화면으로, [나중에 할게요]는 [닫기]), `PairCarScreen`(오늘·설정 탭 [차 연결하기], `from=tab`, [완료]는 이전 화면으로). 라우트(`setup/*.tsx`)가 `from` 파라미터를 보고 `standalone`을 준다. 첫 설정 흐름의 글자·testID는 그대로다.
-- 문구는 `phone/src/i18n/ko.ts`(`tabs`·`permissions`·`carConnection`·`today`·`familyTab`·`placesTab`·`settings`).
+- 가족 탭(J10b, `features/family/`): `FamilyTabScreen`(조립), `FamilyGroupSection`(가족 묶기·구성원·초대 코드·공유 스위치), `RequestsSection`(보낸·받은 요청), `LegacySendSection`(일정으로 보내기 기존 입구), `FamilyRequestScreen`(요청 만들기, 라우트 `setup/family-request`), `ReceivedRequestsSection`(오늘 탭), 훅 `useFamilyGroup`·`useFamilyRequests`, 구성원 비밀값 `memberSecret.ts`·`familyClient.ts`·`familyGroupApi.ts`, 문구 표 `requestModel.ts`, 입력 검증 `requestForm.ts`, 알림 누름 `familyTaps.ts`. 장소 검색 화면 재사용을 위해 `features/places/placePicker.ts`와 `PlaceSearchScreen`의 `pickerKey` 모드를 더했다.
+- 문구는 `phone/src/i18n/ko.ts`(`tabs`·`permissions`·`carConnection`·`today`·`familyTab`·`family`·`familyRequest`·`placesTab`·`settings`).
 - 테스트 도우미(가짜 api·권한·연결)는 `src/__tests__/support/todaySupport.ts`(jest 설정이 `/__tests__/support/`를 테스트로 세지 않게 제외한다).
 
 ## 알려진 한계(다음 묶음이 이어 붙일 곳)
 
-- 가족 탭의 보낸 요청은 일정 응답의 `familyRequests`로 만든다(서버에 목록 API 없음). 묶기·요청 4종·공유(J10b)는 자리만 있다.
+- 가족 탭의 묶기·요청 4종·상태·도착 예정 공유(J10b)는 붙었다([가족 요청 문서](family-requests.md)). '일정으로 보낸 것' 목록은 여전히 일정 응답의 `familyRequests`(픽스처 가족)로 만들고, 새 모델로 일정을 옮기는 것(옛 경로 대체)은 하지 않았다. 차 쪽은 다른 묶음이다.
 - 장소 탭의 이동 없음 목록은 `SkipList`(J2b)가 `GET·PUT /skips`의 이름 목록을 보이고 지운다(기억한 이름이라 같은 이름 일정은 차에 안 간다. 지우면 다시 간다). 폰 캐시는 `features/skips/skipMemory.ts`이고 서버가 기억 상한이라 거절하면 목록 위에 '가득 찼어요' 안내가 뜬다. 오늘 탭·3단계는 **[이동 없음] 안내와 10초 [되돌리기]**(`useSchedulePlaces`의 `skipNotice`·`NoTravelNotices`)를 같이 쓰고, 이름으로 기억해 폰이 거른 일정은 거른 줄('이동 없음 · 이동 없음으로 기억')로 보이며 [이동 일정이에요]는 그 기억을 지운다(`useTravelMark`의 `lines[].reason`). 기억한 장소(J3)는 `RememberedPlaces`로 붙었다.
-- 설정 탭의 스위치·차 연결 끊기는 J5b로 붙었다(`docs/settings.md`). 받은 가족 요청(J10b)은 `TodayScreen`의 `family-inbox` 구역을 채우고, 새 알림 종류의 누름 처리는 `registerTapHandler(kind, ...)`로 더한다(알림함 줄이 같은 처리를 부른다).
+- 설정 탭의 스위치·차 연결 끊기는 J5b로 붙었다(`docs/settings.md`). 받은 가족 요청(J10b)은 `TodayScreen`의 `family-inbox` 구역을 `ReceivedRequestsSection`으로 채웠고(`family-status` 누름은 `features/family/familyTaps.ts`가 `registerTapHandler`로 등록), 새 알림 종류의 누름 처리는 같은 방식으로 더한다(알림함 줄이 같은 처리를 부른다).
 - 5단계(차 연결) 건너뛰기 글자는 J1의 `strings.pairCar.skip`('건너뛰기')을 그대로 쓴다. 4단계 '말 거는 방법'의 [건너뛰기]도 같은 글자다. 3단계의 '나중에 할게요'와 글자를 맞출지는 정하지 않았다.
 - 3단계 카드의 거른 줄은 J2의 `opacity` 흐림(`FilteredEventCard`)을 그대로 두었다. 대비 4.5:1을 지키는 색 방식은 오늘 탭에만 적용했다.
 
 ## 검증
 
 - `pnpm typecheck`, `pnpm phone:test`, `pnpm --filter @chagok/phone lint --max-warnings 0`
+- jest(가족 탭, J10b): `features/family/__tests__`(구성원 비밀값 저장·헤더·401 처리 `memberSecret`·`familyClient`, API `familyGroupApi`, 상태 문구 표·요약 `requestModel`, 폼 검증 `requestForm`, 가족 만들기·참여·나가기·이름·공유·상태 5종 `FamilyTabScreen`·`useFamilyGroup`, 요청 4종 폼·장소 고르기·서버 오류 `FamilyRequestScreen`, 목록 새로 고침 `useFamilyRequests`, 알림 누름 `familyTaps`, 실제 서버 앱과 `hc`를 묶은 `familyWiring`), 오늘 탭의 받은 요청(`features/today/__tests__/TodayScreen.test.tsx`), 장소 고르기 모드(`features/places/__tests__/PlaceSearchPicker.test.tsx`).
 - jest: 탭 진입 분기(`src/__tests__/tabsLayout.test.tsx`, `setupRoutes.test.tsx`, `features/entry`), 오늘 탭(`features/today/__tests__`: 상태 5종·권한·연결·거른 일정·4xx 저장·포커스 때 다시 읽기·늦은 응답 버리기·저장 중 탭 전환), 가족·설정·장소 탭, 공유 화면 `standalone`(채비·가족·검색·캘린더 고르기·차 연결).
 - 설정 탭·말 거는 방법 단계 테스트는 `features/settings/__tests__`(`docs/settings.md`).
 - Maestro `e2e/maestro/phone/today-tabs.yaml`: `E2E_FLOWS=today-tabs pnpm e2e:phone`(기준 시각이 고정된 `fixtures/schedules/pt-day.json`을 스크립트가 기본으로 쓴다). 기존 flow(`calendar-select`·`places`·`fill-places`·`pair-car`)는 첫 설정 화면에 직접 들어가는 경로·글자·testID가 그대로다.

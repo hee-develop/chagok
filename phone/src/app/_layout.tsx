@@ -11,6 +11,10 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useEventSync } from '../features/calendar-sync/useEventSync';
 import { bindLocalCarStateToSession } from '../features/pair-car/localState';
+// 가족 요청 상태 알림을 누르면 가족 탭의 그 요청을 연다(누름 처리기를 불러오는 것만으로 등록된다).
+import '../features/family/familyTaps';
+// 가족에서 나가면(구성원 비밀값이 지워지면) 알림함의 가족 요청 알림도 지운다.
+import '../features/family/familyInboxCleanup';
 import { useNotifications } from '../features/notifications/useNotifications';
 import { colors, FontsLoadedContext } from '../ui/theme';
 

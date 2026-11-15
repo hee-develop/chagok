@@ -42,6 +42,16 @@ export type Inbox = {
   clear(): void;
 };
 
+/**
+ * 가족 요청의 도착 예정 시각(`etaAt`)은 알림함에 **두지 않는다**: 폰은 이 값을 쓰지 않고(알림 제목·본문만 보임), 정책 11장은 가족에게 보인 도착 예정 시각을 저장하지 않는다고 한다
+ * (서버 알림함도 도착 예정 알림을 최대 1시간만 둔다). 그래서 담을 때와 저장소에서 불러올 때 `data.etaAt`을 버린다(옛 버전이 저장해 둔 값도 다음에 불러올 때 지워진다).
+ */
+export const dropEta = <T extends { data: Record<string, string> }>(item: T): T => {
+  if (!('etaAt' in item.data)) return item;
+  const { etaAt: _etaAt, ...data } = item.data;
+  return { ...item, data };
+};
+
 /** id는 앞자리 0이 없는 십진수 문자열이라 길이 → 사전순으로 견준다. */
 export const compareIds = (a: string, b: string) => (a.length !== b.length ? a.length - b.length : a < b ? -1 : a > b ? 1 : 0);
 
@@ -104,10 +114,14 @@ export function createInbox({
       // 불러오는 동안 이미 add된 것이 있으면 저장된 것과 합친다.
       const byId = new Map<string, InboxItem>();
       for (const item of [...stored.items, ...state.items]) byId.set(item.id, item);
-      const items = fresh([...byId.values()]).sort((a, b) => compareIds(b.id, a.id)).slice(0, maxItems);
+      const kept = fresh([...byId.values()]).sort((a, b) => compareIds(b.id, a.id)).slice(0, maxItems);
+      const items = kept.map(dropEta);
+      const scrubbed = items.some((item, i) => item !== kept[i]);
       const lastId = [stored.lastId, state.lastId].filter((x): x is string => x !== null).sort(compareIds).at(-1) ?? null;
       state = { loaded: true, items, lastId };
       for (const listener of [...listeners]) listener();
+      // 옛 버전이 저장해 둔 도착 예정 시각을 저장소에서도 지운다.
+      if (scrubbed) set({ items, lastId });
     })();
     return loading;
   };
@@ -130,7 +144,7 @@ export function createInbox({
       for (const n of list) if (newest === null || compareIds(n.id, newest) > 0) newest = n.id;
       if (fresher.length === 0 && newest === lastId) return [];
       const receivedAt = now().toISOString();
-      const added: InboxItem[] = fresher.map((n) => ({ ...n, receivedAt, read: false }));
+      const added: InboxItem[] = fresher.map((n) => dropEta({ ...n, receivedAt, read: false }));
       const items = fresh([...added, ...state.items])
         .sort((a, b) => compareIds(b.id, a.id))
         .slice(0, maxItems);

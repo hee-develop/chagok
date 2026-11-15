@@ -19,6 +19,8 @@ import type { SkipMemory } from '../skips/skipMemory';
 import { useSchedulePlaces } from '../fill-places/useSchedulePlaces';
 import type { ContactsSource } from '../contacts/contactsSource';
 import type { SettingsApi } from '../settings/settingsApi';
+import { ReceivedRequestsSection } from '../family/ReceivedRequestsSection';
+import type { FamilyGroupApi } from '../family/familyGroupApi';
 import { carConnectionSource, useCarConnection, type CarConnectionSource } from './carConnection';
 import { ConnectionCard } from './ConnectionCard';
 import { FilteredRow } from './FilteredRow';
@@ -48,10 +50,12 @@ type Props = {
   contactsSource?: ContactsSource;
   /** 일정을 서버로 보낼 수 없는 이유. 기본은 일정 동기화 결과를 따라가는 `useEventSendBlock()`. */
   sendBlock?: SendBlockReason | null;
+  /** 받은 가족 요청을 읽는 API. 기본은 실제 서버(`features/family/familyGroupApi`). */
+  familyApi?: FamilyGroupApi;
 };
 
 /**
- * 오늘(홈) 탭(정책서 10.7): 꺼진 권한 안내(맨 위, 10.4), 차 연결 상태, 장소 빈 일정 배너, 오늘 일정, 다른 날 장소 빈 일정, 받은 가족 요청 자리.
+ * 오늘(홈) 탭(정책서 10.7 순서): 알림함, 꺼진 권한 안내(맨 위, 10.4), 차 연결 상태, 오늘 일정, 받은 가족 요청(`features/family/ReceivedRequestsSection`), 장소 빈 일정(배너와 다른 날 빈 일정).
  * 일정을 누르면 그 자리에서 장소·채비·가족에게 보내기를 한다(3단계와 같은 컴포넌트).
  * 폰이 읽을 때 거른 일정(온라인·건물 안·종일)은 '이동 없음'으로 흐리게 같이 보이고, 누르면 3단계와 같은 확인·되돌리기로 이동 일정으로 바꾼다.
  * 상태: 일정 구역이 로딩·오류(다시 시도)·빈 목록·권한 없음(캘린더 꺼짐)·정상을 가른다. 4xx(일정이 바뀜) 저장 오류는 [닫기]만 둔다.
@@ -68,6 +72,7 @@ export function TodayScreen({
   sendBlock: sendBlockProp,
   settingsApi,
   contactsSource,
+  familyApi,
 }: Props) {
   const font = useFont();
   const router = useRouter();
@@ -140,13 +145,6 @@ export function TodayScreen({
         <ConnectionCard state={connection.state} onRecheck={connection.recheck} />
       </Section>
 
-      {split && split.missingCount > 0 ? (
-        <View testID="missing-banner" accessibilityLiveRegion="polite" style={styles.banner}>
-          <Text style={[styles.bannerTitle, font(600)]}>{t.missingBanner(split.missingCount)}</Text>
-          <Text style={[styles.bannerHint, font(400)]}>{t.missingBannerHint}</Text>
-        </View>
-      ) : null}
-
       <Section heading={t.scheduleHeading} testID="today-schedules">
         {calendarBlocked ? (
           <EmptyText testID="today-permission">{t.calendarNeeded}</EmptyText>
@@ -179,6 +177,15 @@ export function TodayScreen({
         ) : null}
       </Section>
 
+      <ReceivedRequestsSection api={familyApi} timeoutMs={timeoutMs} />
+
+      {split && split.missingCount > 0 ? (
+        <View testID="missing-banner" accessibilityLiveRegion="polite" style={styles.banner}>
+          <Text style={[styles.bannerTitle, font(600)]}>{t.missingBanner(split.missingCount)}</Text>
+          <Text style={[styles.bannerHint, font(400)]}>{t.missingBannerHint}</Text>
+        </View>
+      ) : null}
+
       {split && split.otherMissing.length > 0 ? (
         <Section heading={t.otherDaysHeading} testID="other-missing">
           {split.otherMissing.map((schedule) => (
@@ -187,14 +194,6 @@ export function TodayScreen({
           ))}
         </Section>
       ) : null}
-
-      <Section heading={t.inboxHeading} testID="family-inbox">
-        {/* 받는 쪽 API가 서버에 아직 없다. 다음 묶음(J10b)이 이 자리를 채운다. */}
-        <Card>
-          <Text style={[styles.inboxTitle, font(500)]}>{t.inboxEmpty}</Text>
-          <Text style={[styles.inboxHint, font(400)]}>{t.inboxSoon}</Text>
-        </Card>
-      </Section>
     </TabScreen>
   );
 }
@@ -205,6 +204,4 @@ const styles = StyleSheet.create({
   bannerHint: { fontSize: 14, lineHeight: 20, color: colors.textStrong },
   guideRow: { gap: 10 },
   guideText: { fontSize: 15, lineHeight: 22, color: colors.textStrong },
-  inboxTitle: { fontSize: 16, color: colors.text },
-  inboxHint: { fontSize: 14, lineHeight: 20, color: colors.textMuted },
 });

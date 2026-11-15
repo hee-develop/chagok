@@ -11,11 +11,12 @@ import { schedulePlacesApi, type SchedulePlacesApi } from '../fill-places/schedu
 import type { PlaceTarget } from './favorites';
 import { PlaceRow } from './PlaceRow';
 import { placesApi, snapshotOf, type Place, type PlaceSearchSource, type PlacesApi } from './placesApi';
+import { deliverPlace } from './placePicker';
 
 /** 서버 검색어 상한과 같다. */
 const MAX_QUERY_LENGTH = 50;
 
-type Props = ({ target: PlaceTarget; scheduleId?: never } | { scheduleId: string; target?: never }) & {
+type Props = ({ target: PlaceTarget; scheduleId?: never; pickerKey?: never } | { scheduleId: string; target?: never; pickerKey?: never } | { pickerKey: string; target?: never; scheduleId?: never }) & {
   scheduleApi?: SchedulePlacesApi;
   api?: PlacesApi;
   timeoutMs?: number;
@@ -26,7 +27,7 @@ type Props = ({ target: PlaceTarget; scheduleId?: never } | { scheduleId: string
 
 type SearchState = { status: 'idle' } | { status: 'loading' } | { status: 'error' } | { status: 'ready'; places: Place[]; source: PlaceSearchSource };
 
-export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePlacesApi, api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS, debounceMs = 300, standalone = false }: Props) {
+export function PlaceSearchScreen({ target, scheduleId, pickerKey, scheduleApi = schedulePlacesApi, api = placesApi, timeoutMs = REQUEST_TIMEOUT_MS, debounceMs = 300, standalone = false }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const font = useFont();
@@ -85,11 +86,17 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
-    else router.replace(standalone ? '/' : scheduleId === undefined ? '/setup/places' : '/setup/fill-places');
-  }, [router, scheduleId, standalone]);
+    else router.replace(standalone ? '/' : scheduleId === undefined && pickerKey === undefined ? '/setup/places' : '/setup/fill-places');
+  }, [router, scheduleId, pickerKey, standalone]);
 
   /** 해당 자리 또는 일정 하나만 저장한다. 일정이 거절되면 목록 확인을 안내한다. */
   const pick = async (place: Place, source: PlaceSearchSource) => {
+    // 가족 요청의 장소 칸: 서버에 저장하지 않고 글자(이름)와 좌표만 돌려준다.
+    if (pickerKey !== undefined) {
+      deliverPlace(pickerKey, { text: place.name, lat: place.lat, lng: place.lng });
+      goBack();
+      return;
+    }
     if (pickRequest.current) return;
     retryPick.current = () => void pick(place, source);
     const controller = new AbortController();
@@ -127,7 +134,14 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
     if (leave) goBack();
   };
 
-  const title = scheduleId !== undefined ? t.titleSchedule : target === 'home' ? t.titleHome : target === 'work' ? t.titleWork : t.titleOther;
+  /** 요청 장소 칸에서만: 검색 결과 대신 입력한 글자만 돌려준다(좌표 없이). */
+  const useText = () => {
+    if (pickerKey === undefined || trimmed === '') return;
+    deliverPlace(pickerKey, { text: trimmed });
+    goBack();
+  };
+
+  const title = pickerKey !== undefined ? t.titleRequest : scheduleId !== undefined ? t.titleSchedule : target === 'home' ? t.titleHome : target === 'work' ? t.titleWork : t.titleOther;
   const picking = pickingId !== null;
 
   return (
@@ -158,6 +172,12 @@ export function PlaceSearchScreen({ target, scheduleId, scheduleApi = schedulePl
           style={[styles.input, font(400)]}
           value={query}
         />
+
+        {pickerKey !== undefined && trimmed !== '' ? (
+          <Pressable accessibilityRole="button" accessibilityLabel={t.useAsText(trimmed)} accessibilityHint={t.useAsTextHint} onPress={useText} style={styles.useText}>
+            <Text style={[styles.useTextLabel, font(600)]}>{t.useAsText(trimmed)}</Text>
+          </Pressable>
+        ) : null}
 
         {search.status === 'loading' ? (
           <View key="loading" accessible accessibilityRole="progressbar" accessibilityLabel={t.searching} style={styles.statusBox}>
@@ -235,6 +255,8 @@ const styles = StyleSheet.create({
   retryText: { fontSize: 15, color: colors.text, textDecorationLine: 'underline' },
   footer: { paddingHorizontal: 20, paddingTop: 8, gap: 8 },
   saveError: { alignItems: 'center' },
+  useText: { minHeight: 48, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1.5, borderColor: colors.text, justifyContent: 'center' },
+  useTextLabel: { fontSize: 15, color: colors.text },
   cancel: { height: 48, alignItems: 'center', justifyContent: 'center' },
   cancelText: { fontSize: 15, color: colors.textMuted },
 });

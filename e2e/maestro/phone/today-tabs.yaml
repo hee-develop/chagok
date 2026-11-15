@@ -83,12 +83,16 @@ appId: ${APP_ID}
     timeout: 20000
 - assertVisible: '주간 회의'
 - assertVisible: '이동 없음 · 온라인 회의'
-- assertVisible: '장소가 빈 일정이 .*개 있어요'
 # 캘린더는 목 출처라 권한 안내가 없다.
 - assertNotVisible: '캘린더를 켜면 오늘 일정을 차에 보내 드려요.'
 # 받은 가족 요청은 화면 아래에 있어 스크롤해서 본다(빈 상태만).
 - scrollUntilVisible:
     element: '아직 받은 요청이 없어요.'
+    direction: DOWN
+    timeout: 20000
+# 정책 10.7 순서: 오늘 일정 → 받은 가족 요청 → 장소 빈 일정(배너)이라 배너는 받은 요청 아래에 있다.
+- scrollUntilVisible:
+    element: '장소가 빈 일정이 .*개 있어요'
     direction: DOWN
     timeout: 20000
 - takeScreenshot: 03b-today-bottom
@@ -148,13 +152,14 @@ appId: ${APP_ID}
     timeout: 15000
 - assertNotVisible: '일정 장소 찾기'
 
-# 7) 가족 탭: 보내기 입구와 묶기 자리
+# 7) 가족 탭: 가족이 없으면 가족 묶기(만들기·초대 코드 넣기)와 일정으로 보내는 입구(자세한 가족 탭 흐름은 family.yaml)
 - tapOn:
     id: 'tabbar-family'
 - extendedWaitUntil:
-    visible: '일정 고르러 가기'
+    visible: '가족 묶기'
     timeout: 15000
-- assertVisible: '가족을 묶고 요청을 받는 기능은 곧 만나요.'
+- assertVisible: '가족 만들기'
+- assertVisible: '초대 코드 넣기'
 - takeScreenshot: 06-family
 
 # 8) 장소 탭: 자주 가는 곳(단계 표시·다음 없음), 기억한 장소(서버에 심은 둘을 보이고 하나는 확인을 거쳐 지운다), 이동 없음 자리

@@ -15,14 +15,16 @@ import { registerTapHandler } from '../../notifications/taps';
 import { createMemoryStore } from '../../../storage/keyValueStore';
 import { TodayScreen } from '../TodayScreen';
 import { DENTIST, GRANTED, LUNCH, makeConnection, makePermissions, makeScheduleApi, SEAT } from '../../../__tests__/support/todaySupport';
+import { makeFamilyApi, receivedAppointment, receivedCare } from '../../../__tests__/support/familySupport';
 
 const mockPush = jest.fn();
+const mockNavigate = jest.fn();
 // 화면 포커스를 테스트가 켜고 끈다(탭을 바꿨다 돌아오는 상황).
 const mockFocus = { focused: true, listeners: new Set<(focused: boolean) => void>() };
 jest.mock('expo-router', () => {
   const { useEffect, useState } = jest.requireActual('react');
   return {
-    useRouter: () => ({ push: mockPush }),
+    useRouter: () => ({ push: mockPush, navigate: mockNavigate }),
     useFocusEffect: (callback: () => void | (() => void)) => {
       const [focused, setFocused] = useState(mockFocus.focused);
       useEffect(() => {
@@ -119,11 +121,85 @@ describe('오늘 탭: 정상', () => {
     expect(screen.getByTestId('today-row-head-lunch').props.accessibilityHint).toBe('누르면 접어요');
   });
 
-  it('받은 가족 요청은 서버에 받는 쪽이 없어 빈 상태만 보인다', async () => {
-    await setup();
+  it('받은 가족 요청이 없으면(가족이 없는 폰 포함) 빈 상태 문구와 안내를 보인다', async () => {
+    await setup({ familyApi: makeFamilyApi() });
     const inbox = within(screen.getByTestId('family-inbox'));
-    expect(inbox.getByText('아직 받은 요청이 없어요.')).toBeOnTheScreen();
-    expect(inbox.getByText('가족이 보낸 요청은 곧 여기에서 볼 수 있어요.')).toBeOnTheScreen();
+    expect(await inbox.findByText('아직 받은 요청이 없어요.')).toBeOnTheScreen();
+    expect(inbox.getByText('가족이 보낸 요청은 차에 타면 차곡이 전해 드려요. 누르면 가족 탭에서 볼 수 있어요.')).toBeOnTheScreen();
+  });
+});
+
+describe('오늘 탭: 받은 가족 요청(정책서 10.7)', () => {
+  const received = { sent: [], received: [receivedAppointment(), receivedCare()] };
+  const withReceived = (lists: object = received) => makeFamilyApi({ fetchRequests: jest.fn().mockResolvedValue(lists) });
+
+  beforeEach(() => mockNavigate.mockReset());
+
+  it('받은 요청을 보낸 사람·카테고리·요약·상태로 간단히 보인다(진행 중인 요청이 먼저)', async () => {
+    await setup({ familyApi: withReceived({ sent: [], received: [receivedCare({ status: 'completed' }), receivedAppointment()] }) });
+    const inbox = within(screen.getByTestId('family-inbox'));
+    const first = await inbox.findByTestId('inbox-request-in-appt');
+    expect(within(first).getByText('보낸 사람 엄마 · 약속 가기')).toBeOnTheScreen();
+    expect(within(first).getByText('17:00 치과')).toBeOnTheScreen();
+    expect(within(first).getByText('차에 연결하면 전해 드려요')).toBeOnTheScreen();
+    const rows = inbox.getAllByTestId(/^inbox-request-/);
+    expect(rows.map((r) => r.props.testID)).toEqual(['inbox-request-in-appt', 'inbox-request-in-care']);
+    expect(within(rows[1]!).getByText('끝났어요')).toBeOnTheScreen();
+  });
+
+  it('구역 순서는 정책 10.7대로 오늘 일정 → 받은 가족 요청 → 장소 빈 일정(배너·다른 날 빈 일정)이다', async () => {
+    await setup({ familyApi: withReceived() });
+    await screen.findByTestId('inbox-request-in-appt');
+    const ids: string[] = [];
+    const walk = (node: unknown) => {
+      if (typeof node !== 'object' || node === null) return;
+      const n = node as { props?: { testID?: string }; children?: unknown[] | null };
+      if (n.props?.testID) ids.push(n.props.testID);
+      n.children?.forEach(walk);
+    };
+    walk(screen.toJSON());
+    const at = (id: string) => ids.indexOf(id);
+    expect(at('today-schedules')).toBeGreaterThanOrEqual(0);
+    expect(at('today-schedules')).toBeLessThan(at('family-inbox'));
+    expect(at('family-inbox')).toBeLessThan(at('missing-banner'));
+    expect(at('missing-banner')).toBeLessThan(at('other-missing'));
+  });
+
+  it('누르면 가족 탭의 그 요청으로 간다', async () => {
+    await setup({ familyApi: withReceived() });
+    await fireEvent.press(await screen.findByTestId('inbox-request-in-care'));
+    expect(mockNavigate).toHaveBeenCalledWith({ pathname: '/family', params: { request: 'in-care' } });
+  });
+
+  it('줄 이름은 보낸 사람·카테고리·요약을 읽어 주고 힌트가 누르면 무엇이 되는지 알려 준다', async () => {
+    await setup({ familyApi: withReceived() });
+    const row = await screen.findByTestId('inbox-request-in-appt');
+    expect(row.props.accessibilityLabel).toBe('보낸 사람 엄마, 약속 가기, 17:00 치과');
+    expect(row.props.accessibilityHint).toBe('누르면 가족 탭에서 이 요청을 봐요');
+  });
+
+  it('세 개까지만 보이고 나머지는 가족 탭으로 보낸다', async () => {
+    const many = Array.from({ length: 5 }, (_, i) => receivedCare({ id: `c${i}`, item: `물건${i}` }));
+    await setup({ familyApi: withReceived({ sent: [], received: many }) });
+    const inbox = within(screen.getByTestId('family-inbox'));
+    expect(await inbox.findAllByTestId(/^inbox-request-/)).toHaveLength(3);
+    await fireEvent.press(inbox.getByRole('button', { name: '2개 더 보기' }));
+    expect(mockNavigate).toHaveBeenCalledWith('/family');
+  });
+
+  it('로딩: 읽는 동안 진행 표시를 보인다', async () => {
+    await setup({ familyApi: makeFamilyApi({ fetchRequests: jest.fn(() => new Promise(() => {})) }) });
+    expect(await screen.findByLabelText('받은 요청을 불러오는 중')).toBeOnTheScreen();
+  });
+
+  it('오류: 읽지 못하면 이 구역에 안내와 [다시 시도]가 보이고 일정 구역은 그대로다', async () => {
+    const fetchRequests = jest.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue(received);
+    await setup({ familyApi: makeFamilyApi({ fetchRequests }) });
+    const inbox = within(screen.getByTestId('family-inbox'));
+    expect(await inbox.findByText('받은 요청을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.')).toBeOnTheScreen();
+    expect(await screen.findByText('육전집 점심')).toBeOnTheScreen();
+    await fireEvent.press(inbox.getByRole('button', { name: '다시 시도' }));
+    expect(await inbox.findByTestId('inbox-request-in-appt')).toBeOnTheScreen();
   });
 });
 
