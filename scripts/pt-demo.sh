@@ -31,7 +31,7 @@ signal() { # signal <쿼리>: 차 debug 앱에 신호를 넣는다(adb shell만 
 case "${1:-}" in
   server)
     if lsof -ti "tcp:$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-      echo "포트 $PORT에서 이미 서버가 돌고 있습니다. 그 서버를 끄고 다시 하세요(lsof -i tcp:$PORT -sTCP:LISTEN)." >&2
+      echo "포트 ${PORT}에서 이미 서버가 돌고 있습니다. 그 서버를 끄고 다시 하세요(lsof -i tcp:$PORT -sTCP:LISTEN)." >&2
       exit 1
     fi
     echo "PT 일정으로 서버를 띄웁니다: http://127.0.0.1:$PORT ($PT_FIXTURE, 기준 12/3 08:50)"
