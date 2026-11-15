@@ -10,7 +10,7 @@ env:
 - launchApp
 
 # 1. 연결 전: 탑승해도 브리핑 없이 연결 카드(QR·번호)만
-- openLink: chagok-debug://signal?paired=false&now=2026-11-06T00:20:00Z&trip=none&route=ok&listen=off&gear=P&enter=true
+- openLink: chagok-debug://signal?paired=false&now=2026-11-06T00:20:00Z&navi=real&trip=none&route=ok&listen=off&gear=P&enter=true
 - extendedWaitUntil:
     visible: '휴대폰과 연결해 주세요.'
     timeout: 15000

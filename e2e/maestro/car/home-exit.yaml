@@ -23,7 +23,7 @@ env:
 - launchApp
 
 # 0. 집 등록: 연결을 풀어(서버의 자리도 지움) 연결 카드를 띄우고, 화면의 번호를 서버에 보내 새 자리를 만든 뒤 그 자리에 집을 넣는다.
-- openLink: chagok-debug://signal?paired=false&now=2026-11-06T00:20:00Z&trip=none&route=ok&listen=off&gear=P
+- openLink: chagok-debug://signal?paired=false&now=2026-11-06T00:20:00Z&navi=real&trip=none&route=ok&listen=off&gear=P
 - extendedWaitUntil:
     visible:
       id: '.*pairing_code'
@@ -83,7 +83,7 @@ env:
 - assertNotVisible: ".*수고했어요.*"
 
 # 5. 집을 떠나지 않고(집 밖 위치 없이) 집 P단은 말 없음: 초기화 직후 바로 집 위치로 P단
-- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&gear=P
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&navi=real&gear=P
 - openLink: chagok-debug://signal?gear=D
 - openLink: chagok-debug://signal?loc=35.1743,126.9121
 - openLink: chagok-debug://signal?gear=P
@@ -93,7 +93,7 @@ env:
 - assertNotVisible: ".*챙기세요!.*"
 
 # 6. 집 하차(챙길 물건 없음): 초기화한 09:20에는 콩물 픽업(21:00) 전이라 물건이 없어 '오늘도 수고했어요.'(버튼 없음). 12초 뒤 닫힌다
-- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&gear=P
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&navi=real&gear=P
 - openLink: chagok-debug://signal?gear=D
 - openLink: chagok-debug://signal?loc=35.1378,126.7912
 - openLink: chagok-debug://signal?loc=35.1743,126.9121
@@ -119,7 +119,7 @@ env:
 - assertNotVisible: ".*챙기세요!.*"
 
 # 8. 집 하차(픽업 물건): 21:10에 '콩물 픽업'(21:00 시작, 메모 없음)이 지났으니 '콩물 챙기세요!' + [챙겼어요]. 초기화로 오늘 기록을 다시 센다
-- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&advance=710&gear=P
+- openLink: chagok-debug://signal?now=2026-11-06T00:20:00Z&navi=real&advance=710&gear=P
 - openLink: chagok-debug://signal?gear=D
 - openLink: chagok-debug://signal?loc=35.1378,126.7912
 - openLink: chagok-debug://signal?loc=35.1743,126.9121

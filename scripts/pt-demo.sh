@@ -9,7 +9,7 @@
 #                                    차는 같은 날 마지막으로 받은 일정 사본(리허설 때 받은 것)으로 브리핑한다.
 #
 # 환경 변수: PORT(서버, 기본 8787), CAR_SERIAL(기본 emulator-5554), PHONE_SERIAL(기본 emulator-5556), METRO_PORT(기본 8081),
-#   PT_REAL=1 이면 reset이 실제 내비 소요 시간·길안내·음성 인식을 쓴다(기본은 주입: 소요 시간 모름, 길안내 요청 성공, 듣기 끔).
+#   PT_REAL=1 이면 reset이 실제 내비 소요 시간·길안내·음성 인식을 쓴다(기본은 주입: 소요 시간 모름, 길안내 요청 성공, 듣기 끔, 가짜 길안내 켬 = 지도·도착 예정이 보인다).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,14 +38,14 @@ case "${1:-}" in
     cd "$ROOT/server" && PORT="$PORT" FIXTURE_PATH="$PT_FIXTURE" FIXTURE_SEATS=1 exec ./node_modules/.bin/tsx src/index.ts
     ;;
   reset)
-    if [ "${PT_REAL:-0}" = 1 ]; then mode="trip=real&route=real&listen=real"; else mode="trip=none&route=ok&listen=off"; fi
+    if [ "${PT_REAL:-0}" = 1 ]; then mode="trip=real&route=real&listen=real&navi=real"; else mode="trip=none&route=ok&listen=off&navi=fake"; fi
     # 연결 확인은 앱이 앞에 있을 때만 돈다(PairingController). 앱을 먼저 띄운 뒤 신호를 넣는다.
     "$ADB" -s "$CAR_SERIAL" shell am start -W -n com.chagok.car/.MainActivity >/dev/null
     signal "paired=false&now=$PT_ANCHOR_UTC&$mode&gear=P&enter=true"
     echo "차를 12/3 08:50 · 휴대폰 연결 전으로 되돌렸습니다($mode). 차 화면에 연결 카드(QR · 번호)가 보여야 합니다."
     ;;
   fallback)
-    if [ "${PT_REAL:-0}" = 1 ]; then mode="trip=real&route=real&listen=real"; else mode="trip=none&route=ok&listen=off"; fi
+    if [ "${PT_REAL:-0}" = 1 ]; then mode="trip=real&route=real&listen=real&navi=real"; else mode="trip=none&route=ok&listen=off&navi=fake"; fi
     "$ADB" -s "$CAR_SERIAL" shell am start -W -n com.chagok.car/.MainActivity >/dev/null
     signal "now=$PT_ANCHOR_UTC&$mode&gear=P&enter=true"
     echo "차를 12/3 08:50 탑승으로 되돌렸습니다(연결 유지). 서버에 닿지 않으면 사본으로 브리핑하고 '서버에 연결하지 못해…' 한 줄이 붙습니다."
@@ -65,7 +65,8 @@ case "${1:-}" in
     if "$ADB" -s "$CAR_SERIAL" get-state >/dev/null 2>&1; then
       ok "붙어 있다"
       tz="$("$ADB" -s "$CAR_SERIAL" shell getprop persist.sys.timezone | tr -d '\r')"
-      if [ "$tz" = "Asia/Seoul" ]; then ok "시간대 서울"; else bad "시간대가 $tz 다. 에뮬레이터를 -timezone Asia/Seoul로 다시 켠다"; fi
+      # 차곡 차량 앱은 기기 시간대와 무관하게 날짜·시각을 Asia/Seoul로 읽는다(ServiceZone). 기기가 UTC여도 시연에는 문제가 없어 실패로 보지 않는다.
+      if [ "$tz" = "Asia/Seoul" ]; then ok "시간대 서울"; else ok "기기 시간대는 $tz (차곡 앱은 늘 서울로 읽으므로 상관없음)"; fi
       if "$ADB" -s "$CAR_SERIAL" shell pm path com.chagok.car >/dev/null 2>&1; then ok "차곡 앱이 깔려 있다"; else bad "차곡 앱이 없다: cd car && ANDROID_SERIAL=$CAR_SERIAL ./gradlew :app:installDebug"; fi
       reach="$("$ADB" -s "$CAR_SERIAL" shell "(echo -e 'GET /health HTTP/1.0\r\n\r\n'; sleep 1) | toybox nc -w 2 10.0.2.2 $PORT" 2>/dev/null | head -1 | tr -d '\r')"
       case "$reach" in *200*) ok "차에서 서버(10.0.2.2:$PORT)에 닿는다";; *) bad "차에서 서버에 닿지 않는다. 차 네트워크가 끊겼으면 adb -s $CAR_SERIAL reboot";; esac

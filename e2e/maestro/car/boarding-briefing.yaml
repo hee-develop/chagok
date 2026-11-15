@@ -13,7 +13,7 @@ env:
 - launchApp
 
 # 2. 시계를 프로토타입 장면(09:20 KST)으로 맞추고 첫 탑승부터 다시 → 인사와 서버 일정이 보인다
-- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=none&route=ok&listen=off&gear=P&enter=true
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&navi=real&trip=none&route=ok&listen=off&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
     timeout: 20000
@@ -35,7 +35,7 @@ env:
 - takeScreenshot: ${SHOT_DIR}/02-gear-d-collapsed
 
 # 4. 다시 첫 탑승(상태 초기화, 기어 P, 앱 진입) → 주 버튼으로 수락하면 카드가 접힌다
-- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&gear=P&enter=true
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&navi=real&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
     timeout: 20000

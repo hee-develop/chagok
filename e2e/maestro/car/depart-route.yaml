@@ -12,7 +12,7 @@ env:
 - launchApp
 
 # 1. 출발 제안 카드: 주 버튼 "응, 출발"과 보조 버튼 "잠깐만", 음성 힌트
-- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&enter=true
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&navi=real&trip=12000&route=ok&listen=off&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
     timeout: 20000
@@ -48,7 +48,7 @@ env:
 - takeScreenshot: ${SHOT_DIR}/03b-result-gone
 
 # 4. 다시 첫 탑승 → "응"이라고 말하는데 내비가 경로 요청을 받지 못하면 실패 안내
-- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=fail&listen=off&gear=P&enter=true
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&navi=real&trip=12000&route=fail&listen=off&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
     timeout: 20000
@@ -60,7 +60,7 @@ env:
 - takeScreenshot: ${SHOT_DIR}/04-route-failed
 
 # 5. 소요 시간 4시간이면 늦음: 늦는다고 알린 뒤 출발 제안과 같이 묻고, 수락하기 전에는 길안내를 시작하지 않는다
-- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=14400&route=ok&listen=off&gear=P&enter=true
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&navi=real&trip=14400&route=ok&listen=off&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*도착이에요.*"
     timeout: 20000
@@ -78,7 +78,7 @@ env:
 - takeScreenshot: ${SHOT_DIR}/05b-late-accepted
 
 # 6. 소요 30분이면 여유가 많아 목적지를 묻는다: 제안 장소가 후보. 장소 이름으로 고른다
-- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=1800&route=ok&listen=off&gear=P&enter=true
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&navi=real&trip=1800&route=ok&listen=off&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*어디로 갈까요.*"
     timeout: 20000
@@ -93,7 +93,7 @@ env:
 - takeScreenshot: ${SHOT_DIR}/07-candidate-route-started
 
 # 7. 거절: "그냥 갈게" 버튼으로 카드만 접는다
-- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=1800&route=ok&listen=off&gear=P&enter=true
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&navi=real&trip=1800&route=ok&listen=off&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*어디로 갈까요.*"
     timeout: 20000

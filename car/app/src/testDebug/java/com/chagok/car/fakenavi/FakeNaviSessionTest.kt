@@ -36,6 +36,7 @@ class FakeNaviSessionTest {
     }
 
     private val place = Place("광주 육전집", LatLng(35.1595, 126.8526))
+    private val DEPARTED = java.time.Instant.parse("2026-11-06T00:20:00Z")
     private val scheduler = FakeScheduler()
     private var now = 0L
     private val arrivals = mutableListOf<String>()
@@ -53,7 +54,7 @@ class FakeNaviSessionTest {
     }
 
     private fun driveAndStart() {
-        session.start(place)
+        session.start(place, DEPARTED)
         session.setDriving(true)
     }
 
@@ -61,7 +62,7 @@ class FakeNaviSessionTest {
         session.setDriving(true)
         assertEquals(0, scheduler.count)
         session.setDriving(false)
-        session.start(place)
+        session.start(place, DEPARTED)
         assertEquals(0, scheduler.count)
     }
 
@@ -121,13 +122,13 @@ class FakeNaviSessionTest {
 
     @Test fun `길이가 0인 경로는 시작하자마자 도착을 한 번 알린다`() {
         session.setDriving(true)
-        session.start(Place("여기", FakeRoute.ORIGIN.position))
+        session.start(Place("여기", FakeRoute.ORIGIN.position), DEPARTED)
         assertEquals(listOf("여기"), arrivals)
         assertEquals(0, scheduler.count)
     }
 
     @Test fun `progress는 정차 중에도 진행률을 옮기고 틱을 만들지 않는다`() {
-        session.start(place)
+        session.start(place, DEPARTED)
         session.setProgress(0.5)
         assertEquals(0.5, session.trip!!.remainingRatio, 1e-9)
         assertEquals(0, scheduler.count)
@@ -137,7 +138,7 @@ class FakeNaviSessionTest {
     @Test fun `progress 1은 도착으로 알리고 경로가 없으면 무시한다`() {
         session.setProgress(0.3)
         assertNull(session.trip)
-        session.start(place)
+        session.start(place, DEPARTED)
         session.setProgress(1.0)
         assertEquals(1, arrivals.size)
         assertNotNull(session.trip)
@@ -168,7 +169,7 @@ class FakeNaviSessionTest {
     @Test fun `progress로 건너뛴 도착도 onArrived로 알린다`() {
         var count = 0
         session.onArrived = { count++ }
-        session.start(place)
+        session.start(place, DEPARTED)
         session.setProgress(1.0)
         assertEquals(1, count)
     }
@@ -176,7 +177,7 @@ class FakeNaviSessionTest {
     @Test fun `trip 주입값이 있으면 패널의 남은 시간을 그 값으로 맞춘다`() {
         DebugInjection.tripSeconds = 12_000
         try {
-            session.start(place)
+            session.start(place, DEPARTED)
             assertEquals(java.time.Duration.ofSeconds(12_000), session.trip!!.remainingDuration)
             session.setProgress(0.5)
             assertEquals(6_000_000.0, session.trip!!.remainingDuration.toMillis().toDouble(), 2.0)
@@ -185,12 +186,33 @@ class FakeNaviSessionTest {
         }
     }
 
+    @Test fun `경로를 시작한 시각이 출발 시각이고 달려도 도착 예정은 같다`() {
+        DebugInjection.tripSeconds = 12_000
+        try {
+            session.start(place, DEPARTED)
+            val expected = DEPARTED + java.time.Duration.ofSeconds(12_000)
+            assertEquals(expected, session.trip!!.arrivalAt)
+            session.setDriving(true)
+            now += 5_000
+            scheduler.runPending()
+            assertEquals(expected, session.trip!!.arrivalAt)
+            session.setProgress(0.9)
+            assertEquals(expected, session.trip!!.arrivalAt)
+            // 새 경로는 새 출발 시각으로 정한다
+            val later = DEPARTED + java.time.Duration.ofMinutes(30)
+            session.start(place, later)
+            assertEquals(later + java.time.Duration.ofSeconds(12_000), session.trip!!.arrivalAt)
+        } finally {
+            DebugInjection.tripSeconds = null
+        }
+    }
+
     @Test fun `trip이 없거나 모름이면 경로 길이로 구한 시간을 쓴다`() {
-        session.start(place)
+        session.start(place, DEPARTED)
         assertEquals(session.trip!!.route.duration, session.trip!!.remainingDuration)
         DebugInjection.tripSeconds = DebugInjection.NO_TRIP
         try {
-            session.start(place)
+            session.start(place, DEPARTED)
             assertEquals(session.trip!!.route.duration, session.trip!!.remainingDuration)
         } finally {
             DebugInjection.tripSeconds = null
@@ -205,7 +227,7 @@ class FakeNaviSessionTest {
             located += it
             log += "위치"
         }
-        session.start(place)
+        session.start(place, DEPARTED)
         // 경로를 시작할 때 출발점
         assertEquals(listOf(FakeRoute.ORIGIN.position), located)
         session.setDriving(true)
@@ -256,13 +278,13 @@ class FakeNaviSessionTest {
     @Test fun `내비가 멈춘 동안 progress는 무시하고 길이 0인 경로의 도착은 다시 켜질 때 한 번 알린다`() {
         val reached = mutableListOf<String>()
         session.onArrived = { reached += it.route.destination.name }
-        session.start(place)
+        session.start(place, DEPARTED)
         session.setStopped(true)
         session.setProgress(1.0)
         assertEquals(0.0, session.trip!!.traveledMeters, 1e-9)
         assertTrue(reached.isEmpty())
 
-        session.start(Place("여기", FakeRoute.ORIGIN.position))
+        session.start(Place("여기", FakeRoute.ORIGIN.position), DEPARTED)
         assertTrue(reached.isEmpty())
         session.setStopped(false)
         assertEquals(listOf("여기"), reached)

@@ -10,7 +10,7 @@
 #   DEMO_HOME=1     이미 떠 있는 서버에도 집 하차 단계를 위해 서버 자주 가는 곳의 집(mock-home-apt)을 등록했다가 끝나면 해제한다.
 #                   이 스크립트가 서버를 띄운 경우에는 늘 한다. 기존 서버에 DEMO_HOME 없이 돌리면 집 하차 단계는 건너뛴다(폰이 쓰는 서버의 집을 바꾸지 않으려고).
 # 시작할 때 앱을 force-stop한 뒤 MainActivity를 다시 띄운다(DemoClock이 시작할 때 시간대를 잡고, 가짜 내비는 MainActivity가 앞에 있어야 움직인다).
-# 끝날 때(Ctrl-C 포함) 주입값(trip·route·listen·navi·drive·loc·exitcard)을 실제 값으로 되돌린다. 휴대폰 연결 상태는 되돌리지 않는다:
+# 끝날 때(Ctrl-C 포함) 주입값(trip·route·listen·drive·loc·exitcard)을 실제 값으로, navi는 debug 기본값(fake)으로 되돌린다. 휴대폰 연결 상태는 되돌리지 않는다:
 # 시작할 때 paired=true로 '연결됨'으로 두므로(연결 카드가 단계 판정을 가리지 않게), PT 시연 전에는 `pnpm demo:pt reset`으로 다시 연결 전으로 돌린다.
 # 시계는 09:20(기준 시각)에서 시작해 재탑승 단계에서 13:30으로 보낸다. 서버·앱 데이터는 바꾸지 않는다.
 # 같은 에뮬레이터를 다른 세션이 쓰는 중일 수 있어 그 에뮬레이터를 대상으로 한 Maestro가 돌고 있으면 멈춘다. 이 스크립트는 e2e-car.sh와 달리 flow를 돌리지 않는다.
@@ -72,7 +72,7 @@ restore_timezone() {
 # 주입값을 되돌려 이 데모가 남긴 trip·route·listen·navi·drive·loc·exitcard가 이어지는 다른 확인에 영향을 주지 않게 한다.
 reset_injection() {
   [ "$APP_STARTED" = "1" ] || return 0
-  "${ADB[@]}" shell "am start -a android.intent.action.VIEW -d 'chagok-debug://signal?trip=real&route=real&listen=real&navi=real&drive=4.5&loc=real&exitcard=real'" </dev/null >/dev/null 2>&1 || true
+  "${ADB[@]}" shell "am start -a android.intent.action.VIEW -d 'chagok-debug://signal?trip=real&route=real&listen=real&navi=fake&drive=4.5&loc=real&exitcard=real'" </dev/null >/dev/null 2>&1 || true
   sleep 1
 }
 
@@ -362,10 +362,10 @@ if [ "$HOME_SET" = "1" ]; then
     "수고했어요"
 fi
 
-step "끝: 실제 내비로 되돌림" \
-  "가짜 내비를 끄고 실제 내비 모드로, 주입값도 실제 값으로(이어지는 다른 확인에 영향이 없게)" \
-  "'시연용 가짜 지도' 표시가 사라짐" \
-  "navi=real&trip=real&route=real&listen=real&drive=4.5&loc=real&exitcard=real" \
+step "끝: 기본값(가짜 내비 켬)으로 되돌림" \
+  "debug 기본값(가짜 내비 켬)으로, 주입값은 실제 값으로(이어지는 다른 확인에 영향이 없게)" \
+  "'시연용 가짜 지도' 표시가 남아 있음" \
+  "navi=fake&trip=real&route=real&listen=real&drive=4.5&loc=real&exitcard=real" \
   "" 0 \
   "" \
   ""

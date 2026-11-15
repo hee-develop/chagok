@@ -97,7 +97,7 @@ class InjectedNavigatorTest {
         assertEquals(listOf("location"), inner.calls) // 경로가 없으면 실제 내비에 묻는다
         assertTrue(posted.isEmpty())
 
-        fake.start(place)
+        fake.start(place, java.time.Instant.parse("2026-11-06T00:20:00Z"))
         fake.setProgress(1.0)
         posted.clear()
         navigator.requestLocation()
@@ -116,7 +116,7 @@ class InjectedNavigatorTest {
 
     @Test fun `loc을 주입했으면 가짜 내비가 켜져 있어도 가짜 경로 위치 대신 주입 위치로 답한다`() {
         DebugInjection.fakeNavi = true
-        fake.start(place)
+        fake.start(place, java.time.Instant.parse("2026-11-06T00:20:00Z"))
         fake.setProgress(1.0)
         val injected = LatLng(35.1690, 126.8888)
         DebugInjection.injectedLocation = injected
@@ -160,7 +160,7 @@ class InjectedNavigatorTest {
         DebugHooks.connect(fake) { posted += it }
         DebugInjection.fakeNavi = true
         DebugInjection.injectedLocation = LatLng(35.1690, 126.8888)
-        fake.start(place)
+        fake.start(place, java.time.Instant.parse("2026-11-06T00:20:00Z"))
         assertTrue(posted.none { it is Event.LocationChanged })
         DebugInjection.injectedLocation = null
         fake.setProgress(0.5)
@@ -180,5 +180,34 @@ class InjectedNavigatorTest {
         fake.setProgress(1.0)
         assertTrue(posted.contains(Event.DestinationArrived))
         assertEquals(listOf("stop", "start"), inner.calls)
+    }
+
+    @Test fun `가짜 내비가 켜져 있는 동안에는 실제 내비의 도착 알림을 버리고 끄면 통과한다`() {
+        val out = mutableListOf<Event>()
+        val naviSink = DebugHooks.naviSink { out += it }
+        DebugInjection.fakeNavi = true
+        repeat(3) { naviSink(Event.DestinationArrived) } // 실제 내비(에뮬레이터)가 도착 알림을 되풀이해 보내도
+        naviSink(Event.TravelTimeResult(1, null))
+        assertEquals(listOf<Event>(Event.TravelTimeResult(1, null)), out) // 가짜 모드의 도착은 가짜 경로가 한 번만 알린다
+        out.clear()
+
+        DebugInjection.fakeNavi = false
+        naviSink(Event.DestinationArrived)
+        assertEquals(listOf<Event>(Event.DestinationArrived), out)
+    }
+
+    @Test fun `가짜 경로를 시작하는 시각이 도착 예정의 출발 시각이다`() {
+        val at = java.time.Instant.parse("2026-12-02T23:50:00Z")
+        val timed = InjectedNavigator(inner, { posted += it }, fake) { at }
+        DebugInjection.fakeNavi = true
+        DebugInjection.tripSeconds = 12_000
+        assertTrue(timed.startRoute(place))
+        assertEquals(at, fake.trip!!.departedAt)
+        assertEquals(at + Duration.ofSeconds(12_000), fake.trip!!.arrivalAt)
+    }
+
+    @Test fun `debug 빌드의 가짜 길안내 기본값은 켬이다`() {
+        // 다른 테스트가 reset()으로 false로 만들어 두므로 기본값 상수와 선언 초깃값을 따로 확인한다.
+        assertTrue(DebugInjection.DEFAULT_FAKE_NAVI)
     }
 }

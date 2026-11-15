@@ -11,7 +11,9 @@ import com.chagok.car.runtime.Adapters
 import com.chagok.car.runtime.Locator
 import com.chagok.car.runtime.Navigator
 import com.chagok.car.runtime.Speaker
+import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 
 /**
  * E2E가 내비 결과와 듣기를 직접 정하게 하는 주입 값. 디버그 빌드에만 있고 릴리스 소스셋에는 [DebugHooks]의 항등 구현만 있다.
@@ -36,8 +38,11 @@ object DebugInjection {
      */
     @Volatile var exitCardSeconds: Long? = null
 
-    /** true면 실제 내비 대신 가짜 길안내(직접 그린 지도)를 쓴다. 기본 false(실제 내비). */
-    @Volatile var fakeNavi: Boolean = false
+    /**
+     * true면 실제 내비 대신 가짜 길안내(직접 그린 지도)를 쓴다. **debug 빌드의 기본은 true**다(앱을 새로 설치·재시작해도 지도가 보이게).
+     * 실제 내비·실제 위치(에뮬레이터 GPS)로 보려면 신호 `navi=real`로 끈다. 값은 프로세스 메모리에만 있어 앱을 다시 띄우면 기본값(true)으로 돌아온다.
+     */
+    @Volatile var fakeNavi: Boolean = DEFAULT_FAKE_NAVI
 
     /**
      * 신호 `loc`으로 주입한 위치. null이면 주입하지 않은 것이다(`loc=real`로 되돌린다).
@@ -51,6 +56,9 @@ object DebugInjection {
 
     /** 기본 4.5초. 처음 45초였는데 시연에서 너무 느려 10배 빠르게 했다(2026-11-12). */
     const val DEFAULT_DRIVE_MILLIS = 4_500L
+
+    /** [fakeNavi]의 기본값. debug는 가짜 길안내 켬(2026-11-15 변경, 이전 기본은 실제 내비). */
+    const val DEFAULT_FAKE_NAVI = true
     const val NO_TRIP = -1L
 }
 
@@ -59,9 +67,15 @@ object DebugHooks {
     /** 하차 카드를 띄워 두는 시간. [DebugInjection.exitCardSeconds]가 없으면 정책 기준값이다. */
     fun exitCardDuration(): Duration = DebugInjection.exitCardSeconds?.let { Duration.ofSeconds(it) } ?: Rules.EXIT_CARD
 
-    /** 실제 내비의 위치 답이 쓰는 이벤트 출구. 위치를 주입한 동안([DebugInjection.injectedLocation])에는 그 답을 버린다. */
+    /**
+     * 실제 내비의 이벤트 출구. 위치를 주입한 동안([DebugInjection.injectedLocation])에는 위치 답을 버린다.
+     * 가짜 내비가 켜져 있는 동안에는 실제 내비의 도착 알림도 버린다: 가짜 모드의 도착은 가짜 경로([FakeNaviSession.onArrived])가 한 번만 알리는데
+     * 실제 내비(에뮬레이터)가 따로 도착 알림을 되풀이해 보내면 같은 도착이 여러 번 세션에 들어온다.
+     */
     fun naviSink(post: (Event) -> Unit): (Event) -> Unit = { event ->
-        if (!(event is Event.LocationChanged && DebugInjection.injectedLocation != null)) post(event)
+        val dropped = (event is Event.LocationChanged && DebugInjection.injectedLocation != null) ||
+            (event is Event.DestinationArrived && DebugInjection.fakeNavi)
+        if (!dropped) post(event)
     }
 
     /** 위치 어댑터가 쓰는 이벤트 출구. 실제 위치를 받지 않는 동안([acceptsRealLocation])에는 위치 이벤트를 버린다. */
@@ -72,10 +86,11 @@ object DebugHooks {
     /** 실제 위치(어댑터가 읽은 에뮬레이터·차의 위치)를 받는가. `loc`을 주입했거나 가짜 내비가 켜져 있으면 받지 않는다. */
     fun acceptsRealLocation(): Boolean = DebugInjection.injectedLocation == null && !DebugInjection.fakeNavi
 
-    fun wrap(adapters: Adapters, post: (Event) -> Unit): Adapters {
+    /** [clock]은 데모 시계다. 가짜 경로를 시작한 시각(출발 시각)을 이 시계로 정해 패널의 도착 예정 시각이 데모 시계와 같은 시간축에 있게 한다. */
+    fun wrap(adapters: Adapters, post: (Event) -> Unit, clock: Clock): Adapters {
         connect(FakeNaviSession.shared, post)
         return Adapters(
-            navi = InjectedNavigator(adapters.navi, post),
+            navi = InjectedNavigator(adapters.navi, post, now = clock::instant),
             voice = InjectedSpeaker(adapters.voice),
             signals = adapters.signals,
             location = InjectedLocator(adapters.location),
@@ -96,6 +111,8 @@ internal class InjectedNavigator(
     private val inner: Navigator,
     private val post: (Event) -> Unit,
     private val fake: FakeNaviSession = FakeNaviSession.shared,
+    /** 가짜 경로의 출발 시각을 정하는 데모 시계의 지금 */
+    private val now: () -> Instant = Instant::now,
 ) : Navigator {
     // 세션이 내비 어댑터를 멈추는 Suspend 동안에는 가짜 내비도 멈춘다(도착·위치 이벤트를 넣지 않는다).
     override fun start() {
@@ -127,7 +144,7 @@ internal class InjectedNavigator(
         // 가짜 내비는 실제 내비를 거치지 않는다. route=fail이면 경로를 시작하지 않고 실패로 답한다.
         val ok = DebugInjection.routeOk ?: true
         // 실패면 남아 있던 이전 가짜 경로를 지운다(옛 경로가 계속 달려 도착 알림을 내지 않게).
-        if (ok) fake.start(place) else fake.clear()
+        if (ok) fake.start(place, now()) else fake.clear()
         return ok
     }
 

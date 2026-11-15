@@ -2,6 +2,7 @@ package com.chagok.car.flow
 
 import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.Schedule
+import com.chagok.car.domain.ServiceZone
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
@@ -95,7 +96,7 @@ class ServerScheduleSource(
     private val fetcher: ScheduleFetcher,
     private val anchor: () -> Instant,
     private val copies: ScheduleCopyStore? = null,
-    private val zone: () -> ZoneId = { ZoneId.systemDefault() },
+    private val zone: () -> ZoneId = { ServiceZone.SEOUL },
     private val logger: Logger = Logger.None,
     private val worker: Executor = Executors.newCachedThreadPool { r -> Thread(r, "schedule-fetch").apply { isDaemon = true } },
     /**
