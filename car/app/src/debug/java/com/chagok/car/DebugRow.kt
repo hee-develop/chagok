@@ -19,7 +19,7 @@ import java.time.Duration
  * 윗줄은 탑승·주행·정차·도착·시간·초기화, 아랫줄은 [가짜 내비]와 "들은 말 처리: …" 글자.
  * [탑승]은 앱 진입 규칙을 건너뛰고 바로 탑승으로 처리한다.
  * [주행]·[정차]는 기어 D·P 이벤트를 넣는다. [도착]은 내비 목적지 도착 알림을 넣는다(차곡이 길안내를 시작한 일정이 도착이 된다).
- * [가짜 내비]는 가짜 길안내 지도를 켜고 끈다(글자에 지금 상태를 보인다). [데모 초기화]는 가짜 경로도 지운다.
+ * [가짜 내비]는 가짜 길안내 지도를 켜고 끈다(글자에 지금 상태를 보인다). [데모 초기화]는 시연 시작 상태로 되돌린다([DebugDemoReset]).
  */
 object DebugRow {
     fun create(activity: Activity, host: SessionHost): View {
@@ -37,10 +37,8 @@ object DebugRow {
                 // 가짜 내비 패널의 도착 예정 시각도 바로 갱신한다.
                 FakeNaviSession.shared.onChanged?.invoke()
             })
-            addView(button(activity, "데모 초기화") {
-                FakeNaviSession.shared.clear()
-                host.resetDemo()
-            })
+            // 시연 시작 상태로: 시계는 마지막 now= 시각, 기어는 P, 주입 위치·가짜 경로를 지우고 앱 진입 판단을 한 번 돌린다.
+            addView(button(activity, "데모 초기화") { DebugDemoReset.reset(DebugDemoReset.of(host)) })
         }
         val navi = button(activity, "") { FakeNaviSession.shared.setEnabled(!FakeNaviSession.shared.enabled) }
         fun showNavi(on: Boolean) { navi.text = if (on) "가짜 내비 켬" else "가짜 내비 끔" }

@@ -16,7 +16,7 @@ import java.time.Instant
  *
  * - `paired`: true면 휴대폰과 연결된 것으로 두고(말하지 않음), false면 연결을 풀어(서버도) 연결 카드를 띄운다. 가장 먼저 처리한다.
  *   연결 상태는 차에 저장돼 남는다. 연결 카드가 없는 기존 흐름의 E2E는 시작할 때 `paired=true`를 넣는다
- * - `now`: ISO8601 시각. 데모 시계와 일정 기준 시각을 그 시각으로 맞추고 상태(가짜 경로 포함)를 비운다(연결 다음에 처리). `exitcard`도 `real`로 되돌린다
+ * - `now`: ISO8601 시각. 데모 시계와 일정 기준 시각을 그 시각으로 맞추고 상태(가짜 경로 포함)를 비운다(연결 다음에 처리). `exitcard`도 `real`로 되돌린다. 이 시각은 [데모 초기화] 버튼이 시계를 되돌릴 시작 시각으로 기억한다([DebugDemoReset])
  * - `trip`: 소요 시간 조회 결과를 초 단위로(`2400`). `none`이면 "모름", `real`이면 실제 내비([DebugInjection])
  * - `route`: 길안내 요청 결과 `ok`·`fail`. `real`이면 실제 내비([DebugInjection])
  * - `exitcard`: 하차 카드가 떠 있는 시간을 초 단위로(`30`, E2E가 문구를 확인하게). `real`이면 정책 기준값(5초)
@@ -45,7 +45,10 @@ object DebugSignals {
         value("paired")?.let { host.setPaired(it.toBoolean()) }
         value("now")?.let {
             FakeNaviSession.shared.clear()
-            host.resetDemo(Instant.parse(it))
+            val startAt = Instant.parse(it)
+            // [데모 초기화] 버튼이 이 시각으로 되돌린다.
+            DebugInjection.demoStartAt = startAt
+            host.resetDemo(startAt)
             // 데모 초기화는 하차 카드 시간도 되돌린다(flow가 중간에 실패해도 늘어난 시간이 남지 않게). 같은 신호의 exitcard는 아래에서 다시 정한다.
             DebugInjection.exitCardSeconds = null
         }
