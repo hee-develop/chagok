@@ -295,7 +295,11 @@ export const createEventsRoute = (
       for (const scope of new Map([[write.seatId, write], [read.seatId, read]]).values()) {
         scope.data.events.clear();
         // 기본 자리(데모·E2E)만 도착 횟수도 함께 비운다(반복하는 데모가 횟수를 쌓지 않게). 실제 자리·연결 전 버킷의 도착 횟수는 건드리지 않는다.
-        if (scope.kind === 'default') scope.data.arrivals.clear();
+        // 설정(`/settings`)도 같다: 다음 시연이 앞 시연의 스위치를 물려받지 않게 기본값으로 되돌린다.
+        if (scope.kind === 'default') {
+          scope.data.arrivals.clear();
+          scope.data.settings.reset();
+        }
       }
       return c.json({ receivedAt: null as string | null }, 200);
     });

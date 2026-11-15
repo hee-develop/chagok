@@ -248,6 +248,12 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: '카드를 띄우지 않고 말로만 알려요.'
     timeout: 15000
+# 낙관적으로 먼저 바뀌므로 저장이 끝나(스위치가 다시 enabled) 서버에 반영된 뒤 확인한다.
+- extendedWaitUntil:
+    visible:
+      id: 'switch-voiceOnly'
+      enabled: true
+    timeout: 15000
 - assertVisible:
     id: 'switch-voiceOnly'
     checked: true
@@ -275,6 +281,11 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: '켜면 카드를 띄우지 않고 말로만 알려요.'
     timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: 'switch-voiceOnly'
+      enabled: true
+    timeout: 15000
 - runScript:
     file: assert-settings.js
     env:
@@ -286,6 +297,11 @@ appId: ${APP_ID}
     id: 'switch-lateContact'
 - extendedWaitUntil:
     visible: '늦을 것 같으면 연락할지 차가 물어봐요.*'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: 'switch-lateContact'
+      enabled: true
     timeout: 15000
 - assertVisible:
     id: 'switch-lateContact'
@@ -301,6 +317,11 @@ appId: ${APP_ID}
     id: 'switch-lateContact'
 - extendedWaitUntil:
     visible: '켜면 늦을 것 같을 때 연락할지 차가 물어봐요.*'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: 'switch-lateContact'
+      enabled: true
     timeout: 15000
 - runScript:
     file: assert-settings.js
@@ -398,7 +419,7 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: '차 연결을 끊을까요\?'
     timeout: 10000
-- assertVisible: '이 폰의 자리를 지워요. 서버에 있는 연결, 일정, 기억한 장소가 바로 삭제되고.*'
+- assertVisible: '이 폰의 자리를 지워요. 서버에 있는 연결, 일정.*도착 횟수.*설정이 바로 삭제되고.*'
 - takeScreenshot: 12-disconnect-confirm
 # 취소하면 아무것도 하지 않는다.
 - tapOn: '취소'

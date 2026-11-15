@@ -1,7 +1,7 @@
 import { CalendarPermissionError, type CalendarSource, type DeviceEvent } from '../../calendar-select/calendarSource';
 import { HttpError } from '../../../api/request';
 import { createContactFinder } from '../../contacts/contactFinder';
-import { makeContacts } from '../../settings/testSupport';
+import { makeContacts } from '../../settings/__tests__/support/settingsSupport';
 import { createEventSync, RESEND_UNCHANGED_AFTER_MS } from '../eventSync';
 import { createFilteredEventsStore } from '../filteredEvents';
 import { PAYLOAD_BUDGET_BYTES } from '../payloadBudget';
@@ -602,6 +602,25 @@ describe('createEventSync', () => {
       expect(send.mock.calls[0][0]).toEqual([wire(lunch)]);
       expect(JSON.stringify(send.mock.calls[0][0])).not.toContain('KIA');
       expect(filtered.get()).toEqual([{ id: 'kia', title: 'KIA 직관', start: kia.start, end: kia.end, reason: 'skipped' }]);
+    });
+
+    it('이름을 기억한 일정(skipped)은 연락 상대를 찾지 않는다: 찾기에는 서버로 보내는 일정만 넘어간다', async () => {
+      const lookup = jest.fn((_e: DeviceEvent) => ['김민수']);
+      const send = jest.fn().mockResolvedValue({});
+      const sync = createSync({
+        source: { kind: 'device', list: async () => [], listEvents: async () => [kia, lunch] },
+        fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
+        send,
+        exceptions: createTravelExceptions(memory()),
+        skips: skipsOf(['KIA 직관']),
+        filtered: createFilteredEventsStore(),
+        contacts: { prepare: async () => lookup },
+        timeoutMs: 1000,
+        log: jest.fn(),
+      });
+      expect(await sync.run()).toBe('sent');
+      expect(lookup.mock.calls.map(([e]) => e.id)).toEqual(['lunch']);
+      expect(send.mock.calls[0][0].map((e: WireEvent) => [e.id, e.contacts])).toEqual([['lunch', ['김민수']]]);
     });
 
     it('일정을 보내기 전에 서버와 맞춘다(바꾼 것을 먼저 올림)', async () => {

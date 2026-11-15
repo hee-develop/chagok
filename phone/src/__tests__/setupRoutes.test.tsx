@@ -76,8 +76,8 @@ beforeEach(() => {
   mockAskNotification.mockResolvedValue('granted');
 });
 
-describe('4단계(차 연결) 라우트: 연결하지 않아도 홈으로 간다', () => {
-  it('4단계에 닿기만 해서는 첫 설정 완료로 표시하지 않는다', async () => {
+describe('5단계(차 연결) 라우트: 연결하지 않아도 홈으로 간다', () => {
+  it('5단계에 닿기만 해서는 첫 설정 완료로 표시하지 않는다', async () => {
     await render(<PairCarRoute />);
     expect(screen.getByText('연결 화면(첫 설정)')).toBeOnTheScreen();
     expect(delegate.current.dump()[SETUP_DONE_KEY]).toBeUndefined();

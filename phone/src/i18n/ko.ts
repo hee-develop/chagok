@@ -111,6 +111,9 @@ export const ko = {
     calendarName: '캘린더',
     cameraName: '카메라',
     notificationsName: '알림',
+    // 홈 맨 위 '켜면 이게 돼요'(정책서 10.4): '늦을 때 연락'이 켜져 있는데 연락처 권한을 거부했을 때만 보인다.
+    contacts: '연락처를 켜면 늦을 때 연락할 상대를 미리 찾아 둘 수 있어요. 꺼 두면 차가 연락할 때 번호를 물어요.',
+    contactsName: '연락처',
     on: '켜기',
     openSettings: '설정 열기',
     turnOnLabel: (name: string) => `${name} 켜기`,
@@ -247,7 +250,7 @@ export const ko = {
     disconnect: {
       button: '차 연결 끊기',
       question: '차 연결을 끊을까요?',
-      explain: '이 폰의 자리를 지워요. 서버에 있는 연결, 일정, 기억한 장소가 바로 삭제되고 차 화면 목록에서도 빠져요. 다시 쓰려면 차와 새로 연결해야 해요.',
+      explain: '이 폰의 자리를 지워요. 서버에 있는 연결, 일정(장소·채비 포함), 기억한 장소, 자주 가는 곳, 이동 없음 목록, 도착 횟수, 보낸 가족 요청, 설정이 바로 삭제되고 차 화면 목록에서도 빠져요. 다시 쓰려면 차와 새로 연결해야 해요.',
       confirm: '끊기',
       confirmLabel: '차 연결 끊기 확인',
       cancel: '취소',

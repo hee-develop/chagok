@@ -17,6 +17,8 @@ import { schedulePlacesApi, type SchedulePlacesApi } from '../fill-places/schedu
 import type { Inbox } from '../notifications/inbox';
 import type { SkipMemory } from '../skips/skipMemory';
 import { useSchedulePlaces } from '../fill-places/useSchedulePlaces';
+import type { ContactsSource } from '../contacts/contactsSource';
+import type { SettingsApi } from '../settings/settingsApi';
 import { carConnectionSource, useCarConnection, type CarConnectionSource } from './carConnection';
 import { ConnectionCard } from './ConnectionCard';
 import { FilteredRow } from './FilteredRow';
@@ -24,6 +26,7 @@ import { InboxSection } from './InboxSection';
 import { devicePermissions, usePermissions, type PermissionName, type PermissionsSource } from './permissions';
 import { PermissionGuide } from './PermissionGuide';
 import { ScheduleRow } from './ScheduleRow';
+import { useContactsGuide } from './useContactsGuide';
 import { splitSchedules } from './todaySchedules';
 
 type Props = {
@@ -39,6 +42,10 @@ type Props = {
   skips?: Pick<SkipMemory, 'has' | 'full' | 'dismissFull' | 'subscribe'>;
   /** 폰 알림함. 기본은 앱 전체가 공유하는 것. */
   inbox?: Inbox;
+  /** 연락처 안내가 읽는 설정 API('늦을 때 연락'이 켜져 있는가). 기본은 `GET /settings`. */
+  settingsApi?: SettingsApi;
+  /** 연락처 권한 출처(기본은 실제 연락처 또는 `EXPO_PUBLIC_CONTACTS_SOURCE=mock`의 목). */
+  contactsSource?: ContactsSource;
   /** 일정을 서버로 보낼 수 없는 이유. 기본은 일정 동기화 결과를 따라가는 `useEventSendBlock()`. */
   sendBlock?: SendBlockReason | null;
 };
@@ -59,6 +66,8 @@ export function TodayScreen({
   skips,
   inbox,
   sendBlock: sendBlockProp,
+  settingsApi,
+  contactsSource,
 }: Props) {
   const font = useFont();
   const router = useRouter();
@@ -74,6 +83,7 @@ export function TodayScreen({
   const permissionsPending = permissions.state.status === 'loading';
 
   const connection = useCarConnection({ source: connectionSource, timeoutMs });
+  const contactsGuide = useContactsGuide({ settingsApi, contactsSource, timeoutMs });
   const sched = useSchedulePlaces({ api: scheduleApi, timeoutMs, enabled: !calendarBlocked && !permissionsPending, skips, undoVisibleMs: travelMark?.undoVisibleMs });
   // 거른 줄을 이동 일정으로 바꾸거나 되돌리면 서버가 아는 일정이 달라지므로 서버 목록을 다시 조회한다.
   const travel = useTravelMark({ ...travelMark, lines: filtered, onChanged: sched.reload });
@@ -104,11 +114,17 @@ export function TodayScreen({
     <TabScreen title={t.title} description={day} testID="tab-today">
       <InboxSection inbox={inbox} />
 
-      {(guideNames.length > 0 && shownMap) || calendarOffForSend ? (
+      {(guideNames.length > 0 && shownMap) || calendarOffForSend || contactsGuide.show ? (
         <Section heading={strings.permissions.heading} testID="permission-guide">
           <Card>
             {shownMap && guideNames.length > 0 ? (
               <PermissionGuide map={shownMap} names={guideNames} onRequest={(name) => void permissions.request(name)} onOpenSettings={permissions.openSettings} />
+            ) : null}
+            {contactsGuide.show ? (
+              <View testID="permission-contacts" style={styles.guideRow}>
+                <Text style={[styles.guideText, font(400)]}>{strings.permissions.contacts}</Text>
+                <OutlineButton label={strings.permissions.openSettings} accessibilityLabel={strings.permissions.openSettingsLabel(strings.permissions.contactsName)} onPress={contactsGuide.openSettings} />
+              </View>
             ) : null}
             {calendarOffForSend ? (
               <View testID="send-block-no-selection" style={styles.guideRow}>

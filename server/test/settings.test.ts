@@ -230,6 +230,38 @@ describe('설정 API · 연결 전 버킷', () => {
   });
 });
 
+describe('데모 초기화(DELETE /events)', () => {
+  const loopback = () => makeApp({ isLoopback: () => true });
+
+  it('기본 자리의 설정을 기본값으로 되돌린다(다음 시연이 앞 시연의 스위치를 물려받지 않는다)', async () => {
+    const app = loopback();
+    await put(app, { body: { plusMode: true, lateContact: true, voiceOnly: true } });
+    expect((await get(app)).body).toEqual({ plusMode: true, lateContact: true, voiceOnly: true });
+    expect((await call(app, 'DELETE', '/events')).status).toBe(200);
+    expect((await get(app)).body).toEqual(OFF);
+    expect((await today(app)).body.settings).toEqual(OFF);
+  });
+
+  it('실제 자리(폰 토큰)와 연결 전 버킷(기기 id)의 설정은 건드리지 않는다', async () => {
+    const app = loopback();
+    const car = await registerCar(app);
+    const a = await connect(app, car, 'A');
+    await put(app, { token: a.phoneToken, body: { plusMode: true } });
+    await put(app, { device: DEVICE_B, body: { voiceOnly: true } });
+    expect((await call(app, 'DELETE', '/events', { token: a.phoneToken })).status).toBe(200);
+    expect((await call(app, 'DELETE', '/events', { device: DEVICE_B })).status).toBe(200);
+    expect((await get(app, { token: a.phoneToken })).body).toEqual({ ...OFF, plusMode: true });
+    expect((await get(app, { device: DEVICE_B })).body).toEqual({ ...OFF, voiceOnly: true });
+  });
+
+  it('같은 기기 요청이 아니면 403이고 아무것도 바꾸지 않는다', async () => {
+    const app = makeApp({ isLoopback: () => false });
+    await put(app, { body: { plusMode: true } });
+    expect((await call(app, 'DELETE', '/events')).status).toBe(403);
+    expect((await get(app)).body).toEqual({ ...OFF, plusMode: true });
+  });
+});
+
 describe('설정 API · 폰 바꾸기와 연결 끊기', () => {
   it('폰 바꾸기는 설정을 그대로 둔다. 옛 폰 토큰은 401, 새 폰 토큰이 같은 설정을 읽는다', async () => {
     const app = makeApp();

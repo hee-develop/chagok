@@ -109,7 +109,7 @@ pnpm e2e:phone         # Android E2E (아래)
 
 - 스크린샷: `.e2e-shots/phone/<flow 이름>/` (`E2E_SHOT_DIR`로 변경. 저장소 루트 아래만 허용)
 - flow는 KIA 선택 저장 전후로 `GET /schedules/today`에 `KIA vs 두산`이 없다가 생기는지도 확인합니다
-- fill-places flow는 이동 없음, 지난번 장소 '여기 맞아요', 장소 검색·변경, 차량 응답의 좌표·일정 제외, 4단계 이동과 복귀 후 복원을 검증합니다. Gboard 필기 입력은 테스트 중만 끄고 종료 시 원래 설정으로 돌립니다.
+- fill-places flow는 이동 없음, 지난번 장소 '여기 맞아요', 장소 검색·변경, 차량 응답의 좌표·일정 제외, 4단계 '말 거는 방법'의 스위치 저장과 5단계 이동, 복귀 후 복원을 검증합니다. Gboard 필기 입력은 테스트 중만 끄고 종료 시 원래 설정으로 돌립니다.
 - places flow는 서버의 `GET /places/favorites`로 집·추가 장소 저장도 확인합니다. Maestro `assertVisible`·`tapOn` 글자는 정규식 전체 일치라 `[ ] ( ) +`는 `\`로 막습니다
 - 실제 기기 캘린더 flow는 기본 목록에 없고 `E2E_FLOWS=device-calendar pnpm e2e:phone`으로 따로 돌립니다(항상 마지막에 실행). `scripts/seed-phone-calendar.sh`로 에뮬레이터에 로컬 캘린더·일정을 심고 Metro를 device 출처로 다시 띄우며, 끝나면 심은 캘린더를 지웁니다. 이 flow는 장소 칸이 Zoom인 온라인 일정(`E2E Online Standup`)이 서버로 가지 않고 3단계·오늘 탭에 '이동 없음'으로 흐리게 보이는지도 확인합니다.
 - Maestro는 `~/.maestro/bin/maestro`를 씁니다(`MAESTRO`로 변경)

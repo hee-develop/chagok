@@ -92,10 +92,17 @@ appId: ${APP_ID}
     visible: '문자는 내용을 채운 문자 창으로 열어 드려요.'
     timeout: 15000
 - takeScreenshot: 07-talk
+# 스위치는 낙관적으로 먼저 바뀌고 저장은 한 번에 하나라 저장 중에는 모든 스위치가 막혀 있다(enabled: false).
+# 그래서 눌린 뒤에는 스위치가 다시 켜질(enabled) 때까지 기다려 저장이 끝난 것을 확인하고 다음 스위치를 누른다.
 - tapOn:
     id: 'switch-plusMode'
 - extendedWaitUntil:
     visible: '주행 중 늦어질 때 일정당 한 번 먼저 말해요.'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: 'switch-lateContact'
+      enabled: true
     timeout: 15000
 - assertVisible:
     id: 'switch-plusMode'
@@ -104,6 +111,11 @@ appId: ${APP_ID}
     id: 'switch-lateContact'
 - extendedWaitUntil:
     visible: '늦을 것 같으면 연락할지 차가 물어봐요.*'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: 'switch-plusMode'
+      enabled: true
     timeout: 15000
 - assertVisible:
     id: 'switch-lateContact'
@@ -114,14 +126,33 @@ appId: ${APP_ID}
     env:
       SERVER_URL: ${SERVER_URL}
       EXPECT: 'plusMode=true,lateContact=true,voiceOnly=false'
-# 한 번 더 누르면 꺼진다(원래대로 돌려 다음 flow에 남기지 않는다).
+# 한 번 더 누르면 꺼진다(원래대로 돌려 다음 flow에 남기지 않는다). 역시 저장이 끝나기를 기다린 뒤 다음 스위치를 누른다.
 - tapOn:
     id: 'switch-plusMode'
-- tapOn:
-    id: 'switch-lateContact'
 - extendedWaitUntil:
     visible: '켜면 주행 중 늦어질 때 일정당 한 번 먼저 말해요.'
     timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: 'switch-lateContact'
+      enabled: true
+    timeout: 15000
+- assertVisible:
+    id: 'switch-plusMode'
+    checked: false
+- tapOn:
+    id: 'switch-lateContact'
+- extendedWaitUntil:
+    visible: '켜면 늦을 것 같을 때 연락할지 차가 물어봐요.*'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: 'switch-plusMode'
+      enabled: true
+    timeout: 15000
+- assertVisible:
+    id: 'switch-lateContact'
+    checked: false
 - runScript:
     file: assert-settings.js
     env:

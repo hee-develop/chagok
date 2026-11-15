@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 
 import { useSettings } from '../useSettings';
-import { deferred, makeSettingsApi, OFF } from '../testSupport';
+import { deferred, makeSettingsApi, OFF } from './support/settingsSupport';
 
 jest.mock('expo-router', () => {
   const { useEffect } = jest.requireActual('react');

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
-import { StyleSheet } from 'react-native';
+import { Linking, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '../../../ui/theme';
@@ -10,6 +10,7 @@ import { appEventSync } from '../../calendar-sync/eventSync';
 import type { FilteredEvent } from '../../calendar-sync/filteredEvents';
 import type { SchedulePlacesApi } from '../../fill-places/schedulePlacesApi';
 import { createInbox } from '../../notifications/inbox';
+import { makeContacts, makeSettingsApi } from '../../settings/__tests__/support/settingsSupport';
 import { registerTapHandler } from '../../notifications/taps';
 import { createMemoryStore } from '../../../storage/keyValueStore';
 import { TodayScreen } from '../TodayScreen';
@@ -40,7 +41,7 @@ const setFocus = async (focused: boolean) => {
 const insets = { frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } };
 const renderWith = (ui: ReactElement) => render(<SafeAreaProvider initialMetrics={insets}>{ui}</SafeAreaProvider>);
 const setup = (props: Partial<React.ComponentProps<typeof TodayScreen>> = {}) =>
-  renderWith(<TodayScreen scheduleApi={makeScheduleApi()} connectionSource={makeConnection(true)} permissionsSource={makePermissions()} {...props} />);
+  renderWith(<TodayScreen scheduleApi={makeScheduleApi()} connectionSource={makeConnection(true)} permissionsSource={makePermissions()} settingsApi={makeSettingsApi()} contactsSource={makeContacts('granted')} {...props} />);
 // 줄 이름은 '제목 시간 상태', 펼치기는 힌트다.
 const rowName = (title: string) => new RegExp(`^${title} (\\d+월 \\d+일 \\(.\\) )?\\d{2}:\\d{2} `);
 const rowButton = (title: string) => screen.getByRole('button', { name: rowName(title) });
@@ -673,5 +674,37 @@ describe('오늘 탭: 맨 위(알림함·일정을 보낼 수 없는 이유·알
     await screen.findByText('육전집 점심');
     expect(screen.queryByTestId('send-block-no-selection')).toBeNull();
     expect(screen.queryByTestId('permission-guide')).toBeNull();
+  });
+});
+
+describe('오늘 탭: 연락처 권한 안내(정책서 10.4 켜면 이게 돼요)', () => {
+  it("'늦을 때 연락'이 켜져 있는데 연락처 권한을 거부했으면 홈 맨 위 안내에 [설정 열기]와 함께 남는다", async () => {
+    const openSettings = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
+    await setup({ settingsApi: makeSettingsApi({ lateContact: true }), contactsSource: makeContacts('denied') });
+    const guide = await screen.findByTestId('permission-contacts');
+    expect(within(guide).getByText('연락처를 켜면 늦을 때 연락할 상대를 미리 찾아 둘 수 있어요. 꺼 두면 차가 연락할 때 번호를 물어요.')).toBeOnTheScreen();
+    await fireEvent.press(within(guide).getByRole('button', { name: '연락처 설정 열기' }));
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    openSettings.mockRestore();
+  });
+
+  it.each([
+    ['늦을 때 연락이 꺼져 있으면(연락처를 거부해도)', makeSettingsApi({ lateContact: false }), makeContacts('denied')],
+    ['연락처 권한이 켜져 있으면', makeSettingsApi({ lateContact: true }), makeContacts('granted')],
+    ['아직 한 번도 묻지 않았으면(ask)', makeSettingsApi({ lateContact: true }), makeContacts('ask')],
+  ])('%s 안내가 없다', async (_label, settingsApi, contactsSource) => {
+    await setup({ settingsApi, contactsSource });
+    await screen.findByRole('button', { name: '차 연결하기' }).catch(() => undefined);
+    await waitFor(() => expect(settingsApi.fetchSettings).toHaveBeenCalled());
+    await waitFor(() => expect(contactsSource.permission).toHaveBeenCalled());
+    expect(screen.queryByTestId('permission-contacts')).toBeNull();
+  });
+
+  it('설정을 읽지 못하면(오프라인) 안내를 보이지 않고 홈은 그대로 동작한다', async () => {
+    const settingsApi = makeSettingsApi({ lateContact: true }, { fetchSettings: jest.fn().mockRejectedValue(new Error('offline')) });
+    await setup({ settingsApi, contactsSource: makeContacts('denied') });
+    await waitFor(() => expect(settingsApi.fetchSettings).toHaveBeenCalled());
+    expect(screen.queryByTestId('permission-contacts')).toBeNull();
+    expect(await findRowButton('육전집 점심')).toBeOnTheScreen();
   });
 });

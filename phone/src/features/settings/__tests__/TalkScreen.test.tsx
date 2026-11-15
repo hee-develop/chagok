@@ -4,7 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { HttpError } from '../../../api/request';
 import { TalkScreen } from '../TalkScreen';
-import { deferred, makeContacts, makeSettingsApi, OFF } from '../testSupport';
+import { deferred, makeContacts, makeSettingsApi, OFF } from './support/settingsSupport';
 
 const mockPush = jest.fn();
 jest.mock('expo-router', () => {

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 
-import { deferred, makeContacts } from '../settings/testSupport';
+import { deferred, makeContacts } from '../settings/__tests__/support/settingsSupport';
 import { useContactsPermission } from './useContactsPermission';
 
 jest.mock('expo-router', () => {

@@ -1,4 +1,4 @@
-import { REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
+import { HttpError, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
 import type { DeviceEvent } from '../calendar-select/calendarSource';
 import { settingsApi } from '../settings/settingsApi';
 import { defaultContactsSource, type ContactsSource } from './contactsSource';
@@ -13,6 +13,11 @@ export interface ContactFinder {
    * 던지지 않는다: 설정·연락처를 못 읽으면 찾지 않고 이어 간다.
    */
   prepare(): Promise<EventContactLookup | null>;
+  /**
+   * 마지막으로 안 '늦을 때 연락' 값과 읽어 둔 연락처 색인을 잊는다. 차 연결을 끊거나 폰 토큰이 지워질 때(`clearLocalCarState`) 부른다:
+   * 서버가 그 자리의 설정을 지웠으므로 옛 값으로 계속 찾지 않게 하고, 연락처를 메모리에 오래 들고 있지 않게 한다.
+   */
+  reset(): void;
 }
 
 /** 연락처를 읽어 색인한 결과를 이 시간 동안 다시 쓴다(앞에 있는 동안 3분마다 읽으므로 매번 전체를 읽지 않는다). */
@@ -34,7 +39,8 @@ const devLog = (message: string) => {
 
 /**
  * 폰이 일정을 읽으면서 이동 일정마다 연락 상대를 미리 찾는 조회 함수를 만든다(정책서 10.5).
- * 서버가 아는 설정(`lateContact`)이 켜져 있고 연락처 권한이 있을 때만 찾는다. 설정을 읽지 못하면 마지막으로 안 값을 쓰고(처음이면 꺼짐),
+ * 서버가 아는 설정(`lateContact`)이 켜져 있고 연락처 권한이 있을 때만 찾는다. 설정을 읽지 못하면 마지막으로 안 값을 쓰고(처음이면 꺼짐,
+ * 단 서버가 401로 거절하면 연결이 끊긴 것이라 꺼짐으로 보고 읽어 둔 연락처도 버린다),
  * 연락처를 읽지 못하면 이전 색인을, 그것도 없으면 찾지 않는다(일정 보내기는 멈추지 않는다). 일정 내용·이름은 로그에 남기지 않는다.
  */
 export function createContactFinder({
@@ -49,11 +55,22 @@ export function createContactFinder({
   let cache: { at: number; index: ContactIndex } | null = null;
 
   return {
+    reset() {
+      lateKnown = false;
+      cache = null;
+    },
     async prepare() {
       try {
         lateKnown = await requestWithTimeout(fetchLateContact, timeoutMs);
-      } catch {
-        log('[contacts] 설정 읽기 실패: 마지막으로 안 값을 씁니다');
+      } catch (error) {
+        if (error instanceof HttpError && error.status === 401) {
+          // 이 폰의 자리가 없다(끊김·바뀜): 옛 설정으로 계속 찾지 않는다.
+          lateKnown = false;
+          cache = null;
+          log('[contacts] 설정 읽기 401: 연결이 끊겨 찾지 않습니다');
+        } else {
+          log('[contacts] 설정 읽기 실패: 마지막으로 안 값을 씁니다');
+        }
       }
       if (!lateKnown) {
         cache = null; // 꺼 두면 읽어 둔 연락처를 들고 있지 않는다

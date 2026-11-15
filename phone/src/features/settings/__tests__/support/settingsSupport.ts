@@ -1,5 +1,5 @@
-import type { Contact, ContactsPermission, ContactsSource } from '../contacts/contactsSource';
-import type { Settings, SettingsApi } from './settingsApi';
+import type { Contact, ContactsPermission, ContactsSource } from '../../../contacts/contactsSource';
+import type { Settings, SettingsApi } from '../../settingsApi';
 
 export const OFF: Settings = { plusMode: false, lateContact: false, voiceOnly: false };
 

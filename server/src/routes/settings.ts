@@ -22,6 +22,8 @@ export type SettingsStore = {
   update(patch: Partial<SeatSettings>): SeatSettings;
   /** 모두 기본값인가(연결 전 버킷을 밀어낼 때 '빈 버킷'을 가른다). */
   isDefault(): boolean;
+  /** 모두 기본값으로 되돌린다(데모 초기화 `DELETE /events`가 기본 자리에 쓴다). */
+  reset(): void;
 };
 
 export function createSettingsStore(): SettingsStore {
@@ -33,6 +35,9 @@ export function createSettingsStore(): SettingsStore {
       return { ...current };
     },
     isDefault: () => SETTING_KEYS.every((key) => current[key] === DEFAULT_SETTINGS[key]),
+    reset: () => {
+      current = { ...DEFAULT_SETTINGS };
+    },
   };
 }
 

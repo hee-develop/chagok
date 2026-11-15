@@ -13,6 +13,7 @@ const fakeState = () => {
     stopPolling: jest.fn(() => void calls.push('poll')),
     resetEventSync: jest.fn(() => void calls.push('sync')),
     clearFilteredEvents: jest.fn(() => void calls.push('filtered')),
+    resetContacts: jest.fn(() => void calls.push('contacts')),
     resetSkips: jest.fn(() => void calls.push('skips')),
     clearCorrectedPlaces: jest.fn(() => void calls.push('corrected')),
     holdEventSync: jest.fn(() => (calls.push('hold'), () => void calls.push('release'))),
@@ -21,10 +22,10 @@ const fakeState = () => {
 };
 
 describe('clearLocalCarState', () => {
-  it('폴링을 먼저 멈춘 뒤 알림함·일정 보내기 기억·거른 일정 목록·이동 없음 기억·보정된 일정 목록을 비운다', () => {
+  it('폴링을 먼저 멈춘 뒤 알림함·일정 보내기 기억·거른 일정 목록·연락 상대 찾기 기억·이동 없음 기억·보정된 일정 목록을 비운다', () => {
     const { state, calls } = fakeState();
     clearLocalCarState(state);
-    expect(calls).toEqual(['poll', 'inbox', 'sync', 'filtered', 'skips', 'corrected']);
+    expect(calls).toEqual(['poll', 'inbox', 'sync', 'filtered', 'contacts', 'skips', 'corrected']);
   });
 
   it('한 단계가 던져도 나머지는 비운다', () => {
@@ -33,7 +34,7 @@ describe('clearLocalCarState', () => {
       throw new Error('boom');
     });
     expect(() => clearLocalCarState(state)).not.toThrow();
-    expect(calls).toEqual(['poll', 'sync', 'filtered', 'skips', 'corrected']);
+    expect(calls).toEqual(['poll', 'sync', 'filtered', 'contacts', 'skips', 'corrected']);
   });
 
   it('여러 번 불러도 안전하다', () => {
@@ -66,6 +67,7 @@ describe('clearLocalCarState', () => {
       stopPolling: () => undefined,
       resetEventSync: () => sync.reset(),
       clearFilteredEvents: () => filtered.set([]),
+      resetContacts: () => undefined,
       resetSkips: () => undefined,
       clearCorrectedPlaces: () => undefined,
       holdEventSync: () => sync.hold(),
@@ -108,7 +110,7 @@ describe('bindLocalCarStateToSession (401로 토큰이 버려지는 경로도 �
     const off = jest.fn();
     const unbind = bindLocalCarStateToSession({ onTokenCleared: (l) => ((cleared = l), off) }, state);
     cleared();
-    expect(calls).toEqual(['poll', 'inbox', 'sync', 'filtered', 'skips', 'corrected']); // 직접 끊기(clearLocalCarState)와 같은 범위
+    expect(calls).toEqual(['poll', 'inbox', 'sync', 'filtered', 'contacts', 'skips', 'corrected']); // 직접 끊기(clearLocalCarState)와 같은 범위
     unbind();
     expect(off).toHaveBeenCalledTimes(1);
   });
@@ -119,7 +121,7 @@ describe('bindLocalCarStateToSession (401로 토큰이 버려지는 경로도 �
     const { state, calls } = fakeState();
     bindLocalCarStateToSession(session, state);
     await session.clearIfCurrent('tok');
-    expect(calls).toEqual(['poll', 'inbox', 'sync', 'filtered', 'skips', 'corrected']);
+    expect(calls).toEqual(['poll', 'inbox', 'sync', 'filtered', 'contacts', 'skips', 'corrected']);
   });
 });
 

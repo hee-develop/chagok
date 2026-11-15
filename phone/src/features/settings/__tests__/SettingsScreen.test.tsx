@@ -5,7 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { makeConnection, makePermissions } from '../../../__tests__/support/todaySupport';
 import { HttpError } from '../../../api/request';
 import { SettingsScreen } from '../SettingsScreen';
-import { deferred, makeContacts, makeSettingsApi, OFF } from '../testSupport';
+import { deferred, makeContacts, makeSettingsApi, OFF } from './support/settingsSupport';
 
 const mockPush = jest.fn();
 const mockNavigate = jest.fn();
@@ -231,7 +231,11 @@ describe('설정 탭 · 차 연결 끊기', () => {
     await setup({ connectionSource: connected(), pairing });
     await fireEvent.press(await screen.findByRole('button', { name: '차 연결 끊기' }));
     expect(screen.getByText('차 연결을 끊을까요?')).toBeOnTheScreen();
-    expect(screen.getByText(/서버에 있는 연결, 일정, 기억한 장소가 바로 삭제되고 차 화면 목록에서도 빠져요/)).toBeOnTheScreen();
+    // 실제로 지워지는 것(자리 데이터 전체)을 빠짐없이 말한다: 연결, 일정(보정·채비), 기억한 장소, 자주 가는 곳, 이동 없음, 도착 횟수, 가족 요청, 설정.
+    const explain = screen.getByText(/이 폰의 자리를 지워요/);
+    for (const part of ['연결', '일정(장소·채비 포함)', '기억한 장소', '자주 가는 곳', '이동 없음 목록', '도착 횟수', '보낸 가족 요청', '설정이 바로 삭제되고', '차 화면 목록에서도 빠져요']) {
+      expect(explain).toHaveTextContent(new RegExp(part.replace(/[()]/g, '\\$&')));
+    }
     expect(pairing.disconnect).not.toHaveBeenCalled();
     await fireEvent.press(screen.getByRole('button', { name: '취소' }));
     expect(screen.queryByText('차 연결을 끊을까요?')).toBeNull();

@@ -1,7 +1,8 @@
 import type { DeviceEvent } from '../calendar-select/calendarSource';
+import { HttpError } from '../../api/request';
 import { createContactFinder } from './contactFinder';
 import type { Contact } from './contactsSource';
-import { makeContacts } from '../settings/testSupport';
+import { makeContacts } from '../settings/__tests__/support/settingsSupport';
 
 const contacts: Contact[] = [
   { id: '1', name: '김민수', emails: ['m@x.com'], phones: ['010-1111-2222'] },
@@ -87,6 +88,42 @@ describe('createContactFinder', () => {
     expect(await finder.prepare()).toBeNull();
     late = true;
     await finder.prepare();
+    expect(source.list).toHaveBeenCalledTimes(2);
+  });
+
+  it('서버가 설정을 401로 거절하면(연결 끊김·폰 바뀜) 마지막 값을 쓰지 않고 찾지 않으며 읽어 둔 연락처를 버린다', async () => {
+    let fail = false;
+    const source = makeContacts('granted', 'granted', contacts);
+    const fetchLateContact = jest.fn(async () => {
+      if (fail) throw new HttpError(401, 'GET /settings 401');
+      return true;
+    });
+    const finder = make({ source, fetchLateContact });
+    expect(await finder.prepare()).not.toBeNull();
+    fail = true;
+    expect(await finder.prepare()).toBeNull();
+    fail = false;
+    expect(await finder.prepare()).not.toBeNull();
+    expect(source.list).toHaveBeenCalledTimes(2); // 401에서 색인을 버렸으니 다시 읽는다
+  });
+
+  it('그 밖의 설정 읽기 실패(5xx·네트워크)는 마지막으로 안 값을 쓴다', async () => {
+    const fetchLateContact = jest.fn().mockResolvedValueOnce(true).mockRejectedValueOnce(new HttpError(503, 'x'));
+    const finder = make({ fetchLateContact });
+    expect(await finder.prepare()).not.toBeNull();
+    expect(await finder.prepare()).not.toBeNull();
+  });
+
+  it('reset은 마지막으로 안 값과 연락처 색인을 잊는다(연결을 끊을 때): 설정을 못 읽으면 찾지 않는다', async () => {
+    const source = makeContacts('granted', 'granted', contacts);
+    const fetchLateContact = jest.fn().mockResolvedValueOnce(true).mockRejectedValue(new Error('offline'));
+    const finder = make({ source, fetchLateContact });
+    expect(await finder.prepare()).not.toBeNull();
+    finder.reset();
+    expect(await finder.prepare()).toBeNull(); // 옛 자리의 '켜짐'으로 찾지 않는다
+    // 다시 켜짐을 알면 색인을 새로 읽는다.
+    fetchLateContact.mockResolvedValue(true);
+    expect(await finder.prepare()).not.toBeNull();
     expect(source.list).toHaveBeenCalledTimes(2);
   });
 
