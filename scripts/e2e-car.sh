@@ -67,9 +67,9 @@ restore_timezone() {
 }
 
 # flow가 중간에 실패해도 flow가 바꾼 debug 주입값(가짜 내비·소요 시간·길안내 결과·듣기·가짜 경로 시간·위치·하차 카드 시간)이 앱에 남지 않게 되돌린다.
-# 이 스크립트(flow)가 바꾸는 값만 되돌린다. 연결 상태(paired)·시계(now)는 기존처럼 되돌리지 않는다. adb가 실패해도 정리는 계속한다.
+# 가짜 내비는 debug 기본값(켬)으로 되돌린다(flow는 시작 신호에서 navi=real을 명시한다). 이 스크립트(flow)가 바꾸는 값만 되돌린다. 연결 상태(paired)·시계(now)는 기존처럼 되돌리지 않는다. adb가 실패해도 정리는 계속한다.
 reset_injection() {
-  adb shell "am start -a android.intent.action.VIEW -d 'chagok-debug://signal?navi=real&trip=real&route=real&listen=real&drive=4.5&loc=real&exitcard=real'" </dev/null >/dev/null 2>&1 ||
+  adb shell "am start -a android.intent.action.VIEW -d 'chagok-debug://signal?navi=fake&trip=real&route=real&listen=real&drive=4.5&loc=real&exitcard=real'" </dev/null >/dev/null 2>&1 ||
     echo "경고: debug 주입값을 되돌리지 못했습니다(adb 실패). 앱에 navi·trip·route·listen·drive·loc·exitcard 주입값이 남아 있을 수 있습니다." >&2
   sleep 1
 }

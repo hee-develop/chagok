@@ -111,6 +111,8 @@ class E2eApp : ChagokApp() {
     override val runtimePermissions: List<String> = emptyList()
 
     override fun createHost(): SessionHost {
+        // debug 기본은 가짜 길안내 켬이지만 계측 테스트는 FakeNavigator로 내비를 대신하므로 가짜 지도·카드 왼쪽 위 정렬을 끈다(화면 기준을 release와 같게).
+        DebugInjection.fakeNavi = false
         lateinit var speaker: FakeSpeaker
         lateinit var navigator: FakeNavigator
         val host = SessionHost(

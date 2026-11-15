@@ -11,7 +11,7 @@ env:
 - launchApp
 
 # 1. 09:20 첫 탑승 카드(출발 제안, 오늘 일정 타일·종일 인사 있음). 아무 말도 하지 않고 기다린다.
-- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&enter=true
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&navi=real&trip=12000&route=ok&listen=off&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
     timeout: 20000
@@ -53,7 +53,7 @@ env:
 - assertNotVisible: "응, 출발"
 
 # 5. 거절은 다시 묻지 않는다: 첫 탑승 카드에서 "아니"라고 말하면 접히고, 달린 뒤 P단에서도 묻지 않는다
-- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&enter=true
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&navi=real&trip=12000&route=ok&listen=off&gear=P&enter=true
 - extendedWaitUntil:
     visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
     timeout: 20000
