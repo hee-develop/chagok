@@ -103,6 +103,13 @@ class DriveSessionReaskTest {
         return parked + session.handle(Event.LocationTimedOut(timer.timerId))
     }
 
+    /** P단에 넣고, 위치 답을 기다리면(일정 장소가 시간 창 안) 내비가 답하지 않은 것으로 보고 타임아웃까지 넣는다. [driveAndPark]의 P단 부분. */
+    private fun parkWithTimeout(): List<Effect> {
+        val parked = park()
+        val timer = parked.filterIsInstance<Effect.ScheduleLocationTimeout>().singleOrNull() ?: return parked
+        return parked + session.handle(Event.LocationTimedOut(timer.timerId))
+    }
+
     // ---- 접히는 때와 저장 ----
 
     @Test
@@ -450,6 +457,237 @@ class DriveSessionReaskTest {
         session.handle(Event.GearChanged(Gear.NEUTRAL))
         val out = session.handle(Event.GearChanged(Gear.PARK))
         assertTrue(out.none { it is Effect.RequestTravelTime || it is Effect.ShowCard })
+    }
+
+    // ---- P단 다시 묻기는 탑승이 아니다(M1) ----
+
+    @Test
+    fun P단에서_다시_묻는_것은_탑승_기록을_남기지_않아_내렸다_40분_뒤_앱에_들어오면_재탑승_한_줄이_나온다() {
+        boardAndIgnore()
+        val parked = driveAndPark(15)
+        val request = parked.one<Effect.RequestTravelTime>()
+        val shown = session.handle(Event.TravelTimeResult(request.requestId, null))
+        // P단에서 다시 묻는 카드: 마지막 탑승 뒤 '달린 뒤 P단'과 P단 시각이 그대로 남는다(탑승이 아니라서 지우지 않는다).
+        val afterReask = shown.lastSnapshot().log
+        assertTrue("달린 뒤 P단 표시가 남아야 한다", afterReask.parkedAfterDriveSinceBoarding)
+        assertEquals(clock.now, afterReask.lastParkedAt)
+        // 이 카드도 무응답으로 접힌 뒤 내려서 40분이 지난다.
+        session.handle(Event.CardTimedOut(shown.one<Effect.ScheduleCardTimeout>().timerId))
+        clock.now += Duration.ofMinutes(40)
+        // 시동 신호가 없어 앱 진입이 탑승 신호다: 마지막 탑승 뒤 주행하고 P단에 넣었으므로 탑승으로 인정하고, 같은 날 재탑승이라 한 줄이다.
+        val entered = session.handle(Event.AppEntered)
+        val again = session.handle(Event.TravelTimeResult(entered.one<Effect.RequestTravelTime>().requestId, null))
+        val card = again.card()
+        assertTrue("재탑승 한 줄이라 타일이 없다", card.tiles.isEmpty())
+        assertTrue(card.voice, card.voice.contains("고객 미팅"))
+    }
+
+    // ---- 주행 제한이 풀릴 때 이어서 묻기(M2) ----
+
+    @Test
+    fun P단_신호가_주행_제한_해제보다_먼저_와도_해제될_때_이어서_묻는다() {
+        boardAndIgnore()
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        session.handle(Event.RestrictionChanged(true))
+        clock.now += Duration.ofMinutes(15)
+        // P단이 먼저 오고 제한이 아직 안 풀렸다: 말하지도 묻지도 않지만 기회는 남는다.
+        val parked = parkWithTimeout()
+        assertTrue(parked.none { it is Effect.RequestTravelTime || it is Effect.ShowCard || it is Effect.Speak })
+        val released = session.handle(Event.RestrictionChanged(false))
+        val shown = session.handle(Event.TravelTimeResult(released.one<Effect.RequestTravelTime>().requestId, null))
+        assertEquals("출발할까요?", shown.card().sub)
+        assertNull("한 번 썼다", shown.lastSnapshot().reask)
+    }
+
+    @Test
+    fun 제한이_풀리기_전에_다시_달리기_시작하면_다시_묻기를_접고_질문은_남는다() {
+        boardAndIgnore()
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        session.handle(Event.RestrictionChanged(true))
+        clock.now += Duration.ofMinutes(15)
+        parkWithTimeout()
+        // 제한이 풀리기 전에 다시 달리기 시작하면 첫 P단의 다시 묻기는 접힌다(주행 중에는 묻지 않는다).
+        assertTrue(session.handle(Event.GearChanged(Gear.DRIVE)).none { it is Effect.RequestTravelTime || it is Effect.ShowCard })
+        assertTrue(session.handle(Event.RestrictionChanged(false)).none { it is Effect.RequestTravelTime || it is Effect.ShowCard })
+        // 질문은 남아 있어 다음 달린 뒤 P단에서 묻는다.
+        clock.now += Duration.ofMinutes(15)
+        assertEquals(1, parkWithTimeout().filterIsInstance<Effect.RequestTravelTime>().size)
+    }
+
+    // ---- 앱이 앞에 있을 때만(Pleos 점검) ----
+
+    @Test
+    fun 앱이_뒤에_있으면_기회를_쓰지_않고_앞에_온_뒤_정차_중이면_묻는다() {
+        boardAndIgnore()
+        session.handle(Event.ForegroundChanged(false))
+        val parked = driveAndPark(15)
+        assertTrue("뒤에서는 말하지도 카드를 띄우지도 않는다", parked.none { it is Effect.RequestTravelTime || it is Effect.ShowCard || it is Effect.Speak })
+        // 질문은 남아 있다. 앱이 앞으로 오면(같은 P단) 이어서 묻는다.
+        val front = session.handle(Event.ForegroundChanged(true))
+        val shown = session.handle(Event.TravelTimeResult(front.one<Effect.RequestTravelTime>().requestId, null))
+        assertEquals("출발할까요?", shown.card().sub)
+        assertTrue(shown.one<Effect.Speak>().thenListen)
+        assertNull(shown.lastSnapshot().reask)
+    }
+
+    @Test
+    fun 뒤에_있는_동안_다시_달리면_그_P단의_기회는_접고_다음_P단에서_앞에_있으면_묻는다() {
+        boardAndIgnore()
+        session.handle(Event.ForegroundChanged(false))
+        driveAndPark(15)
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        // 달리는 중에 앞으로 와도 묻지 않는다(주행 중).
+        assertTrue(session.handle(Event.ForegroundChanged(true)).none { it is Effect.RequestTravelTime || it is Effect.ShowCard })
+        clock.now += Duration.ofMinutes(15)
+        assertEquals(1, parkWithTimeout().filterIsInstance<Effect.RequestTravelTime>().size)
+    }
+
+    @Test
+    fun 뒤에_있는_동안_질문의_대상_일정이_건너뜀이_되면_앞에_와도_묻지_않는다() {
+        boardAndIgnore()
+        session.handle(Event.ForegroundChanged(false))
+        driveAndPark(15)
+        clock.now = start + Duration.ofMinutes(101)
+        val front = session.handle(Event.ForegroundChanged(true))
+        assertTrue(front.none { it is Effect.RequestTravelTime || it is Effect.ShowCard })
+        assertNull(front.lastSnapshot().reask)
+    }
+
+    @Test
+    fun 뒤에_있는_동안_하차_카드가_먼저_뜬_P단에서는_앞에_와도_묻지_않고_질문은_남는다() {
+        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400))
+        newSession()
+        boardAndIgnore()
+        schedules = listOf(schedule("a", "고객 미팅", 40, gangnam, lengthMin = 400), schedule("b", "점심 약속", 180, cityHall))
+        session.handle(Event.ForegroundChanged(false))
+        drive()
+        clock.now = start + Duration.ofMinutes(130)
+        session.handle(Event.LocationChanged(LatLng(cityHall.position.lat + 0.001, cityHall.position.lng)))
+        val parked = park()
+        assertTrue(parked.any { it is Effect.ShowCard && it.card.status == Phrases.STATUS_BEFORE_EXIT })
+        val front = session.handle(Event.ForegroundChanged(true))
+        assertTrue(front.none { it is Effect.RequestTravelTime })
+        assertEquals("접힌 질문은 남아 다음 기회에 묻는다", ReaskKind.DEPART, session.handle(Event.SuspendRequested).lastSnapshot().reask?.kind)
+    }
+
+    // ---- 말하지 못했을 때(Pleos 점검) ----
+
+    @Test
+    fun 다시_묻는_카드를_오디오_포커스를_못_얻어_말하지_못했으면_기회를_쓴_것으로_치지_않는다() {
+        boardAndIgnore()
+        val request = driveAndPark(15).one<Effect.RequestTravelTime>()
+        val shown = session.handle(Event.TravelTimeResult(request.requestId, null))
+        // 어댑터가 포커스를 못 얻어 말하지 못했다고 알린다.
+        session.handle(Event.SpeechUnavailable)
+        val folded = session.handle(Event.CardTimedOut(shown.one<Effect.ScheduleCardTimeout>().timerId))
+        assertEquals("기회를 쓰지 않았으니 다시 남는다", ReaskKind.DEPART, folded.lastSnapshot().reask?.kind)
+        // 다음 정차에서 다시 묻는다. 이번에는 말했으니 접혀도 더 묻지 않는다.
+        val second = driveAndPark(15).one<Effect.RequestTravelTime>()
+        val again = session.handle(Event.TravelTimeResult(second.requestId, null))
+        val foldedAgain = session.handle(Event.CardTimedOut(again.one<Effect.ScheduleCardTimeout>().timerId))
+        assertNull(foldedAgain.filterIsInstance<Effect.Save>().lastOrNull()?.snapshot?.reask)
+        assertTrue(driveAndPark(15).none { it is Effect.ShowCard })
+    }
+
+    @Test
+    fun 말하지_못했어도_사용자가_버튼으로_답한_다시_묻는_카드는_평소대로_처리한다() {
+        boardAndIgnore()
+        val request = driveAndPark(15).one<Effect.RequestTravelTime>()
+        session.handle(Event.TravelTimeResult(request.requestId, null))
+        session.handle(Event.SpeechUnavailable)
+        // 수락하면 길안내하고 접힌 질문은 없다.
+        assertTrue(session.handle(Event.PrimaryPressed).has<Effect.StartRoute>())
+        assertTrue(driveAndPark(15).none { it is Effect.ShowCard })
+    }
+
+    @Test
+    fun 다시_묻는_카드가_아닌_카드의_말하기_실패는_다시_묻기와_무관하다() {
+        // 첫 카드를 말하지 못해도(다시 묻는 카드가 아님) 접히면 평소대로 다시 물을 질문으로 남는다.
+        val shown = boardWithCard()
+        session.handle(Event.SpeechUnavailable)
+        val folded = session.handle(Event.CardTimedOut(shown.one<Effect.ScheduleCardTimeout>().timerId))
+        assertEquals(ReaskKind.DEPART, folded.lastSnapshot().reask?.kind)
+    }
+
+    // ---- 받는 중·연결 해제(m1, m10) ----
+
+    @Test
+    fun 일정을_받는_중에_보류한_P단_다시_묻기는_받기가_끝난_뒤_잠깐_정차_규칙_없이_이어_묻는다() {
+        boardAndIgnore()
+        origin = ScheduleOrigin.STORED
+        val parked = driveAndPark(15)
+        // 일정 출처가 최신이 아니라 먼저 다시 받는다: 받는 동안 탑승 판단(다시 묻기)은 보류한다.
+        assertTrue(parked.has<Effect.RefreshSchedules>())
+        assertTrue(parked.none { it is Effect.RequestTravelTime || it is Effect.ShowCard })
+        origin = ScheduleOrigin.FRESH
+        session.handle(Event.ScheduleLoading(1))
+        val loaded = session.handle(Event.ScheduleLoaded(1))
+        // 방금 P단에 넣은 직후라 보통은 잠깐 정차(10분 안)로 침묵할 시각이지만, 다시 묻는 것은 규칙을 건너뛴다.
+        val shown = session.handle(Event.TravelTimeResult(loaded.one<Effect.RequestTravelTime>().requestId, null))
+        assertEquals("출발할까요?", shown.card().sub)
+        assertNull(shown.lastSnapshot().reask)
+        // 탑승이 아니므로 마지막 탑승 뒤 달린 뒤 P단 표시가 남는다.
+        assertTrue(shown.lastSnapshot().log.parkedAfterDriveSinceBoarding)
+    }
+
+    @Test
+    fun 일정을_받는_중에_앱이_뒤로_가면_받기가_끝나도_기회를_쓰지_않고_앞에_올_때_묻는다() {
+        boardAndIgnore()
+        origin = ScheduleOrigin.STORED
+        driveAndPark(15)
+        session.handle(Event.ForegroundChanged(false))
+        origin = ScheduleOrigin.FRESH
+        session.handle(Event.ScheduleLoading(1))
+        val loaded = session.handle(Event.ScheduleLoaded(1))
+        assertTrue(loaded.none { it is Effect.RequestTravelTime || it is Effect.ShowCard })
+        val front = session.handle(Event.ForegroundChanged(true))
+        assertEquals(1, front.filterIsInstance<Effect.RequestTravelTime>().size)
+    }
+
+    @Test
+    fun 연결이_풀리면_보류해_둔_다시_묻기_표시도_지워_다음_연결의_첫_브리핑이_사라지지_않는다() {
+        boardAndIgnore()
+        origin = ScheduleOrigin.STORED
+        driveAndPark(15).also { assertTrue(it.has<Effect.RefreshSchedules>()) }
+        // 받는 중에 연결이 풀렸다(받던 일정은 버려지고 완료는 오지 않는다).
+        session.handle(Event.Unpaired)
+        origin = ScheduleOrigin.FRESH
+        // 다른 운전자가 연결하면 일정을 새로 받아 탑승으로 브리핑한다. 낡은 '다시 묻는 중' 표시가 남아 있으면 이 브리핑이 사라진다.
+        val paired = session.handle(Event.Paired(brief = true))
+        assertTrue(paired.has<Effect.RefreshSchedules>())
+        session.handle(Event.ScheduleLoading(2))
+        val loaded = session.handle(Event.ScheduleLoaded(2))
+        assertTrue("새 연결의 첫 브리핑이 나와야 한다", loaded.has<Effect.RequestTravelTime>() || loaded.has<Effect.ShowCard>())
+    }
+
+    // ---- 겹침에서 고른 뒤(m2) ----
+
+    @Test
+    fun 다시_묻는_겹침_카드에서_일정을_고른_뒤의_출발_제안이_또_접혀도_다시_묻지_않는다() {
+        schedules = listOf(schedule("a", "점심 약속", 40, gangnam), schedule("b", "친구 모임", 90, cityHall))
+        newSession()
+        val timer = session.handle(Event.Boarded).one<Effect.ScheduleCardTimeout>()
+        session.handle(Event.CardTimedOut(timer.timerId))
+        // 달린 뒤 P단에서 겹침을 다시 묻는다(점심 약속이 시간 창 안이라 위치 답을 기다리다 타임아웃).
+        val asked = driveAndPark(5)
+        assertEquals("‘점심 약속’과 ‘친구 모임’이 겹쳐요.", asked.card().voice)
+        // 다음 일정을 고르면 같은 카드에서 출발 제안으로 바뀐다. 이 카드는 '다시 묻는 중'이라 또 접혀도 세 번째 질문이 없다.
+        val request = session.handle(Event.SecondaryPressed).one<Effect.RequestTravelTime>()
+        val depart = session.handle(Event.TravelTimeResult(request.requestId, Duration.ofMinutes(20)))
+        val folded = session.handle(Event.CardTimedOut(depart.one<Effect.ScheduleCardTimeout>().timerId))
+        assertNull(folded.filterIsInstance<Effect.Save>().lastOrNull()?.snapshot?.reask)
+        assertTrue(driveAndPark(20).none { it is Effect.ShowCard || it is Effect.RequestTravelTime })
+    }
+
+    @Test
+    fun 처음_겹침_카드에서_고른_출발_제안이_접히면_그_질문을_한_번_다시_묻는다() {
+        schedules = listOf(schedule("a", "점심 약속", 40, gangnam), schedule("b", "친구 모임", 90, cityHall))
+        newSession()
+        session.handle(Event.Boarded)
+        val request = session.handle(Event.SecondaryPressed).one<Effect.RequestTravelTime>()
+        val depart = session.handle(Event.TravelTimeResult(request.requestId, Duration.ofMinutes(20)))
+        val folded = session.handle(Event.CardTimedOut(depart.one<Effect.ScheduleCardTimeout>().timerId))
+        assertEquals(PendingReask(ReaskKind.DEPART, "b"), folded.lastSnapshot().reask)
     }
 
     // ---- 대안(7장) ----

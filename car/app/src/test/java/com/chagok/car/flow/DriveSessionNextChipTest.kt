@@ -103,6 +103,47 @@ class DriveSessionNextChipTest {
         assertEquals("", session.handle(Event.DestinationArrived).chip())
     }
 
+    /** 점심(90분)이 고객 미팅(40~100분)과 겹쳐 겹침 카드에서 다음 일정(점심)을 골라 길안내를 시작한다. 길안내 중인 일정이 칩의 '다음 일정'(미팅)과 달라진다. */
+    private fun routeToSecondOfOverlap() {
+        val overlapLunch = Schedule("b", "점심 약속", at(90), at(150), place = cityHall)
+        begin(meeting, overlapLunch)
+        session.handle(Event.Boarded)
+        val request = session.handle(Event.SecondaryPressed).filterIsInstance<Effect.RequestTravelTime>().single()
+        session.handle(Event.TravelTimeResult(request.requestId, null))
+        session.handle(Event.PrimaryPressed)
+        session.handle(Event.RouteRequestResult(true))
+    }
+
+    @Test fun `길안내 중에는 칩이 지금 가고 있는 일정이고 도착하면 다음 일정으로 바뀐다`() {
+        routeToSecondOfOverlap()
+        // 먼저인 일정(고객 미팅)이 아직 남아 있어도 길안내 중인 점심 약속이 칩이다.
+        assertEquals("01:30 점심 약속", session.handle(Event.GearChanged(Gear.DRIVE)).chip())
+        // 도착하면 길안내 일정이 끝나 지금처럼 남은 일정 중 첫 일정(고객 미팅)이다.
+        assertEquals("00:40 고객 미팅", session.handle(Event.DestinationArrived).chip())
+    }
+
+    @Test fun `길안내가 없으면 칩은 지금처럼 다음 일정이다`() {
+        begin(meeting, lunch)
+        // 겹치지 않는 두 일정에서 수락 없이 주행을 시작하면 길안내가 없으므로 첫 일정이다.
+        assertEquals("00:40 고객 미팅", session.handle(Event.GearChanged(Gear.DRIVE)).chip())
+    }
+
+    @Test fun `길안내 중인 일정이 건너뜀이 되면 칩은 남은 첫 일정으로 돌아온다`() {
+        routeToSecondOfOverlap()
+        assertEquals("01:30 점심 약속", session.handle(Event.GearChanged(Gear.DRIVE)).chip())
+        // 점심 약속이 끝난 뒤(고객 미팅도 지났다): 둘 다 건너뜀이라 칩이 사라진다.
+        clock.now = at(151)
+        assertEquals("", session.handle(Event.ClockChanged).chip())
+    }
+
+    @Test fun `연결이 풀리면 길안내 기억도 지운다`() {
+        routeToSecondOfOverlap()
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        assertEquals("", session.handle(Event.Unpaired).chip())
+        // 새 운전자가 연결해 달리는 중이어도 지난 길안내 일정(점심)이 아니라 남은 첫 일정이 칩이다.
+        assertEquals("00:40 고객 미팅", session.handle(Event.Paired(brief = false)).chip())
+    }
+
     private fun List<Effect>.timer(): Effect.ScheduleChipRecheck? = filterIsInstance<Effect.ScheduleChipRecheck>().lastOrNull()
 
     /** 칩 표시·타이머 효과가 없다(건너뜀 저장 같은 다른 효과는 있을 수 있다). */

@@ -1,10 +1,13 @@
 package com.chagok.car.flow
 
+import com.chagok.car.domain.BoardingLog
 import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.Gear
 import com.chagok.car.domain.LatLng
+import com.chagok.car.domain.PendingReask
 import com.chagok.car.domain.Place
+import com.chagok.car.domain.ReaskKind
 import com.chagok.car.domain.Rules
 import com.chagok.car.domain.Schedule
 import com.chagok.car.ui.TileView
@@ -107,6 +110,24 @@ class DriveSessionTargetTest {
     }
 
     @Test
+    fun 달린_뒤_P단의_다시_묻기_판단은_이번_주행을_시작하기_전에_측위한_위치를_쓰지_않는다() {
+        // 접힌 질문(고객 미팅)이 있는 채로 출발했다가 3분 뒤 P단에 넣는다.
+        val restored = Snapshot(BoardingLog(lastBoardedOn = start.atZone(ZoneOffset.UTC).toLocalDate()), emptyMap(), start.atZone(ZoneOffset.UTC).toLocalDate(), reask = PendingReask(ReaskKind.DEPART, "a"))
+        session = DriveSession(clock, { ScheduleSnapshot(schedules, favorites = favorites) }, restored)
+        session.handle(Event.GearChanged(Gear.PARK))
+        clock.now += Duration.ofMinutes(1)
+        session.handle(Event.GearChanged(Gear.DRIVE))
+        clock.now += Duration.ofMinutes(3)
+        val parked = session.handle(Event.GearChanged(Gear.PARK))
+        // P단에 넣는 순간 시스템의 마지막 위치를 읽어 넣었는데 출발(00:01) 전인 00:00에 측위한 값이다(나이 4분이라 5분 안이지만 주행 시작 전).
+        // 강남역 근처에서 측위한 값이지만 차는 이미 움직였으므로 '이미 그곳'으로 보지 않는다: 도착으로도 쓰지 않고 고객 미팅이 그대로 대상이다.
+        session.handle(Event.LocationChanged(northOf(gangnam.position, 100.0), ageMillis = Duration.ofMinutes(4).toMillis()))
+        val timer = parked.filterIsInstance<Effect.ScheduleLocationTimeout>().single()
+        val asked = session.handle(Event.LocationTimedOut(timer.timerId))
+        assertEquals(gangnam, asked.one<Effect.RequestTravelTime>().place)
+    }
+
+    @Test
     fun 기다리는_사이_위치로_대상이_바뀌면_그_소요_시간은_쓰지_않는다() {
         newSession()
         val request = session.handle(Event.Boarded).one<Effect.RequestTravelTime>()
@@ -125,11 +146,12 @@ class DriveSessionTargetTest {
         val card = session.handle(Event.Boarded).filterIsInstance<Effect.ShowCard>().single().card
         val tile = card.tiles.single() as TileView.Candidates
         assertEquals("갈 곳", tile.label)
-        assertEquals(listOf("광주-기아 챔피언스필드", "집", "회사"), tile.rows.map { it.name })
-        assertEquals("종일 광주 직관", tile.rows.first().detail)
-        assertEquals("광주-기아 챔피언스필드로", card.primary)
+        // 정책서 5장 순서: (대상 일정 장소) → 집 → (종일 일정 장소) → 나머지 자주 가는 곳
+        assertEquals(listOf("집", "광주-기아 챔피언스필드", "회사"), tile.rows.map { it.name })
+        assertEquals("종일 광주 직관", tile.rows[1].detail)
+        assertEquals("집으로", card.primary)
         // 종일 일정 장소로 길안내하되 그 일정을 도착 대상으로 삼지는 않는다(길안내 대상이 아님).
-        assertEquals("광주-기아 챔피언스필드", session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place.name)
+        assertEquals("광주-기아 챔피언스필드", session.handle(Event.CandidatePressed(1)).one<Effect.StartRoute>().place.name)
     }
 
     @Test
@@ -152,8 +174,12 @@ class DriveSessionTargetTest {
         session.handle(Event.Heard("다른 데"))
         assertEquals(home.place, session.handle(Event.Heard("응")).one<Effect.StartRoute>().place)
         // 내비 도착은 일정 장소로 간 길안내가 아니므로 도착으로 기록하지 않는다.
+        // 도착 알림이 아무 Effect도 내지 않아 `none`이 비어 있는 목록에서 거짓으로 통과하지 않게, 시동 끔의 저장 상태를 직접 읽어 확인한다.
         session.handle(Event.GearChanged(Gear.DRIVE))
         val arrived = session.handle(Event.DestinationArrived)
-        assertTrue(arrived.filterIsInstance<Effect.Save>().none { it.snapshot.statuses["c"] != null })
+        assertTrue("하차 대기·카드도 없어야 한다", arrived.none { it is Effect.ShowCard || it is Effect.Speak })
+        val saved = session.handle(Event.SuspendRequested).filterIsInstance<Effect.Save>().single().snapshot
+        assertEquals(null, saved.statuses["c"])
+        assertEquals(null, saved.exitTargetId)
     }
 }

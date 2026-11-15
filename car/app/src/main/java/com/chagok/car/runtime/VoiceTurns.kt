@@ -147,8 +147,8 @@ class DeferredSpeech {
         waiting.also { waiting = null }
     }
 
-    /** 말하기를 멈췄다. 붙든 말을 버린다. */
-    fun cancel() = synchronized(lock) { waiting = null }
+    /** 말하기를 멈췄다. 붙든 말을 버린다. 버린 말이 있었으면 true. */
+    fun cancel(): Boolean = synchronized(lock) { (waiting != null).also { waiting = null } }
 
     /** TTS를 새로 초기화하거나 해제한다. 준비 안 됨으로 돌리고 붙든 말을 버린다. */
     fun reset() = synchronized(lock) {

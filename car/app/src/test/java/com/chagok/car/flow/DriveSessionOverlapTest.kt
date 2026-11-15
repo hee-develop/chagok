@@ -215,14 +215,32 @@ class DriveSessionOverlapTest {
     fun 후보에_없는_이름은_한_번_다시_묻는다() {
         boardToOverlap()
         val out = session.handle(Event.Heard("서울역"))
-        assertEquals(Phrases.ASK_AGAIN, out.one<Effect.Speak>().text)
+        // 겹침 카드는 '응·아니'가 아니라 어느 일정인지를 묻는다.
+        assertEquals(Phrases.ASK_AGAIN_PICK, out.one<Effect.Speak>().text)
+        assertEquals("다시 말해 줄래요? '첫 번째'나 '두 번째'로요.", Phrases.ASK_AGAIN_PICK)
+    }
+
+    @Test
+    fun 화면에_줄여_보인_긴_제목은_앞부분만_말해도_고를_수_있다() {
+        val longTitle = "아주아주긴제목의 점심약속입니다 확인"
+        schedules = listOf(schedule("a", longTitle, 40, 60, gangnam), schedule("b", "친구 모임", 90, 60, cityHall))
+        newSession()
+        val card = boardToOverlap().card()
+        // 큰 문구에는 12자로 줄여 보인다. 보인 만큼만 말해도 먼저인 일정을 고른다.
+        assertTrue(card.voice, card.voice.contains("…"))
+        val shown = Phrases.shortTitle(longTitle).trimEnd('…')
+        assertEquals(gangnam, session.handle(Event.Heard(shown)).one<Effect.RequestTravelTime>().place)
+        // 줄이지 않은 전체 이름도 고른다.
+        newSession()
+        boardToOverlap()
+        assertEquals(gangnam, session.handle(Event.Heard(longTitle)).one<Effect.RequestTravelTime>().place)
     }
 
     @Test
     fun 두_일정_이름이_같이_들리면_알아듣지_못한_것이다() {
         boardToOverlap()
         val out = session.handle(Event.Heard("점심 약속이랑 친구 모임"))
-        assertEquals(Phrases.ASK_AGAIN, out.one<Effect.Speak>().text)
+        assertEquals(Phrases.ASK_AGAIN_PICK, out.one<Effect.Speak>().text)
     }
 
     @Test

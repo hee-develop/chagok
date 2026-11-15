@@ -25,7 +25,8 @@ import java.time.Duration
  *   켜진 제공자가 없으면 이번엔 켜지 못하고, 다음에 앱이 앞으로 올 때([setForeground]) 다시 시도한다.
  * - 수동(passive) 갱신은 센서를 켜지 않고 다른 앱(내비)이 얻은 위치만 받는다. 메인 스레드 부하를 줄이려고 [PASSIVE_INTERVAL]·[PASSIVE_DISTANCE_METERS]로 간격을 둔다.
  *   앱이 앞에 있는 동안 내비 같은 다른 앱이 얻은 위치도 받으려는 것이고, 앱이 뒤에 있을 때 받는 것은 기대하지 않는다.
- * - [refreshNow]는 P단에 넣는 순간 시스템의 마지막 위치를 읽는다(백그라운드 권한이 없으면 null일 수 있다).
+ * - [refreshNow]는 P단에 넣는 순간과 탑승 판단 신호(앱 진입·시동 ON·앞으로 옴·일정 받기 끝)마다 시스템의 마지막 위치를 한 번 읽어 넘긴다(백그라운드 권한이 없으면 null일 수 있다).
+ *   쓸 일([setNeeded]) 여부와 무관하게 읽는다(앱을 새로 띄운 직후에는 일정을 받기 전이라 쓸 일을 아직 모른다). 센서를 켜지 않고 위치 권한이 없으면 읽지 않는다.
  * - 위치를 쓸 일이 있을 때([setNeeded]: 집 좌표가 있거나 오늘 남은 일정 중 장소가 있음)만 주기·수동 갱신을 켠다. 쓸 일이 없으면 센서를 읽지 않는다.
  * - 정확도 반경이 [Rules.LOCATION_MAX_ACCURACY_METERS](100m)보다 큰 측위는 버린다(정확도를 모르는 측위는 받는다).
  * - 읽은 위치는 측위한 지 얼마나 됐는지([Event.LocationChanged.ageMillis])만 실어 보내고, 나이 기준(5분)과 이번 주행 시작 뒤인지는 세션이 판단한다.
@@ -98,7 +99,9 @@ class LocationAdapter(context: Context, private val sink: (Event) -> Unit) : Loc
 
     override fun refreshNow(deliver: (Event) -> Unit) {
         val lm = manager ?: return
-        if (!started || !needed || !hasPermission()) return
+        // 쓸 일([needed]) 여부와 무관하게 시작·권한만 본다: 앱을 새로 띄운 직후에는 일정을 받기 전이라 아직 쓸 일을 모르는데, 그때의 첫 탑승 판단에도 지금 위치가 필요하다.
+        // 한 번 읽어 넘기기만 하고 센서·갱신을 켜지 않으며, 권한이 없으면 아무것도 하지 않는다.
+        if (!started || !hasPermission()) return
         val best = (ACTIVE_PROVIDERS + LocationManager.PASSIVE_PROVIDER)
             .mapNotNull { provider -> runCatching { lm.getLastKnownLocation(provider) }.getOrNull() }
             .maxByOrNull { it.elapsedRealtimeNanos } ?: return

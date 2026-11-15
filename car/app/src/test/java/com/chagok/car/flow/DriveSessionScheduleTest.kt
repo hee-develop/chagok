@@ -238,18 +238,28 @@ class DriveSessionScheduleTest {
         assertEquals(Phrases.JUST_GO, card.secondary)
         assertTrue(out.has<Effect.Speak>())
         assertTrue(out.none { it is Effect.RequestTravelTime })
-        // 질문을 낸 탑승이라 탑승 기록을 남긴다.
-        assertEquals(java.time.LocalDate.of(2026, 12, 3), out.filterIsInstance<Effect.Save>().last().snapshot.log.lastBoardedOn)
+        // 일정을 받지 못해서 낸 카드는 그날 첫 브리핑을 쓴 것으로 치지 않는다: 탑승 기록을 남기지 않는다.
+        assertTrue(out.filterIsInstance<Effect.Save>().all { it.snapshot.log.lastBoardedOn == null })
     }
 
-    @Test fun `사본 없음의 어디로 갈까요는 그냥 갈게로 접고 이후 앱 진입은 조용하다`() {
+    @Test fun `사본 없음의 일정 없음 카드를 그냥 갈게로 접고 일정을 새로 받은 앱 진입은 첫 탑승 인사로 판단한다`() {
         givenNoSchedule()
         session.handle(Event.AppEntered)
         refreshCycle(1)
         val closed = session.handle(Event.SecondaryPressed)
         assertEquals(Effect.CollapseCard(false), closed.one<Effect.CollapseCard>())
-        // 내비 화면에서 돌아오듯 앱에 다시 들어와도 탑승이 아니라 아무 말도 하지 않는다(그날 첫 진입은 이미 썼다).
-        assertTrue(session.handle(Event.AppEntered).none { it is Effect.Speak || it is Effect.ShowCard || it is Effect.RefreshSchedules })
+        // 그날 첫 브리핑을 쓰지 않았으므로 다시 앱에 들어오면 탑승으로 보고 일정을 다시 받으려 한다.
+        assertTrue(session.handle(Event.AppEntered).has<Effect.RefreshSchedules>())
+        // 이번에는 일정을 새로 받았다: 첫 탑승(FIRST)이라 인사와 오늘 일정 타일이 있다.
+        source.schedules = listOf(meeting)
+        source.origin = ScheduleOrigin.FRESH
+        session.handle(Event.ScheduleLoading(2))
+        val request = session.handle(Event.ScheduleLoaded(2)).one<Effect.RequestTravelTime>()
+        val card = session.handle(Event.TravelTimeResult(request.requestId, null)).one<Effect.ShowCard>().card
+        assertTrue(card.tiles.any { it is com.chagok.car.ui.TileView.Schedules })
+        // 이 카드가 첫 탑승을 쓴다: 같은 날 다음 앱 진입은 탑승이 아니다.
+        session.handle(Event.SecondaryPressed)
+        assertTrue(session.handle(Event.AppEntered).none { it is Effect.Speak || it is Effect.ShowCard || it is Effect.RequestTravelTime })
     }
 
     @Test fun `사본이 있고 서버가 못 받으면 사본으로 브리핑하며 한 줄이 붙고 사본이 없으면 붙지 않는다`() {
@@ -274,6 +284,14 @@ class DriveSessionScheduleTest {
         clock.now += Duration.ofDays(1)
         session.handle(Event.Boarded)
         assertEquals(Phrases.ASK_DESTINATION, refreshCycle(2).one<Effect.ShowCard>().card.voice)
+        // 다음 날 일정을 받으면 첫 탑승으로 판단한다(인사와 오늘 일정 타일).
+        source.schedules = listOf(meeting.copy(id = "n", start = meeting.start + Duration.ofDays(1), end = meeting.end + Duration.ofDays(1)))
+        source.origin = ScheduleOrigin.FRESH
+        clock.now += Duration.ofMinutes(20)
+        session.handle(Event.SecondaryPressed)
+        val request = session.handle(Event.Boarded).one<Effect.RequestTravelTime>()
+        val card = session.handle(Event.TravelTimeResult(request.requestId, null)).one<Effect.ShowCard>().card
+        assertTrue(card.tiles.any { it is com.chagok.car.ui.TileView.Schedules })
     }
 
     @Test fun `서버가 일정 없음으로 답하면 목적지를 묻고 받기 실패 안내와 다르다`() {

@@ -99,7 +99,8 @@ class SessionHost(
         // 휴대폰과 연결 전에는 일정·집을 서버에서 받지 않는다(연결이 풀린 뒤 집 좌표가 되살아나지 않게).
         allowed = { store.paired },
     )
-    private val session = DriveSession(clock, source, store.load(), paired = store.paired, exitCardTimeout = DebugHooks::exitCardDuration)
+    // 앱 화면은 아직 앞에 오지 않았다(Application 범위로 먼저 만들어진다). 앞에 오면 [onActivityResumed]가 알린다.
+    private val session = DriveSession(clock, source, store.load(), paired = store.paired, exitCardTimeout = DebugHooks::exitCardDuration, foreground = false)
     // 서버가 연결 해제를 확인하면(앱이 앞으로 올 때 [PairingController.verify]) 받아 둔 일정·집 좌표와 저장된 사본을 지운다.
     private val pairing = PairingController(pairingClient, store, ::post, onReleased = { source.clear() })
     private val refresher = ScheduleRefresher(source, ::post, ::dispatch)
@@ -186,6 +187,8 @@ class SessionHost(
             resumed = true
             location.setForeground(true)
             updatePairing()
+            // 다시 묻기는 앱이 앞에 있을 때만 한다. 뒤에서 미뤄 둔 다시 묻기는 이 이벤트에서 이어 간다.
+            post(Event.ForegroundChanged(true))
             // 연결이 서버에서 풀렸는지 확인한다(운전자 교체·폰에서 해제). 서버에 닿지 못하면 해제로 보지 않는다.
             pairing.verify()
             // Suspend 중이었다면 어댑터를 다시 켠다. 포커스·재생은 되찾지 않는다.
@@ -201,6 +204,7 @@ class SessionHost(
             resumed = false
             location.setForeground(false)
             updatePairing()
+            post(Event.ForegroundChanged(false))
         }
     }
 
@@ -216,14 +220,17 @@ class SessionHost(
         main.post {
             // P단에 넣는 순간 시스템이 아는 최근 위치를 먼저 세션에 넣는다(차곡이 뒤에 있어 주기 갱신을 못 받았어도 판정할 수 있게).
             // 이 위치가 낡았거나 이번 주행 전 것이면 세션이 쓰지 않고 내비에 현재 위치를 묻는다.
-            // 탑승 판단 신호(앱 진입·시동 ON)에도 같은 읽기를 해 '이미 그곳'(일정 장소 300m 안)·'지금 집이면 집 빼기' 판정에 지금 위치가 쓰이게 한다(5장). 낡았으면 세션이 쓰지 않는다.
+            // 탑승 판단 신호(앱 진입·시동 ON·앞으로 옴)와 보류한 탑승 판단을 잇는 신호(일정 받기 끝·폰 연결)에도 같은 읽기를 해
+            // '이미 그곳'(일정 장소 300m 안)·'지금 집이면 집 빼기' 판정에 지금 위치가 쓰이게 한다(5장). 낡았거나 이번 주행 전 것이면 세션이 쓰지 않는다.
+            // 위치 답을 기다리느라 브리핑을 늦추지는 않는다(읽기는 그 자리에서 끝난다).
             if (event is Event.GearChanged && event.gear == Gear.PARK || event.isBoardingSignal()) location.refreshNow(::dispatch)
             dispatch(event)
         }
     }
 
     private fun Event.isBoardingSignal() =
-        this is Event.AppEntered || this is Event.Boarded || (this is Event.IgnitionChanged && ignition == com.chagok.car.domain.Ignition.ON)
+        this is Event.AppEntered || this is Event.Boarded || (this is Event.IgnitionChanged && ignition == com.chagok.car.domain.Ignition.ON) ||
+            (this is Event.ForegroundChanged && foreground) || this is Event.ScheduleLoaded || (this is Event.Paired && brief)
 
     /** 데모 초기화. [at]을 주면 데모 시계를 그 시각으로 맞추고 일정 기준 시각도 그 시각으로 한다. */
     fun resetDemo(at: Instant? = null) {

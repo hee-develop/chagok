@@ -73,6 +73,17 @@ sealed interface Event {
      */
     data object ClockChanged : Event
 
+    /**
+     * 앱 화면이 앞에 있는가(어댑터가 액티비티 resume·pause로 알린다). 기본은 앞에 있음이다.
+     * P단에서 다시 묻기는 말하고 마이크를 여는 동작이라 앞에 있을 때만 하고, 뒤에 있으면 기회를 쓰지 않고 남겨 둔다(`docs/reask.md`).
+     */
+    data class ForegroundChanged(val foreground: Boolean) : Event
+
+    /**
+     * 카드를 말하려 했지만 말하지 못했다(오디오 포커스를 얻지 못함 등). 다시 묻는 카드가 말을 못 했으면 그 '한 번'의 기회를 쓴 것으로 치지 않는다.
+     */
+    data object SpeechUnavailable : Event
+
     /** 결과 한 줄을 보인 지 [Rules.RESULT_VISIBLE]이 지났다. */
     data class ResultTimedOut(val timerId: Int) : Event
 
@@ -224,6 +235,8 @@ class DriveSession(
     paired: Boolean = true,
     /** 하차 카드를 띄워 두는 시간. 기본은 [Rules.EXIT_CARD]이고 debug E2E만 늘려 쓴다(release는 항상 기본). */
     private val exitCardTimeout: () -> Duration = { Rules.EXIT_CARD },
+    /** 앱 화면이 앞에 있는가의 처음 값. 앱이 뒤에서 시작되는 호스트는 false로 시작하고 [Event.ForegroundChanged]로 알린다. */
+    foreground: Boolean = true,
 ) {
     private val zone get() = clock.zone
 
@@ -348,6 +361,9 @@ class DriveSession(
 
     private var paired = paired
 
+    /** 앱 화면이 앞에 있는가. 다시 묻기(말하기·듣기)는 앞에 있을 때만 한다. */
+    private var foreground = foreground
+
     /** 연결 전 마지막으로 받은 연결 코드. 연결되면 버린다. */
     private var pairingCode: Event.PairingCodeIssued? = null
     private var seq = 0
@@ -356,7 +372,17 @@ class DriveSession(
     private var resultTimerId: Int? = null
 
     /** [forced]는 일정 겹침에서 사용자가 고른 일정으로 이어 가는 판단이다(겹침을 다시 묻지 않는다). */
-    private class PendingBoarding(val requestId: Int, val kind: BoardingKind, val targetId: String, val reasking: Boolean, val forced: Boolean = false)
+    /**
+     * [atPark]는 달린 뒤 P단에서 접힌 질문을 다시 묻는 판단이다([settleReaskAtPark]). 탑승이 아니라서 탑승 기록과 그 부작용을 남기지 않는다.
+     */
+    private class PendingBoarding(
+        val requestId: Int,
+        val kind: BoardingKind,
+        val targetId: String,
+        val reasking: Boolean,
+        val forced: Boolean = false,
+        val atPark: Boolean = false,
+    )
 
     private class CardState(
         var view: CardContent,
@@ -380,6 +406,10 @@ class DriveSession(
         val kind: BoardingKind? = null,
         /** 일정 겹침에서 일정을 골라 그 일정의 소요 시간을 기다리는 중인가. 그동안 버튼·음성·후보 누름·30초 접힘은 무시한다. */
         var resolving: Boolean = false,
+        /** 달린 뒤 P단 다시 묻기로 띄운 카드인가(탑승이 아님). 겹침에서 고른 뒤의 카드도 이어받아 탑승 기록을 남기지 않는다. */
+        val parkReask: Boolean = false,
+        /** 이 카드를 말하지 못했는가(오디오 포커스를 못 얻음). 다시 묻는 카드가 이 상태로 접히면 '한 번'의 기회를 쓴 것으로 치지 않고 다시 남긴다. */
+        var speechFailed: Boolean = false,
     )
 
     init {
@@ -462,6 +492,8 @@ class DriveSession(
             // 시계가 건너뛰었으니 예약해 둔 시각이 낡았다. flush의 syncChip이 다시 판단·예약한다.
             Event.ClockChanged -> chipDeadline = null
             is Event.ResultTimedOut -> if (resultTimerId == event.timerId) clearResult(out)
+            is Event.ForegroundChanged -> foreground = event.foreground
+            Event.SpeechUnavailable -> card?.takeIf { it.isReask && it.question != null }?.speechFailed = true
             is Event.Heard -> onHeard(event.text, out)
             Event.PrimaryPressed -> onButton(primary = true, out)
             Event.SecondaryPressed -> onButton(primary = false, out)
@@ -565,10 +597,13 @@ class DriveSession(
 
     /**
      * 탑승 판단에 쓰는 지금 차 위치: 측위한 지 [Rules.LOCATION_MAX_AGE] 이내인 마지막 위치. 믿을 만한 최근 위치가 없으면 null이라 '이미 그곳'·'집이면 집 빼기' 판정은 건너뛴다.
-     * 도착 판정([usableLocation])과 달리 '이번 주행 시작 뒤' 조건은 두지 않는다: 탑승 때 차는 서 있고, 주행을 시작하면 지난 위치는 이미 버렸다([onGear]).
+     * 달린 적이 있으면([driveStartedAt]) 그 주행을 시작하기 전에 측위한 위치는 쓰지 않는다(도착 판정 [usableLocation]과 같은 규칙).
+     * 달리기 시작할 때 지난 위치를 버리지만([onGear]), P단에 넣는 순간 시스템의 마지막 위치를 읽어 넣으면 출발 전에 측위한 낡은 위치가 들어올 수 있어서다.
+     * 달린 적이 없는 탑승(시동 ON·앱 진입)은 이 조건이 없다.
      */
     private fun hereForBoarding(): LatLng? {
         val at = lastPositionAt ?: return null
+        driveStartedAt?.let { if (at.isBefore(it)) return null }
         val age = Duration.between(at, now())
         return if (age.isNegative || age > Rules.LOCATION_MAX_AGE) null else lastPosition
     }
@@ -582,6 +617,11 @@ class DriveSession(
     private fun onBoarded(out: MutableList<Effect>, allowRefresh: Boolean = true, reaskNow: Boolean = false) {
         if (suspended || motion() != Motion.STOPPED || pending != null) return
         if (reaskNow && reask == null) return
+        // P단 다시 묻기는 앱이 앞에 있을 때만 한다(말하고 마이크를 여는 동작). 뒤에 있으면 기회를 쓰지 않고 앞에 올 때까지 남긴다.
+        if (reaskNow && !foreground) {
+            reaskAtPark = gear == Gear.PARK
+            return
+        }
         // 연결 전에는 탑승을 소진하지 않고 연결 카드만 보인다. 연결되면 [onPaired]가 탑승으로 이어 간다.
         if (!paired) {
             showPairingCard(out)
@@ -600,8 +640,11 @@ class DriveSession(
         if (card != null && !exiting) return
         if (kind == BoardingKind.QUICK_STOP) return
         // 진짜 탑승이 시작되면 못 보인 하차 카드는 더 보이지 않고, 그 P단은 더 '방금 달려 와 댄 P단'이 아니다.
-        clearExit()
-        lastParkWasRun = false
+        // P단 다시 묻기는 탑승이 아니라서 이 정리를 하지 않는다(같은 P단의 내비 도착은 계속 하차 카드로 이어진다).
+        if (!reaskNow) {
+            clearExit()
+            lastParkWasRun = false
+        }
         if (exiting) closeCard(out, instant = true)
         if (origin != ScheduleOrigin.FRESH && allowRefresh) {
             loadingSchedules = true
@@ -615,17 +658,17 @@ class DriveSession(
         val reasking = reaskNow || reask != null
         // 일정 겹침이면 어느 일정으로 갈지부터 묻는다. 소요 시간은 고른 일정으로 정해진 뒤([chooseOverlap]) 묻는다.
         if (BoardingDecider.findOverlap(plan().boardingCandidates(now(), hereForBoarding())) != null) {
-            decide(kind, null, out, reasking)
+            decide(kind, null, out, reasking, atPark = reaskNow)
             return
         }
         val target = boardingTarget()
         val place = target?.place
         if (place == null) {
-            decide(kind, null, out, reasking)
+            decide(kind, null, out, reasking, atPark = reaskNow)
             return
         }
         val id = ++seq
-        pending = PendingBoarding(id, kind, checkNotNull(target).id, reasking)
+        pending = PendingBoarding(id, kind, checkNotNull(target).id, reasking, atPark = reaskNow)
         out += Effect.RequestTravelTime(id, place)
     }
 
@@ -669,8 +712,10 @@ class DriveSession(
         pending = null
         acceptedRoute = false
         heldBoarding = false
+        heldReaskNow = false
         reask = null
         reaskAtPark = false
+        routeScheduleId = null
         clearExit()
         // 연결이 풀리면 집 좌표(일정 응답의 자주 가는 곳)는 [SessionHost]가 지운다. 세션은 위치와 집 판정 기록을 버린다.
         forgetLocation()
@@ -695,7 +740,13 @@ class DriveSession(
         val reaskNow = heldReaskNow
         heldBoarding = false
         heldReaskNow = false
-        if (held) onBoarded(out, allowRefresh = false, reaskNow = reaskNow)
+        if (!held) return
+        // 받는 동안 P단 다시 묻기를 보류했다면, 받기가 끝난 지금 앞에 있고 정차 중일 때만 묻는다. 아니면 기회를 쓰지 않고 같은 P단에서 앞에 올 때까지 남긴다.
+        if (reaskNow && (!foreground || motion() != Motion.STOPPED)) {
+            reaskAtPark = gear == Gear.PARK && reask != null
+            return
+        }
+        onBoarded(out, allowRefresh = false, reaskNow = reaskNow)
     }
 
     private fun onTravelTime(event: Event.TravelTimeResult, out: MutableList<Effect>) {
@@ -703,30 +754,47 @@ class DriveSession(
         if (waiting.requestId != event.requestId) return
         pending = null
         if (!canSpeak()) return
+        // 기다리는 사이 앱이 뒤로 갔으면 P단 다시 묻기는 기회를 쓰지 않고 앞에 올 때까지 남긴다.
+        if (waiting.atPark && !foreground) {
+            reaskAtPark = gear == Gear.PARK && reask != null
+            return
+        }
         // 일정 겹침에서 고른 일정이면 그 일정이 아직 도착·건너뜀이 아닌지만 본다. 아니면 기다리는 사이 대상 일정이 바뀌었을 때 그 소요 시간은 쓰지 않는다.
         if (waiting.forced) {
             val chosen = plan().pending().firstOrNull { it.id == waiting.targetId }
-            decide(waiting.kind, event.travelTime.takeIf { chosen != null }, out, forced = chosen)
+            decide(waiting.kind, event.travelTime.takeIf { chosen != null }, out, waiting.reasking, forced = chosen, atPark = waiting.atPark)
             return
         }
         val sameTarget = boardingTarget()?.id == waiting.targetId
-        decide(waiting.kind, event.travelTime.takeIf { sameTarget }, out, waiting.reasking)
+        decide(waiting.kind, event.travelTime.takeIf { sameTarget }, out, waiting.reasking, atPark = waiting.atPark)
     }
 
-    private fun decide(kind: BoardingKind, travelTime: Duration?, out: MutableList<Effect>, reasking: Boolean = false, forced: Schedule? = null) {
+    private fun decide(
+        kind: BoardingKind,
+        travelTime: Duration?,
+        out: MutableList<Effect>,
+        reasking: Boolean = false,
+        forced: Schedule? = null,
+        atPark: Boolean = false,
+    ) {
         val decision = BoardingDecider.decide(
             now(), kind, plan(), planIsFallback = origin == ScheduleOrigin.STORED, travelTime = travelTime, favorites = favorites, here = hereForBoarding(), forcedTarget = forced,
         )
         if (decision !is BoardingDecision.Card) return
         // 탑승은 카드를 실제로 띄울 때 기록한다. 판단 중에 D로 바뀌어 카드가 안 뜨면 그날 첫 탑승을 소진하지 않는다.
-        log = log.boarded(now(), zone)
-        lastParkWasRun = false
+        // 달린 뒤 P단에서 다시 묻는 것은 탑승이 아니라서 기록하지 않는다: 기록하면 '마지막 탑승 뒤 달린 뒤 P단' 표시와 하차 대기 판단이 지워져
+        // 내렸다가 다시 앱에 들어와도 재탑승 한 줄이 나오지 않는다.
+        // 일정을 못 받았고 사본도 없어서(origin NONE) 낸 '일정 없음' 카드도 그날 첫 브리핑을 쓴 것으로 치지 않는다: 다음에 일정을 새로 받은 탑승이 첫 탑승으로 판단된다.
+        if (!atPark) {
+            lastParkWasRun = false
+            if (origin != ScheduleOrigin.NONE) log = log.boarded(now(), zone)
+        }
         val question = decision.question
         if (question is Question.DepartLate) statuses = plan().markLate(question.target.id).statuses
 
         val view = Phrases.card(decision, now(), zone)
         val timerId = ++seq
-        val state = CardState(view, question, timerId, voiceOpen = true, briefing = decision.briefing, isReask = reasking, kind = kind)
+        val state = CardState(view, question, timerId, voiceOpen = true, briefing = decision.briefing, isReask = reasking, kind = kind, parkReask = atPark)
         // 다시 묻는 카드를 띄우면 그 기회는 쓴 것이다(한 번만).
         if (reasking) reask = null
         card = state
@@ -819,7 +887,8 @@ class DriveSession(
      */
     private fun keepForReask(state: CardState) {
         val question = state.question ?: return
-        if (state.isReask || state.resolving) return
+        // 다시 묻는 카드가 또 접히면 남기지 않는다(한 번만). 단 그 카드를 말하지 못했으면(오디오 포커스를 못 얻음) 기회를 쓴 것이 아니라서 다시 남긴다.
+        if ((state.isReask && !state.speechFailed) || state.resolving) return
         reask = PendingReask.of(question)
     }
 
@@ -838,14 +907,20 @@ class DriveSession(
      */
     private fun settleReaskAtPark(out: MutableList<Effect>) {
         if (!reaskAtPark) return
-        if (gear != Gear.PARK) {
+        if (gear != Gear.PARK || suspended) {
             reaskAtPark = false
             return
         }
         if (awaitingParkLocation) return
-        reaskAtPark = false
         pruneReask()
-        if (reask == null || exitCardShownThisPark || exitTargetId != null || exitHome) return
+        if (reask == null || exitCardShownThisPark || exitTargetId != null || exitHome) {
+            reaskAtPark = false
+            return
+        }
+        // 주행 제한이 아직 안 풀렸거나(P단 신호가 제한 해제보다 먼저 온 경우) 앱이 뒤에 있으면 기회를 쓰지 않고 기다린다.
+        // 제한이 풀리거나 앱이 앞으로 오는 이벤트에서 이 함수가 다시 불려 이어서 묻는다(하차 카드와 같은 방식). D·R이 되거나 P단을 벗어나면 접는다.
+        if (motion() != Motion.STOPPED || !foreground) return
+        reaskAtPark = false
         onBoarded(out, reaskNow = true)
     }
 
@@ -885,7 +960,8 @@ class DriveSession(
         state.timerId = ++seq
         out += Effect.ScheduleCardTimeout(state.timerId, Rules.CARD_TIMEOUT)
         val id = ++seq
-        pending = PendingBoarding(id, state.kind ?: BoardingKind.AGAIN, chosen.id, reasking = false, forced = true)
+        // 다시 묻는 겹침 카드에서 고른 뒤의 출발 제안도 '다시 묻는 중'으로 넘겨, 그 카드가 또 접혀도 세 번째 질문이 생기지 않게 한다.
+        pending = PendingBoarding(id, state.kind ?: BoardingKind.AGAIN, chosen.id, reasking = state.isReask, forced = true, atPark = state.parkReask)
         out += Effect.RequestTravelTime(id, place)
     }
 
@@ -909,7 +985,7 @@ class DriveSession(
         val candidates = Phrases.choiceNames(question)
         // 수락("응")은 1번 후보(주 버튼)를 고르는 것과 같은 결과다.
         val acceptPick = if (candidates.isNotEmpty()) 0 else null
-        when (val intent = IntentMatcher.match(text, candidates, acceptPick)) {
+        when (val intent = IntentMatcher.match(text, candidates, acceptPick, Phrases.choiceShortForms(question))) {
             Intent.Accept ->
                 // 후보가 없는 목적지 묻기에서 "응"은 갈 곳을 정하지 못한 말이다.
                 if (question is Question.AskDestination && candidates.isEmpty()) unrecognized(state, out) else accept(state, out)
@@ -949,7 +1025,7 @@ class DriveSession(
         if (state.reprompts < Rules.MAX_REPROMPTS) {
             state.reprompts++
             state.voiceOpen = true
-            speak(out, Phrases.ASK_AGAIN, thenListen = true)
+            speak(out, Phrases.askAgain(state.question), thenListen = true)
         } else {
             state.notice = Phrases.USE_SCREEN
             out += Effect.ShowCard(view(state))
@@ -1304,7 +1380,7 @@ class DriveSession(
     private fun syncChip(out: MutableList<Effect>) {
         val visible = motion() == Motion.DRIVING && paired && !suspended
         if (visible && loadingSchedules) return
-        val target = if (visible) plan().target() else null
+        val target = if (visible) chipTarget() else null
         val chip = target?.let { Phrases.nextChipBody(it, zone) } ?: ""
         if (chip != shownChip) {
             shownChip = chip
@@ -1323,6 +1399,12 @@ class DriveSession(
         // 일부러 조금 늦게 깨워, 끝 시각 직후에 건너뜀 판정이 서게 한다(타이머 오차로 일찍 깨 헛돌지 않게).
         out += Effect.ScheduleChipRecheck(id, Duration.between(now(), deadline).coerceAtLeast(Duration.ZERO) + CHIP_RECHECK_SLACK)
     }
+
+    /**
+     * 주행 중 칩이 보일 일정. 길안내 중이면([routeScheduleId]) 그 일정이다(다음 일정이 아니라 지금 가고 있는 곳). 그 일정이 이미 도착·건너뜀이면 지금처럼 [DayPlan.target]이다.
+     */
+    private fun chipTarget(): Schedule? =
+        routeScheduleId?.let { id -> plan().pending().firstOrNull { it.id == id } } ?: plan().target()
 
     /** 저장은 매 이벤트 끝에 바뀐 것만 내보낸다. Suspend 진입 때는 바뀌지 않았어도 저장한다. */
     private fun flush(out: MutableList<Effect>) {
