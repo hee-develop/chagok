@@ -114,7 +114,7 @@ sealed interface DestinationOption {
 
     /** 폰 앱에 등록한 집·회사·자주 가는 곳. */
     data class OfFavorite(val favorite: Favorite) : DestinationOption {
-        override val place: Place get() = favorite.place
+        override val place: Place get() = favorite.destination
     }
 }
 

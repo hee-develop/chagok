@@ -2,6 +2,7 @@ package com.chagok.car.flow
 
 import com.chagok.car.domain.AskReason
 import com.chagok.car.domain.Briefing
+import com.chagok.car.domain.HOME_LABEL
 import com.chagok.car.domain.BoardingDecision
 import com.chagok.car.domain.DestinationOption
 import com.chagok.car.domain.EnergyGoal
@@ -102,7 +103,7 @@ object Phrases {
     const val ALL_DAY = "종일"
 
     // 자주 가는 곳 중 집·회사를 부르는 이름
-    const val HOME = "집"
+    const val HOME = HOME_LABEL
     const val WORK = "회사"
     const val DUCKING = "차곡 안내 중 · 볼륨을 잠깐 낮췄어요"
 
@@ -351,10 +352,10 @@ object Phrases {
         FavoriteKind.OTHER -> favorite.place.name
     }
 
-    /** 후보 줄의 둘째 글: 집·회사는 장소 이름, 나머지는 주소. */
+    /** 후보 줄의 둘째 글: 회사는 장소 이름, 집·나머지는 주소(집은 장소 이름 대신 [HOME_LABEL]만 보이게 한다). */
     private fun favoriteDetail(favorite: Favorite): String = when (favorite.kind) {
-        FavoriteKind.HOME, FavoriteKind.WORK -> favorite.place.name
-        FavoriteKind.OTHER -> favorite.address.orEmpty()
+        FavoriteKind.WORK -> favorite.place.name
+        FavoriteKind.HOME, FavoriteKind.OTHER -> favorite.address.orEmpty()
     }
 
     /**

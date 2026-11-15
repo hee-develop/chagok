@@ -172,7 +172,7 @@ class DriveSessionTargetTest {
         val request = session.handle(Event.Boarded).one<Effect.RequestTravelTime>()
         session.handle(Event.TravelTimeResult(request.requestId, Duration.ofMinutes(20)))
         session.handle(Event.Heard("다른 데"))
-        assertEquals(home.place, session.handle(Event.Heard("응")).one<Effect.StartRoute>().place)
+        assertEquals(home.destination, session.handle(Event.Heard("응")).one<Effect.StartRoute>().place)
         // 내비 도착은 일정 장소로 간 길안내가 아니므로 도착으로 기록하지 않는다.
         // 도착 알림이 아무 Effect도 내지 않아 `none`이 비어 있는 목록에서 거짓으로 통과하지 않게, 시동 끔의 저장 상태를 직접 읽어 확인한다.
         session.handle(Event.GearChanged(Gear.DRIVE))

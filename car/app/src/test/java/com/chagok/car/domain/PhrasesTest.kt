@@ -5,6 +5,7 @@ import com.chagok.car.ui.CandidateRow
 import com.chagok.car.ui.TileRow
 import com.chagok.car.ui.TileView
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -239,7 +240,7 @@ class PhrasesTest {
         assertEquals(listOf("도시락"), Phrases.careItems("도시락"))
     }
 
-    private val home = Favorite(FavoriteKind.HOME, Place("예시 아파트 101동", LatLng(0.0, 0.0)))
+    private val home = Favorite(FavoriteKind.HOME, Place("예시 아파트 101동", LatLng(1.0, 2.0)), "광주 북구 샘플로 12")
     private val work = Favorite(FavoriteKind.WORK, Place("광주 예시 업무지구", LatLng(0.0, 0.0)))
     private val station = Favorite(FavoriteKind.OTHER, Place("광주송정역", LatLng(0.0, 0.0)), "광주 광산구 상무대로 201")
 
@@ -247,12 +248,23 @@ class PhrasesTest {
         val q = Question.AskDestination(AskReason.NO_SCHEDULE, favorites = listOf(home, work, station))
         val c = card(briefing(Briefing.Level.FULL, null, emptyList()), q, "09:00")
         assertEquals("어디로 갈까요?", c.voice)
-        val rows = listOf(CandidateRow("집", "예시 아파트 101동"), CandidateRow("회사", "광주 예시 업무지구"), CandidateRow("광주송정역", "광주 광산구 상무대로 201"))
+        val rows = listOf(CandidateRow("집", "광주 북구 샘플로 12"), CandidateRow("회사", "광주 예시 업무지구"), CandidateRow("광주송정역", "광주 광산구 상무대로 201"))
         assertEquals(listOf<TileView>(TileView.Candidates("자주 가는 곳", rows)), c.tiles)
         assertEquals("집으로", c.primary)
         assertEquals("그냥 갈게", c.secondary)
         assertEquals(listOf("“응”이라고 말해도 돼요", "출발하면 자동으로 접혀요"), c.hints)
         assertEquals(listOf("집", "회사", "광주송정역"), Phrases.candidateNames(q))
+    }
+
+    @Test fun `집 후보는 서버에 등록한 장소 이름이 아니라 집으로 보이고 길안내 목적지도 집이며 좌표는 그대로다`() {
+        val q = Question.AskDestination(AskReason.NO_SCHEDULE, favorites = listOf(home, work))
+        val c = card(briefing(Briefing.Level.FULL, null, emptyList()), q, "09:00")
+        val screen = "${c.voice} ${c.sub} ${c.primary} ${c.secondary} ${c.tiles}"
+        assertFalse(screen, screen.contains("예시 아파트"))
+        val option = DestinationOption.OfFavorite(home)
+        assertEquals(Place("집", LatLng(1.0, 2.0)), option.place)
+        // 회사 등 다른 자주 가는 곳은 등록한 이름 그대로
+        assertEquals("광주 예시 업무지구", DestinationOption.OfFavorite(work).place.name)
     }
 
     @Test fun `여유가 많을 때 자주 가는 곳이 붙으면 일정 장소를 1번 줄로 둔 후보 타일`() {
