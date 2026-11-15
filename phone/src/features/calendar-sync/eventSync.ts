@@ -7,8 +7,10 @@ import {
   type FetchSelectionState,
 } from '../calendar-select/selectionApi';
 import { fetchEventsReceivedAt, putEvents, type FetchReceivedAt, type SendEvents } from './eventsApi';
+import { appCorrectedPlaces, type CorrectedPlaces } from './correctedPlaces';
 import { appFilteredEvents, type FilteredEvent } from './filteredEvents';
 import { fitToBudget } from './payloadBudget';
+import { appSkipMemory, type SkipMemory } from '../skips/skipMemory';
 import { appTravelExceptions, type TravelExceptions } from './travelExceptions';
 import { partitionEvents } from './travelFilter';
 
@@ -38,6 +40,16 @@ export type EventSyncOptions = {
   fetchReceivedAt?: FetchReceivedAt;
   /** "이동 일정이에요"로 바꾼 이름 목록(폰 저장소). */
   exceptions?: Pick<TravelExceptions, 'load' | 'has'>;
+  /**
+   * '이동 없음'으로 기억한 이름(정책서 10.3 4번, 서버 `/skips`의 폰 쪽 캐시). 일정을 읽을 때마다 서버와 맞추고(실패해도 캐시로 이어 감) 같은 이름의 일정은 보내지 않는다.
+   * 기본은 아무 이름도 기억하지 않는 빈 목록이다(앱은 `appSkipMemory`를 넘긴다).
+   */
+  skips?: Pick<SkipMemory, 'load' | 'has' | 'sync' | 'hasPending'>;
+  /**
+   * 사용자가 장소를 넣어 보정한 일정 id(3단계 조회·저장이 채운다). 이 일정은 이름이 '이동 없음'으로 기억돼 있어도 거르지 않는다(장소 보정이 기억을 이긴다).
+   * 기본은 앱 전체가 공유하는 목록이다.
+   */
+  corrected?: Pick<CorrectedPlaces, 'has'>;
   /** 폰이 거른 일정을 받는 곳(화면이 흐리게 보인다). 서버로는 보내지 않는다. */
   filtered?: { set(events: readonly FilteredEvent[]): void };
   timeoutMs?: number;
@@ -78,6 +90,13 @@ export type ResettableEventSync = EventSync & {
   hold(): () => void;
 };
 
+const noSkips: NonNullable<EventSyncOptions['skips']> = {
+  load: async () => undefined,
+  has: () => false,
+  sync: async () => ({ refreshed: false, pendingFailed: false, full: false }),
+  hasPending: () => false,
+};
+
 const devLog = (message: string) => {
   if (__DEV__) console.warn(message);
 };
@@ -94,6 +113,9 @@ const devLog = (message: string) => {
  *   종일 일정은 이름만 보낸다. 같은 내용 판단·크기 예산은 거른 뒤의 일정으로 한다.
  * - 거른 목록(`filtered`)은 일정을 읽은 결과다. 고른 캘린더가 없거나 권한이 없거나 캘린더를 읽지 못하면 이전 목록을 비운다(낡은 일정을 계속 보이지 않는다).
  * - 예외 이름 목록(AsyncStorage)을 읽는 데 시간 제한을 두고, 읽지 못해도 동기화는 멈추지 않는다(저장된 이름을 모르는 채 이어 간다).
+ * - '이동 없음' 기억은 일정을 보내기 전에 서버와 맞춘다: 사용자가 바꾼 것을 먼저 올리고(그래야 방금 '이동 일정이에요'로 바꾼 일정을 서버의 안전망이 막지 않는다)
+ *   서버 목록을 받아 캐시를 바꾼다. 목록을 받지 못하면 저장해 둔 목록으로 이어 가고 동기화는 멈추지 않는다. 바꾼 것을 올리지 못한 채 일정을 보냈으면 결과는 'failed'이고
+ *   다음에 다시 보낸다(올린 것으로 오해하지 않게).
  * - 권한을 묻지 않는다. 권한이 없으면 그냥 건너뛰고, 권한 요청은 캘린더 고르기 화면만 한다.
  * - 실패해도 화면에 알리지 않지만 결과를 기록하고 개발 로그로 남긴다. 다음에 앱이 앞으로 올 때 다시 시도한다.
  */
@@ -104,6 +126,8 @@ export function createEventSync({
   send = putEvents,
   fetchReceivedAt = fetchEventsReceivedAt,
   exceptions = appTravelExceptions,
+  skips = noSkips,
+  corrected = appCorrectedPlaces,
   filtered: filteredSink = appFilteredEvents,
   timeoutMs = REQUEST_TIMEOUT_MS,
   now = () => new Date(),
@@ -168,7 +192,17 @@ export function createEventSync({
         log('[calendar-sync] 이동 예외 목록 읽기 실패: 저장된 이름 없이 이어 갑니다');
       }
       if (cancelled()) return 'cancelled';
-      const { toSend, filtered } = partitionEvents(events, exceptions.has);
+      let skipsPendingFailed = false;
+      try {
+        await requestWithTimeout(() => skips.load(), timeoutMs);
+        // 올리기 요청과 목록 받기 요청이 각자 시간 제한을 가진다. 이 요청의 controller와는 따로 잰다(넘겨도 이 요청을 취소하지 않고 캐시로 이어 간다).
+        skipsPendingFailed = (await requestWithTimeout(() => skips.sync(), timeoutMs * 2 + 1000)).pendingFailed;
+      } catch {
+        log('[calendar-sync] 이동 없음 목록 맞추기 실패: 저장해 둔 목록으로 이어 갑니다');
+        skipsPendingFailed = skips.hasPending();
+      }
+      if (cancelled()) return 'cancelled';
+      const { toSend, filtered } = partitionEvents(events, exceptions.has, skips.has, corrected.has);
       filteredSink.set(filtered);
       events = fitToBudget(toSend);
       const key = JSON.stringify(events);
@@ -192,6 +226,13 @@ export function createEventSync({
       }
       // 응답이 돌아온 시점에도 이 요청이 현재 것일 때만 기록한다.
       if (cancelled()) return 'cancelled';
+      // 올리지 못한 변경이 남았는가는 일정을 서버에 보낸 **뒤**에 본다: 진행 중이던 동기화에 합류한 뒤나 일정을 보내는 동안 사용자가 바꾼 변경은 이번에 거른 결과에 들어
+      // 있지 않다(그 사이 '이동 일정이에요'를 눌러 지우기가 쌓였는데 서버의 기억이 그대로일 수 있다). 남아 있으면 이번 일정을 반영된 것으로 기록하지 않고 다시 맞춘다.
+      if (skipsPendingFailed || skips.hasPending()) {
+        // 이동 없음 기억의 변경을 서버에 올리지 못했다: 서버의 안전망이 방금 보낸 일정을 다르게 볼 수 있다. 다음에 다시 보내도록 기록하지 않는다.
+        log('[calendar-sync] 이동 없음 변경을 올리지 못해 일정은 다시 보냅니다');
+        return 'failed';
+      }
       lastSent = { key, at: startedAt };
       return 'sent';
     } catch (e) {
@@ -271,4 +312,4 @@ export function createEventSync({
 }
 
 /** 앱 전체가 하나를 공유한다(앱 시작·앞으로 올 때·캘린더 선택 저장 뒤에서 같은 인스턴스로 부른다). */
-export const appEventSync = createEventSync();
+export const appEventSync = createEventSync({ skips: appSkipMemory });

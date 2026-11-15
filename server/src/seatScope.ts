@@ -228,7 +228,7 @@ export function createSeatGuard(
   };
 
   /**
-   * 새 장소 API(`/places/resolve`·`/places/memory`)의 자리 정하기. 옛 차 앱 호환(`legacyDriverFallback`)을 적용하지 않는다:
+   * 새 API(`/places/resolve`·`/places/memory`·`/skips`)의 자리 정하기. 옛 차 앱 호환(`legacyDriverFallback`)을 적용하지 않는다:
    * 폰 토큰 = 그 자리, 차 토큰 = `driver=<seatId>` 필수(없으면 400), 기기 id만 = 그 기기의 연결 전 버킷, 식별 없음 = 서버에 자리 있는 차가
    * 하나도 없을 때만 기본 자리(데모·E2E)이고 그 밖에는 저장하지 않는 빈 범위(읽으면 비어 있고 쓰면 거절). 식별 없는 요청이 실제 자리의
    * 기억을 읽거나 쓰는 경로가 없다.
@@ -256,9 +256,9 @@ export function createSeatGuard(
     read: middleware(resolveRead),
     /** 차가 자리 데이터에 쓰는 요청(차 토큰 + driver)이 쓰는 미들웨어. 폰 토큰·기기 id 요청은 `write`와 같다 */
     carWrite: middleware((c) => resolveCarWrite(c)),
-    /** 새 장소 API의 읽기·해석(옛 호환 없음, 위 `strictRead`) */
+    /** 새 API(장소 해석·기억 `/places/resolve`·`/places/memory`, 이동 없음 기억 `/skips`)의 읽기(옛 호환 없음, 위 `strictRead`) */
     placeRead: middleware(strictRead),
-    /** 새 장소 API의 쓰기(옛 호환 없음, 위 `strictWrite`). 차 토큰은 `driver=`가 필수 */
+    /** 새 API의 쓰기(옛 호환 없음, 위 `strictWrite`). 차 토큰은 `driver=`가 필수 */
     placeWrite: middleware(strictWrite),
   };
 }

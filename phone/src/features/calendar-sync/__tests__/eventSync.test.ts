@@ -544,4 +544,150 @@ describe('createEventSync', () => {
       expect(filtered.get()).toHaveLength(1);
     });
   });
+
+  describe('이동 없음 기억(정책서 10.3 4번)', () => {
+    const memory = () => {
+      const data = new Map<string, string>();
+      return { getItem: async (k: string) => data.get(k) ?? null, setItem: async (k: string, v: string) => void data.set(k, v) };
+    };
+    const named = (id: string, title: string) => ({ ...event(id), title, locationText: '광주 육전집' });
+    const kia = named('kia', 'KIA 직관');
+    const lunch = named('lunch', '육전집 점심');
+    type SkipsParts = { load: jest.Mock; has: jest.Mock; sync: jest.Mock; hasPending: jest.Mock };
+    const synced = { refreshed: true, pendingFailed: false, full: false };
+    const skipsOf = (names: string[], over: Partial<SkipsParts> = {}): SkipsParts => ({
+      load: jest.fn().mockResolvedValue(undefined),
+      has: jest.fn((title: string) => names.includes(title)),
+      sync: jest.fn().mockResolvedValue(synced),
+      hasPending: jest.fn().mockReturnValue(false),
+      ...over,
+    });
+    const build = (skips: SkipsParts, events: DeviceEvent[] = [kia, lunch]) => {
+      const filtered = createFilteredEventsStore();
+      const order: string[] = [];
+      skips.sync.mockImplementation(async () => {
+        order.push('skips.sync');
+        return synced;
+      });
+      const send = jest.fn().mockImplementation(async () => {
+        order.push('send');
+        return {};
+      });
+      const log = jest.fn();
+      const sync = createEventSync({
+        source: { kind: 'device', list: async () => [], listEvents: async () => events },
+        fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
+        send,
+        exceptions: createTravelExceptions(memory()),
+        skips,
+        filtered,
+        timeoutMs: 1000,
+        log,
+      });
+      return { sync, send, filtered, order, log };
+    };
+
+    it('기억한 이름의 일정은 서버로 보내지 않고(PUT 본문에 없음) 폰 로컬 목록에 이유 skipped로 둔다', async () => {
+      const { sync, send, filtered } = build(skipsOf(['KIA 직관']));
+      expect(await sync.run()).toBe('sent');
+      expect(send.mock.calls[0][0]).toEqual([lunch]);
+      expect(JSON.stringify(send.mock.calls[0][0])).not.toContain('KIA');
+      expect(filtered.get()).toEqual([{ id: 'kia', title: 'KIA 직관', start: kia.start, end: kia.end, reason: 'skipped' }]);
+    });
+
+    it('일정을 보내기 전에 서버와 맞춘다(바꾼 것을 먼저 올림)', async () => {
+      const { sync, order } = build(skipsOf([]));
+      await sync.run();
+      expect(order).toEqual(['skips.sync', 'send']);
+    });
+
+    it('목록을 받지 못해도(캐시로 이어 감) 동기화는 계속한다', async () => {
+      const skips = skipsOf(['KIA 직관']);
+      const { sync, send, filtered } = build(skips);
+      skips.sync.mockResolvedValue({ ...synced, refreshed: false });
+      expect(await sync.run()).toBe('sent');
+      expect(send.mock.calls[0][0]).toEqual([lunch]);
+      expect(filtered.get().map((e) => e.reason)).toEqual(['skipped']);
+    });
+
+    it('맞추기가 던져도 동기화는 멈추지 않는다', async () => {
+      const skips = skipsOf([]);
+      const { sync, send, log } = build(skips);
+      skips.sync.mockRejectedValue(new Error('boom'));
+      expect(await sync.run()).toBe('sent');
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('이동 없음 목록 맞추기 실패'));
+    });
+
+    it('바꾼 것을 올리지 못한 채 보냈으면 failed이고 같은 내용도 다음에 다시 보낸다', async () => {
+      const skips = skipsOf([]);
+      const { sync, send } = build(skips);
+      skips.sync.mockResolvedValue({ ...synced, refreshed: false, pendingFailed: true });
+      expect(await sync.run()).toBe('failed');
+      skips.sync.mockResolvedValue(synced);
+      expect(await sync.run()).toBe('sent'); // 'unchanged'로 생략하지 않는다
+      expect(send).toHaveBeenCalledTimes(2);
+    });
+
+    it('맞춘 뒤 일정을 보내는 동안에도 올리지 못한 변경이 남았으면 성공으로 기록하지 않고 다음에 다시 보낸다(합류한 호출 뒤에 생긴 변경)', async () => {
+      const skips = skipsOf([]);
+      const { sync, send } = build(skips);
+      // sync 결과는 깨끗하지만(진행 중인 동기화에 합류) 그 뒤에 사용자가 바꾼 변경이 남아 있다.
+      skips.hasPending.mockReturnValue(true);
+      expect(await sync.run()).toBe('failed');
+      skips.hasPending.mockReturnValue(false);
+      expect(await sync.run()).toBe('sent'); // 'unchanged'로 생략하지 않는다
+      expect(send).toHaveBeenCalledTimes(2);
+    });
+
+    it('장소를 넣어 보정한 일정은 이름이 기억돼 있어도 거르지 않고 보낸다', async () => {
+      const filtered = createFilteredEventsStore();
+      const send = jest.fn().mockResolvedValue({});
+      const sync = createEventSync({
+        source: { kind: 'device', list: async () => [], listEvents: async () => [kia, lunch] },
+        fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
+        send,
+        exceptions: createTravelExceptions(memory()),
+        skips: skipsOf(['KIA 직관', '육전집 점심']),
+        corrected: { has: (id) => id === 'kia' },
+        filtered,
+        timeoutMs: 1000,
+        log: jest.fn(),
+      });
+      expect(await sync.run()).toBe('sent');
+      expect(send.mock.calls[0][0]).toEqual([kia]);
+      expect(filtered.get().map((e) => [e.id, e.reason])).toEqual([['lunch', 'skipped']]);
+    });
+
+    it('목 출처는 이동 없음 목록도 맞추지 않고 로컬 목록을 건드리지 않는다(서버는 픽스처를 쓴다)', async () => {
+      const skips = skipsOf(['KIA 직관']);
+      const filtered = createFilteredEventsStore();
+      const sync = createEventSync({
+        source: { kind: 'mock', list: async () => [], listEvents: async () => [kia] },
+        exceptions: createTravelExceptions(memory()),
+        skips,
+        filtered,
+        send: jest.fn(),
+        log: jest.fn(),
+      });
+      expect(await sync.run()).toBe('mock');
+      expect(skips.sync).not.toHaveBeenCalled();
+      expect(filtered.get()).toEqual([]);
+    });
+
+    it('기본 skips는 아무 이름도 기억하지 않는다(기존 동작 그대로)', async () => {
+      const send = jest.fn().mockResolvedValue({});
+      const sync = createEventSync({
+        source: { kind: 'device', list: async () => [], listEvents: async () => [kia, lunch] },
+        fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
+        send,
+        exceptions: createTravelExceptions(memory()),
+        filtered: createFilteredEventsStore(),
+        timeoutMs: 1000,
+        log: jest.fn(),
+      });
+      expect(await sync.run()).toBe('sent');
+      expect(send.mock.calls[0][0]).toEqual([kia, lunch]);
+    });
+  });
 });

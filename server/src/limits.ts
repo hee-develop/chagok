@@ -18,3 +18,9 @@ export const MAX_ATTENDEES = 50;
 export const MAX_ATTENDEE_NAME_LENGTH = 100;
 /** 앱에서 적는 채비 한 줄의 길이 상한(글자). 차는 30자 이하면 그대로 읽고 길면 '채비가 있어요'만 말한다. */
 export const MAX_CARE_LENGTH = 100;
+/** 자리 하나가 기억하는 '이동 없음' 일정 이름 개수 상한. 차면 새 이름은 409 `full`(폰의 '이동 일정이에요' 예외 목록 상한과 같다). */
+export const MAX_SKIPS = 500;
+/** 연결 전 기기 버킷 하나가 기억하는 '이동 없음' 이름 상한. 버킷은 잠깐 쓰고 버려질 수 있는 데이터라 연결된 자리(`MAX_SKIPS`)보다 작게 둔다(버킷 수 500개 × 이름이 서버 메모리를 채우지 않게). 차면 409 `full`. */
+export const MAX_BUCKET_SKIPS = 50;
+/** PUT /skips 한 번에 더하고 빼는 이름 수(더하기+빼기 합계) 상한. */
+export const MAX_SKIP_CHANGES = 50;

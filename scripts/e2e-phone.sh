@@ -254,12 +254,19 @@ expo_url() { # expo_url <경로>
 }
 
 code=0
+REAL_FLOWS_RAN=0
 for flow in $FLOWS; do
   if [ "$flow" = device-calendar ]; then
     ensure_metro device || { code=1; break; }
     # 앞 flow가 남긴 Expo Go 상태(다른 프로젝트 화면 포함)를 정리하고, 서버의 폰 일정을 비워 픽스처 출처에서 시작한다(같은 기기 요청만 받는다).
     "$ADB" -s "$SERIAL" shell am force-stop host.exp.exponent >/dev/null 2>&1 || true
     curl -sf -X DELETE "http://127.0.0.1:$SERVER_PORT/events" >/dev/null 2>&1 || true
+    # 앞 flow(pair-car)가 서버에 자리 있는 차를 남기면 식별 없는 폰(EXPO_PUBLIC_DEVICE_ID=none)의 `/skips` 쓰기가 막힌다(자리 있는 서버의
+    # 식별 없는 쓰기는 저장하지 않는 빈 범위). 실제 폰은 늘 기기 id나 토큰을 보내므로 E2E에서만 맞닥뜨리는 일이라, 서버를 새로 띄워 자리 없는 상태에서 시작한다.
+    if [ "$REAL_FLOWS_RAN" = 1 ]; then
+      kill_group "$SERVER_PID"; SERVER_PID=""
+      start_server || { code=1; break; }
+    fi
     CALENDAR_SEEDED=1
     bash "$ROOT/scripts/seed-phone-calendar.sh" "$SERIAL" seed || { code=1; break; }
   else
@@ -278,6 +285,7 @@ for flow in $FLOWS; do
     -e SERVER_URL="http://127.0.0.1:$SERVER_PORT" \
     --test-output-dir "$SHOT_DIR/$flow"
   flow_code=$?
+  [ "$flow" = device-calendar ] || REAL_FLOWS_RAN=1
   [ "$flow_code" = 0 ] && echo "$flow: 통과" || echo "$flow: 실패"
   [ "$flow_code" = 0 ] || code=$flow_code
 done

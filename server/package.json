@@ -12,6 +12,10 @@
     "./no-travel": {
       "types": "./src/noTravel.ts",
       "default": "./src/noTravel.ts"
+    },
+    "./event-name": {
+      "types": "./src/eventName.ts",
+      "default": "./src/eventName.ts"
     }
   },
   "scripts": {

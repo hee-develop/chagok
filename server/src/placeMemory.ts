@@ -1,7 +1,11 @@
+import { displayEventName, normalizeEventName } from './eventName.js';
 import { MAX_MEMORIES } from './placeSearch/limits.js';
 
-/** 이름 비교용 정규화: 앞뒤 공백 제거, 연속 공백 하나로, 소문자. 목 장소 이름의 '완전 일치' 판정과 장소 기억의 이름 키가 같은 규칙을 쓴다. */
-export const normalizePlaceName = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
+/**
+ * 이름 비교용 정규화: NFC·보이지 않는 글자(제로폭 공백·제어 문자) 제거, 앞뒤 공백 제거, 연속 공백 하나로, 소문자. 폰과 공유하는 `eventName.ts`의 함수 하나다
+ * (이동 없음 기억의 일정 이름과 같은 규칙). 목 장소 이름의 '완전 일치' 판정과 장소 기억의 이름 키가 같은 규칙을 쓴다.
+ */
+export const normalizePlaceName = normalizeEventName;
 
 /** 기억한 장소. 주소는 모를 수 있다. */
 export type MemoryPlace = { name: string; address: string | null; lat: number; lng: number };
@@ -35,7 +39,7 @@ export function createPlaceMemoryStore(now: () => Date, max: number = MAX_MEMORI
     put: ({ name, place, ambiguous }) => {
       const key = normalizePlaceName(name);
       const entry: PlaceMemoryEntry = {
-        name: name.trim().replace(/\s+/g, ' '),
+        name: displayEventName(name),
         place: { ...place },
         ambiguous,
         updatedAt: now().toISOString(),

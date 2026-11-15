@@ -25,7 +25,7 @@ describe('일정별 장소 보정', () => {
     const expected = { name: p.name, lat: p.lat, lng: p.lng };
     const response = await put(app, 'gwangju-friend', { placeId: p.id });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ id: 'gwangju-friend', place: expected, locationText: p.name, noTravel: false, noTravelReason: null });
+    expect(await response.json()).toEqual({ id: 'gwangju-friend', place: expected, locationText: p.name, noTravel: false, noTravelReason: null, title: '친구 약속', corrected: true });
     expect(row((await get(app)).schedules, 'gwangju-friend').place).toEqual(expected);
     expect(row((await get(app, 'today')).schedules, 'gwangju-friend').place).toEqual(expected);
     expect((await get(app)).schedules.filter((s) => s.id !== 'gwangju-friend')).toEqual(before.schedules.filter((s) => s.id !== 'gwangju-friend'));
@@ -42,6 +42,22 @@ describe('일정별 장소 보정', () => {
     expect((await get(app, 'today')).schedules.map((s) => s.id)).toContain('gwangju-friend');
     await put(app, 'gwangju-friend', { placeId: null });
     expect(row((await get(app)).schedules, 'gwangju-friend')).toMatchObject({ place: null, noTravel: false });
+  });
+
+  it('corrected는 사용자가 장소를 넣어 보정한 일정에만 true이고(원래 있던 장소·이동 없음·보정 지움은 false) 차량 응답에는 나가지 않는다', async () => {
+    const app = makeApp();
+    const corrected = async (id: string) => (row((await get(app)).schedules, id) as Row & { corrected: boolean }).corrected;
+    expect(await corrected('gwangju-friend')).toBe(false);
+    expect(await corrected('gwangju-kia')).toBe(false); // 목 일정이 처음부터 가진 장소는 보정이 아니다
+    await put(app, 'gwangju-friend', { placeId: catalog.places[0].id });
+    expect(await corrected('gwangju-friend')).toBe(true);
+    await put(app, 'gwangju-friend', { noTravel: true });
+    expect(await corrected('gwangju-friend')).toBe(false);
+    await put(app, 'gwangju-friend', { placeId: catalog.places[0].id });
+    await put(app, 'gwangju-friend', { placeId: null });
+    expect(await corrected('gwangju-friend')).toBe(false);
+    await put(app, 'gwangju-friend', { placeId: catalog.places[0].id });
+    expect(Object.keys(row((await get(app, 'today')).schedules, 'gwangju-friend'))).not.toContain('corrected');
   });
 
   it.each([null, [], {}, { placeId: 'unknown' }, { placeId: 1 }, { placeId: '' }, { noTravel: false }, { noTravel: true, placeId: 'x' }, { placeId: null, extra: true }])('잘못된 변경 %j는 400이고 저장하지 않는다', async (body) => {

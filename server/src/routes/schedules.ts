@@ -40,6 +40,11 @@ type Row = {
   attendees: string[];
   /** 온라인 회의·건물 안이라 저절로 '이동 없음'인 이유. 종일 일정은 거르지 않는다(차가 첫 탑승 인사에 이름을 쓴다). 보정(장소 넣기·이동 없음)이 있으면 보정이 이긴다. */
   autoNoTravel: NoTravelReason | null;
+  /**
+   * 같은 이름을 '이동 없음'으로 기억했다(`SeatData.skips`, 정책서 10.3 4번). 종일 일정은 거르지 않는다. 폰이 `travelConfirmed`로 보낸 일정도 기억이 이긴다:
+   * 사용자가 "이동 일정이에요"를 고르면 폰이 먼저 그 이름의 기억을 지우고(`PUT /skips`) 일정을 보내기 때문이다. 차의 "안 가요"가 더 나중이면 기억이 이긴다.
+   */
+  skipped: boolean;
 };
 
 /** 이름 비교 정규화. 장소 기억의 이름 키(placeMemory.ts)와 같은 규칙이다. */
@@ -128,6 +133,7 @@ export const createSchedulesRoute = (
           memo: s.memo,
           attendees: s.attendees,
           autoNoTravel: s.allDay ? null : detectNoTravel({ title: s.title, locationText: s.locationText, notes: s.memo }),
+          skipped: !s.allDay && sc.data.skips.has(s.title),
         };
       });
     }
@@ -150,6 +156,7 @@ export const createSchedulesRoute = (
         memo: e.notes,
         attendees: e.attendees,
         autoNoTravel: e.travelConfirmed || e.allDay ? null : detectNoTravel({ title: e.title, locationText: e.locationText, notes: e.notes }),
+        skipped: !e.allDay && sc.data.skips.has(e.title),
       };
     });
   };
@@ -170,19 +177,22 @@ export const createSchedulesRoute = (
     return all.filter((s) => selected.has(s.calendarId));
   };
   /**
-   * 보정을 반영한 장소. 보정이 없으면 온라인 회의·회의실 일정은 저절로 '이동 없음'이고 noTravelReason에 이유를 둔다.
+   * 보정을 반영한 장소. 보정이 없으면 온라인 회의·회의실 일정과 '이동 없음'으로 기억한 이름의 일정(`skipped`)은 저절로 '이동 없음'이고
+   * noTravelReason에 이유를 둔다(온라인·회의실이 먼저, 둘 다 아니면 기억한 이름이라 `skipped`).
    * 사용자가 장소를 넣으면(보정) 그 일정은 다시 차로 가고, 보정을 지우면(placeId: null) 저절로 거르는 상태로 돌아간다.
    */
   const view = (d: SeatData, s: Row) => {
     const override = d.overrides.get(s.id);
     const p = override?.place ?? null;
-    const noTravel = override ? override.noTravel : s.autoNoTravel !== null;
+    const noTravel = override ? override.noTravel : s.autoNoTravel !== null || s.skipped;
     return {
       id: s.id,
+      // 사용자가 장소를 넣어 보정한 일정인가. 폰은 이런 일정을 같은 이름의 '이동 없음' 기억으로 거르지 않는다(보정이 기억을 이긴다: 거르면 서버가 일정과 보정을 잃는다).
+      corrected: !!override && override.place !== null && !override.noTravel,
       locationText: noTravel ? null : p?.name ?? s.locationText,
       place: noTravel ? null : p ? { name: p.name, lat: p.lat, lng: p.lng } : s.place,
       noTravel,
-      noTravelReason: override ? (null as NoTravelReason | null) : s.autoNoTravel,
+      noTravelReason: override ? (null as NoTravelReason | 'skipped' | null) : s.autoNoTravel ?? (s.skipped ? ('skipped' as const) : null),
     };
   };
   /** 장소가 자리의 기억에서 왔을 때만 `placeMemory`를 응답에 덧붙인다(보정·이동 없음이 이기면 없음, 기억이 아니면 필드 자체가 없다). */
@@ -220,7 +230,7 @@ export const createSchedulesRoute = (
       return c.json({
         anchor: anchor.toISOString(),
         schedules: selectedSchedules(sc, anchor).filter((s) => !view(d, s).noTravel && isToday(s, anchor)).map((s) => {
-          const { noTravel: _, noTravelReason: _reason, ...place } = view(d, s);
+          const { noTravel: _, noTravelReason: _reason, corrected: _corrected, ...place } = view(d, s);
           const memorySuggestion = memorySuggestionOf(d, s);
           return {
             ...place, ...memoryFlag(d, s), ...(memorySuggestion ? { suggestion: memorySuggestion } : {}), title: s.title, ...times(s), allDay: s.allDay, memo: s.memo, care: d.cares.get(s.id) ?? null, attendees: s.attendees,
@@ -280,7 +290,8 @@ export const createSchedulesRoute = (
           const known = places.get(change.placeId) as MockPlace;
           d.overrides.set(schedule.id, { place: { id: known.id, name: known.name, address: known.address, lat: known.lat, lng: known.lng }, noTravel: false });
         }
-        return c.json(view(d, schedule), 200);
+        // title은 폰이 '이동 없음'을 고를 때 같은 이름을 기억(`PUT /skips`)하고, 장소를 넣을 때 그 이름의 기억을 지우는 데 쓴다.
+        return c.json({ ...view(d, schedule), title: schedule.title }, 200);
       })
     // 채비 한 줄 저장. 공백만이거나 null이면 지운다. 줄바꿈·연속 공백은 공백 하나로 줄인다. 종일 일정에도 둘 수 있다(하루 전체 채비).
     .put('/:id/care', guard.write, bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => c.json({ error: '본문이 너무 큽니다' }, 413) }),

@@ -111,3 +111,71 @@ describe('partitionEvents (정책서 10.3 표 1~3번)', () => {
     expect(filtered.map((e) => e.id)).toEqual(['b']);
   });
 });
+
+describe('partitionEvents 4번: 이동 없음 기억', () => {
+  const skippedNames = (...names: string[]) => (title: string) => names.includes(title);
+
+  it('기억한 이름의 일정은 보내지 않고 폰 로컬 목록에만 남긴다(이유 skipped)', () => {
+    const a = event({ id: 'a', title: 'KIA 직관', locationText: '광주-기아 챔피언스필드' });
+    const b = event({ id: 'b', title: '치과' });
+    const { toSend, filtered } = partitionEvents([a, b], none, skippedNames('KIA 직관'));
+    expect(toSend).toEqual([b]);
+    expect(filtered).toEqual([{ id: 'a', title: 'KIA 직관', start: a.start, end: a.end, reason: 'skipped' }]);
+    expect(JSON.stringify(filtered)).not.toMatch(/챔피언스필드|김철수/);
+  });
+
+  it('장소 칸이 비어 있어도 기억한 이름이면 거른다', () => {
+    const { toSend, filtered } = partitionEvents([event({ locationText: null })], none, () => true);
+    expect(toSend).toEqual([]);
+    expect(filtered[0]?.reason).toBe('skipped');
+  });
+
+  it('종일 일정은 기억한 이름이어도 거르지 않는다(이름만 보냄)', () => {
+    const allDay = event({ allDay: true, notes: 'x' });
+    const { toSend, filtered } = partitionEvents([allDay], none, () => true);
+    expect(toSend).toEqual([{ ...allDay, notes: null, attendees: [] }]);
+    expect(filtered).toEqual([]);
+  });
+
+  it('온라인·건물 안에 걸리면 그 이유가 먼저다(2·3번이 4번보다 앞)', () => {
+    const { filtered } = partitionEvents([event({ locationText: 'Zoom' })], none, () => true);
+    expect(filtered[0]?.reason).toBe('online');
+  });
+
+  it('기억에도 예외에도 있는 어긋난 이름은 기억이 이긴다(서버 안전망과 같다)', () => {
+    const online = event({ id: 'o', locationText: 'Zoom' });
+    const plain = event({ id: 'p', locationText: '광주' });
+    const { toSend, filtered } = partitionEvents([online, plain], () => true, () => true);
+    expect(toSend).toEqual([]);
+    expect(filtered.map((e) => [e.id, e.reason])).toEqual([['o', 'skipped'], ['p', 'skipped']]);
+  });
+
+  it('예외만 있는 이름은 지금처럼 travelConfirmed로 보낸다', () => {
+    const online = event({ locationText: 'Zoom' });
+    expect(partitionEvents([online], () => true, () => false).toSend).toEqual([{ ...online, travelConfirmed: true }]);
+  });
+});
+
+
+describe('partitionEvents: 장소 보정이 이동 없음 기억을 이긴다', () => {
+  const corrected = (...ids: string[]) => (id: string) => ids.includes(id);
+
+  it('장소를 넣어 보정한 일정은 이름이 기억돼 있어도 거르지 않고 보낸다(서버가 보정을 잃지 않는다)', () => {
+    const a = event({ id: 'a', title: '친구 약속' });
+    const b = event({ id: 'b', title: '친구 약속' });
+    const { toSend, filtered } = partitionEvents([a, b], none, () => true, corrected('a'));
+    expect(toSend.map((e) => e.id)).toEqual(['a']);
+    expect(filtered.map((e) => [e.id, e.reason])).toEqual([['b', 'skipped']]); // 보정 없는 같은 이름은 그대로 거른다
+  });
+
+  it('예외(이동 일정이에요)가 있는 일정도 보정되었으면 보낸다(travelConfirmed 유지)', () => {
+    const online = event({ id: 'o', locationText: 'Zoom' });
+    const { toSend, filtered } = partitionEvents([online], () => true, () => true, corrected('o'));
+    expect(toSend).toEqual([{ ...online, travelConfirmed: true }]);
+    expect(filtered).toEqual([]);
+  });
+
+  it('보정 여부를 넘기지 않으면 지금처럼 이름만 본다', () => {
+    expect(partitionEvents([event({ id: 'a' })], none, () => true).toSend).toEqual([]);
+  });
+});

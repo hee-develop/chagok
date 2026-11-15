@@ -106,3 +106,236 @@ appId: ${APP_ID}
 - tapOn: '취소'
 - assertNotVisible: '.*일정을 이동 일정으로 바꿀까요\?'
 - assertVisible: '이동 없음 · 온라인 회의'
+
+# ---- 이동 없음 기억(정책서 10.3 4번·10.8) ----
+# 1) 오늘 탭에서 일정을 펼쳐 [이동 없음]: 같은 이름 일정을 앞으로 차에 보내지 않는다는 안내와 [되돌리기]가 뜨고 서버에 이름이 기억된다.
+- scrollUntilVisible:
+    element: 'E2E Today Meeting 13:00.*'
+    direction: DOWN
+    timeout: 20000
+- tapOn: 'E2E Today Meeting 13:00.*'
+- scrollUntilVisible:
+    element: 'E2E Today Meeting 이동 없음'
+    direction: DOWN
+    timeout: 20000
+- tapOn: 'E2E Today Meeting 이동 없음'
+- scrollUntilVisible:
+    element: 'E2E Today Meeting 되돌리기'
+    direction: DOWN
+    timeout: 20000
+- assertVisible: '.*이동 없음으로 두었어요\. 같은 이름 일정을 앞으로 차에 보내지 않아요\.'
+- takeScreenshot: 06-skip-notice
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Today Meeting'
+      STAGE: remembered
+# 2) [되돌리기]: 이동 없음과 이름 기억을 함께 되돌린다.
+- tapOn: 'E2E Today Meeting 되돌리기'
+- extendedWaitUntil:
+    notVisible: 'E2E Today Meeting 되돌리기'
+    timeout: 15000
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Today Meeting'
+      STAGE: forgotten
+# 3) 다시 [이동 없음]을 누르고 앱을 다시 열면 일정 동기화가 같은 이름 일정을 거른다: 서버로 보내지 않고 오늘 탭에 '이동 없음으로 기억'으로 흐리게 보인다.
+- runFlow:
+    when:
+      notVisible: 'E2E Today Meeting 이동 없음'
+    commands:
+      - scrollUntilVisible:
+          element: 'E2E Today Meeting 13:00.*'
+          direction: DOWN
+          timeout: 20000
+      - tapOn: 'E2E Today Meeting 13:00.*'
+- scrollUntilVisible:
+    element: 'E2E Today Meeting 이동 없음'
+    direction: DOWN
+    timeout: 20000
+- tapOn: 'E2E Today Meeting 이동 없음'
+- scrollUntilVisible:
+    element: 'E2E Today Meeting 되돌리기'
+    direction: DOWN
+    timeout: 20000
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Today Meeting'
+      STAGE: remembered
+- retry:
+    maxRetries: 3
+    commands:
+      - stopApp
+      - openLink: ${EXPO_URL}
+      - runFlow:
+          file: expo-dev-menu.yaml
+          env:
+            SCREEN_TITLE: '오늘 일정'
+- extendedWaitUntil:
+    visible: '이동 없음 · 이동 없음으로 기억'
+    timeout: 60000
+- assertVisible: 'E2E Today Meeting'
+- takeScreenshot: 07-today-skipped-row
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Today Meeting'
+      STAGE: event-withheld
+# 4) 그 흐린 줄의 [이동 일정이에요]는 기억을 지운다: 서버에서 기억이 사라지고 같은 일정이 다시 서버로 간다.
+- scrollUntilVisible:
+    element: 'E2E Today Meeting 13:00.*'
+    direction: DOWN
+    timeout: 20000
+- tapOn: 'E2E Today Meeting 13:00.*'
+- extendedWaitUntil:
+    visible: '.*E2E Today Meeting.* 일정을 이동 일정으로 바꿀까요\?'
+    timeout: 10000
+- tapOn: '바꾸기'
+- extendedWaitUntil:
+    visible: '.*E2E Today Meeting.* 일정을 이동 일정으로 바꿨어요\.'
+    timeout: 30000
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Today Meeting'
+      STAGE: forgotten
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Today Meeting'
+      STAGE: event-sent
+- takeScreenshot: 08-today-unskipped
+# 5) 장소를 넣으면 같은 이름의 이동 없음 기억이 지워지고 그 일정은 다시 서버로 간다(장소 보정이 이동 없음 기억을 이긴다).
+- runFlow:
+    when:
+      notVisible: 'E2E Today Meeting 이동 없음'
+    commands:
+      - scrollUntilVisible:
+          element: 'E2E Today Meeting 13:00.*'
+          direction: DOWN
+          timeout: 20000
+      - tapOn: 'E2E Today Meeting 13:00.*'
+- scrollUntilVisible:
+    element: 'E2E Today Meeting 이동 없음'
+    direction: DOWN
+    timeout: 20000
+- tapOn: 'E2E Today Meeting 이동 없음'
+- scrollUntilVisible:
+    element: 'E2E Today Meeting 되돌리기'
+    direction: DOWN
+    timeout: 20000
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Today Meeting'
+      STAGE: remembered
+- scrollUntilVisible:
+    element: 'E2E Today Meeting 장소 변경'
+    direction: DOWN
+    timeout: 20000
+- tapOn: 'E2E Today Meeting 장소 변경'
+- extendedWaitUntil:
+    visible: '일정 장소 찾기'
+    timeout: 15000
+- inputText: '육전'
+- extendedWaitUntil:
+    visible: '.*광주 육전집.*'
+    timeout: 15000
+- tapOn: '.*광주 육전집.*'
+- extendedWaitUntil:
+    visible: '오늘 일정'
+    timeout: 20000
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Today Meeting'
+      STAGE: forgotten
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Today Meeting'
+      STAGE: event-sent
+- takeScreenshot: 09-today-placed
+# 앱을 다시 열어도(일정 동기화) 그 일정은 거르지 않고 장소와 함께 보인다.
+- retry:
+    maxRetries: 3
+    commands:
+      - stopApp
+      - openLink: ${EXPO_URL}
+      - runFlow:
+          file: expo-dev-menu.yaml
+          env:
+            SCREEN_TITLE: '오늘 일정'
+- extendedWaitUntil:
+    visible: 'E2E Today Meeting 13:00.*'
+    timeout: 60000
+- assertNotVisible: '이동 없음 · 이동 없음으로 기억'
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Today Meeting'
+      STAGE: event-sent
+# 6) 장소 탭의 이동 없음 목록: 내일 일정에 [이동 없음]을 고르면 기억한 이름이 목록에 보이고, [지우기]로 지운다.
+- scrollUntilVisible:
+    element: 'E2E Tomorrow Visit .*'
+    direction: DOWN
+    timeout: 20000
+- tapOn: 'E2E Tomorrow Visit .*'
+- scrollUntilVisible:
+    element: 'E2E Tomorrow Visit 이동 없음'
+    direction: DOWN
+    timeout: 20000
+- scrollUntilVisible:
+    element: 'E2E Tomorrow Visit 이동 없음'
+    direction: DOWN
+    timeout: 20000
+- tapOn: 'E2E Tomorrow Visit 이동 없음'
+- scrollUntilVisible:
+    element: 'E2E Tomorrow Visit 되돌리기'
+    direction: DOWN
+    timeout: 20000
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Tomorrow Visit'
+      STAGE: remembered
+- tapOn:
+    id: 'tabbar-places'
+- extendedWaitUntil:
+    visible: '자주 가는 곳을 알려주세요'
+    timeout: 15000
+- scrollUntilVisible:
+    element: '이동 없음으로 기억한 일정'
+    direction: DOWN
+    timeout: 20000
+- scrollUntilVisible:
+    element: 'E2E Tomorrow Visit 이동 없음 지우기'
+    direction: DOWN
+    timeout: 20000
+- assertVisible: 'E2E Tomorrow Visit'
+- scroll
+- takeScreenshot: 10-places-tab-skip-list
+- tapOn: 'E2E Tomorrow Visit 이동 없음 지우기'
+- extendedWaitUntil:
+    notVisible: 'E2E Tomorrow Visit 이동 없음 지우기'
+    timeout: 20000
+- runScript:
+    file: assert-skips.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      NAME: 'E2E Tomorrow Visit'
+      STAGE: forgotten
+- takeScreenshot: 11-places-tab-skip-removed

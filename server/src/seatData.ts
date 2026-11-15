@@ -6,14 +6,16 @@ import { createPlaceMemoryStore, type PlaceMemoryStore } from './placeMemory.js'
 import type { StoredPlace } from './placeSnapshot.js';
 import { MAX_BUCKET_MEMORIES, MAX_MEMORIES } from './placeSearch/limits.js';
 import { createFavoritesStore, type FavoritesStore } from './routes/places.js';
+import { createSkipsStore, type SkipsStore } from './routes/skips.js';
+import { MAX_BUCKET_SKIPS, MAX_SKIPS } from './limits.js';
 import { DEFAULT_SEAT_ID, type SeatEvent } from './seats.js';
 
 /** 캘린더 원본과 분리한 일정별 보정값. */
 export type Override = { place: StoredPlace | null; noTravel: boolean };
 
 /**
- * 운전자 자리 하나가 가진 데이터. 일정·캘린더 선택·자주 가는 곳·가족 요청·일정별 보정과 채비·장소 기억·도착 횟수가 자리별로 따로 쌓인다.
- * 앞으로 생길 이동 없음 기억 저장소도 여기에 붙인다(자리를 지우면 함께 지워진다).
+ * 운전자 자리 하나가 가진 데이터. 일정·캘린더 선택·자주 가는 곳·가족 요청·일정별 보정과 채비·장소 기억·이동 없음 기억·도착 횟수가 자리별로 따로 쌓인다.
+ * 장소 기억(`memory`)·이동 없음 기억(`skips`)·도착 횟수(`arrivals`)가 여기 있다(자리를 지우면 함께 지워진다).
  */
 export type SeatData = {
   events: EventsStore;
@@ -21,6 +23,8 @@ export type SeatData = {
   /** 자주 가는 곳(집·회사·단골). 폰을 바꿔도 같은 자리에 남는 기억이다. */
   favorites: FavoritesStore;
   family: FamilyStore;
+  /** '이동 없음'으로 기억한 일정 이름(정책서 10.3 4번). 자리를 지우면 함께 지워지고, 폰을 바꿔도 남는다. */
+  skips: SkipsStore;
   /** 일정 id → 장소 보정·이동 없음. 폰 일정이 바뀌어 사라진 일정의 보정은 버린다(픽스처 일정은 남긴다). */
   overrides: Map<string, Override>;
   /** 일정 id → 앱에서 적은 채비 한 줄. 캘린더에는 쓰지 않고 차곡 안에만 둔다. */
@@ -48,6 +52,8 @@ export const SEAT_DATA_POLICY: Record<keyof SeatData, 'keep' | 'reset'> = {
   cares: 'reset',
   memory: 'keep',
   arrivals: 'keep',
+  // 이동 없음 기억은 사용자가 고른 기억이라 폰을 바꿔도 남기고(`keep`), 새 폰이 연결 전에 쌓은 버킷의 기억은 자리의 기억에 합친다(`apply('replaced')`의 `skips.merge`).
+  skips: 'keep',
 };
 
 export type BucketDenied = 'rate-limited';
@@ -111,6 +117,8 @@ export type SeatDataOptions = {
   maxSeatEventBytes?: number;
   maxBucketEventBytes?: number;
   maxEventBytesPerBucket?: number;
+  /** 연결 전 버킷 하나가 기억하는 '이동 없음' 이름 상한(기본 `MAX_BUCKET_SKIPS`). 연결된 자리가 되면 `MAX_SKIPS`로 늘어난다. */
+  maxBucketSkips?: number;
   bucketCreateWindowMs?: number;
   maxBucketCreatesPerSource?: number;
 };
@@ -126,18 +134,20 @@ export function createSeatDataRegistry({
   maxSeatEventBytes = MAX_SEAT_EVENT_BYTES,
   maxBucketEventBytes = MAX_BUCKET_EVENT_BYTES,
   maxEventBytesPerBucket = MAX_EVENT_BYTES_PER_BUCKET,
+  maxBucketSkips = MAX_BUCKET_SKIPS,
   bucketCreateWindowMs = BUCKET_CREATE_WINDOW_MS,
   maxBucketCreatesPerSource = MAX_BUCKET_CREATES_PER_SOURCE,
 }: SeatDataOptions): SeatDataRegistry {
-  const create = (preset: Preset = {}, memoryMax: number = MAX_MEMORIES): SeatData => {
+  const create = (preset: Preset = {}, limits: { memory: number; skips: number } = { memory: MAX_MEMORIES, skips: MAX_SKIPS }): SeatData => {
     const data: SeatData = {
       events: preset.events ?? createEventsStore(now),
       selection: preset.selection ?? createSelectionStore(),
       favorites: preset.favorites ?? createFavoritesStore(),
       family: preset.family ?? createFamilyStore(now),
+      skips: createSkipsStore(now, limits.skips),
       overrides: new Map(),
       cares: new Map(),
-      memory: createPlaceMemoryStore(now, memoryMax),
+      memory: createPlaceMemoryStore(now, limits.memory),
       arrivals: createArrivalsStore(now),
     };
     // 폰 일정이 교체되거나 비워지면, 더는 없는 일정 id의 보정·채비를 버린다(픽스처 id의 것은 남긴다).
@@ -194,7 +204,8 @@ export function createSeatDataRegistry({
       saved.home === null &&
       saved.work === null &&
       saved.others.length === 0 &&
-      d.family.list().length === 0
+      d.family.list().length === 0 &&
+      d.skips.size() === 0
     );
   };
   /** 밀어낼 버킷: 가장 오래 쓰지 않은 것, 빈 버킷이 있으면 그중 가장 오래된 것. except는 지금 쓰는 버킷. */
@@ -240,11 +251,11 @@ export function createSeatDataRegistry({
         if (victim === null) break;
         buckets.delete(victim);
       }
-      const data = create({}, MAX_BUCKET_MEMORIES);
+      const data = create({}, { memory: MAX_BUCKET_MEMORIES, skips: maxBucketSkips });
       buckets.set(deviceId, { data, lastWrittenAt: at });
       return { ok: true, data };
     },
-    blank: () => create(),
+    blank: () => create({}, { memory: MAX_BUCKET_MEMORIES, skips: maxBucketSkips }),
     reserveEvents: (data, bytes) => {
       const own = bucketIdOf(data);
       if (own === null) {
@@ -289,16 +300,19 @@ export function createSeatDataRegistry({
         // 기본 자리(픽스처·데모 경로)와 다른 폰의 버킷은 가져가지 않는다.
         const data = takeBucket(event.deviceId) ?? create();
         data.memory.setMax(MAX_MEMORIES); // 버킷의 낮은 기억 상한은 자리가 되면 풀린다
+        data.skips.setLimit(MAX_SKIPS);
         bySeat.set(event.seatId, data);
       } else {
         // 폰 바꾸기: 옛 폰의 캘린더에서 온 일정·캘린더 선택·보정·채비는 버리고, 새 폰의 버킷이 있으면 그 일정·선택·보정을 반영한다
-        // (없으면 '받았고 0건' 상태). 자주 가는 곳 같은 기억과 가족 요청은 둔다.
+        // (없으면 '받았고 0건' 상태). 자주 가는 곳·이동 없음 기억 같은 기억과 가족 요청은 두고, 새 폰의 버킷에 쌓인 이동 없음 기억은 자리 기억에 합친다.
         const data = get(event.seatId);
         const bucket = takeBucket(event.deviceId);
         data.events.replace(bucket?.events.get()?.events ?? []);
         data.selection = bucket?.selection ?? createSelectionStore();
         data.overrides = new Map(bucket?.overrides);
         data.cares = new Map(bucket?.cares);
+        // 새 폰이 연결 전에 쌓은 이동 없음 기억은 자리 기억에 합친다(상한 안에서, 자리에 이미 있는 이름이 먼저). 버리면 사용자가 고른 이동 없음을 잃는다.
+        if (bucket) data.skips.merge(bucket.skips.list());
       }
     },
   };

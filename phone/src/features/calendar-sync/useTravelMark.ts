@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { markTravelByTitle, undoMarkTravel, type TravelMarkResult } from './travelMark';
+import { markTravelByTitle, undoMarkTravel, undoUnskipByTitle, unskipByTitle, type TravelMarkResult } from './travelMark';
 
 /** 바꾼 직후 '되돌리기'를 보이는 시간. */
 export const UNDO_VISIBLE_MS = 10_000;
@@ -10,6 +10,9 @@ export type TravelMarkIssue = 'mark' | 'undo';
 export type TravelMarkOptions = {
   mark?: (title: string) => Promise<TravelMarkResult>;
   undo?: (title: string) => Promise<TravelMarkResult>;
+  /** 이유가 '이동 없음으로 기억'(`reason: 'skipped'`)인 줄을 바꾸고 되돌린다(기억을 지우고 도로 더한다). */
+  unskip?: (title: string) => Promise<TravelMarkResult>;
+  undoUnskip?: (title: string) => Promise<TravelMarkResult>;
   undoVisibleMs?: number;
   /** 바꾸기·되돌리기가 서버 일정에 반영된 뒤(화면이 서버 목록을 다시 불러오는 자리). */
   onChanged?: () => void;
@@ -17,7 +20,7 @@ export type TravelMarkOptions = {
    * 지금 화면에 보이는 거른 줄. 확인 중인 줄이 동기화로 사라지거나 제목이 바뀌면 확인을 닫는다
    * (확인 문구의 제목과 실제로 저장되는 이름이 어긋나지 않게). 넘기지 않으면 닫지 않는다.
    */
-  lines?: readonly { id: string; title: string }[];
+  lines?: readonly { id: string; title: string; reason?: string }[];
 };
 
 /**
@@ -27,13 +30,15 @@ export type TravelMarkOptions = {
 export function useTravelMark({
   mark = markTravelByTitle,
   undo = undoMarkTravel,
+  unskip = unskipByTitle,
+  undoUnskip = undoUnskipByTitle,
   undoVisibleMs = UNDO_VISIBLE_MS,
   onChanged,
   lines,
 }: TravelMarkOptions = {}) {
   const [confirming, setConfirming] = useState<{ id: string; title: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [undoable, setUndoable] = useState<{ title: string } | null>(null);
+  const [undoable, setUndoable] = useState<{ title: string; skipped: boolean } | null>(null);
   const [issue, setIssue] = useState<TravelMarkIssue | null>(null);
   const busyRef = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -81,7 +86,7 @@ export function useTravelMark({
     confirming,
     /** 저장·되돌리는 중. 이 동안 다른 저장 버튼을 막는다. */
     busy,
-    /** 방금 바꾼 이름. `UNDO_VISIBLE_MS` 동안 '되돌리기'를 보인다. */
+    /** 방금 바꾼 이름(`skipped`: 이동 없음 기억을 지운 것). `UNDO_VISIBLE_MS` 동안 '되돌리기'를 보인다. */
     undoable,
     issue,
     ask(id: string, title: string) {
@@ -94,23 +99,25 @@ export function useTravelMark({
     },
     async confirm() {
       if (!confirming || busyRef.current) return;
-      const { title } = confirming;
+      const { id, title } = confirming;
+      // 이유가 '이동 없음으로 기억'인 줄은 예외가 아니라 그 이름의 기억을 지운다.
+      const skipped = lines?.find((l) => l.id === id)?.reason === 'skipped';
       setUndoable(null);
-      const result = await run(() => mark(title));
+      const result = await run(() => (skipped ? unskip(title) : mark(title)));
       if (!alive.current) return;
       setConfirming(null);
       if (result === 'failed') {
         setIssue('mark');
         return;
       }
-      setUndoable({ title });
+      setUndoable({ title, skipped });
       timer.current = setTimeout(() => setUndoable(null), undoVisibleMs);
       onChangedRef.current?.();
     },
     async undoNow() {
       if (!undoable || busyRef.current) return;
-      const { title } = undoable;
-      const result = await run(() => undo(title));
+      const { title, skipped } = undoable;
+      const result = await run(() => (skipped ? undoUnskip(title) : undo(title)));
       if (!alive.current) return;
       setUndoable(null);
       if (result === 'failed') setIssue('undo');

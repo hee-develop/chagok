@@ -16,6 +16,7 @@ import { createNotificationsRoute } from './routes/notifications.js';
 import { createPairingRoute } from './routes/pairing.js';
 import { createSchedulesRoute } from './routes/schedules.js';
 import { createPlaceResolveRoute } from './routes/placeResolve.js';
+import { createSkipsRoute } from './routes/skips.js';
 import { createPlacesRoute, type FavoritesStore } from './routes/places.js';
 import { createNotifications, type Notifications } from './notify/notifier.js';
 import { MEMORY_WRITE_MAX, MEMORY_WRITE_WINDOW_MS } from './placeSearch/limits.js';
@@ -178,6 +179,7 @@ export const createApp = ({
     .route('/family', createFamilyGroupRoute(familyGuard, familyRequests, { now, clientAddress }))
     .route('/requests', createRequestsRoute(familyGuard, familyRequests, now))
     .route('/drive-state', createDriveStateRoute(familyGuard, familyRequests))
+    .route('/skips', createSkipsRoute(guard))
     .route('/pairing', createPairingRoute(seats, { clientAddress, isLoopback }))
     .route('/pair', createPairRoute(seats, { now, clientAddress, isLoopback }))
     .route('/notifications', createNotificationsRoute(seats, notifications))

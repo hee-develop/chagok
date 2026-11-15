@@ -7,7 +7,7 @@ export const ANCHOR = '2026-11-06T00:30:00Z';
 
 const base: SetupSchedule = {
   id: 'x', title: 'x', start: '2026-11-06T04:00:00Z', end: '2026-11-06T05:00:00Z', place: null, locationText: null,
-  noTravel: false, noTravelReason: null, care: null, suggestion: null, familyRequests: [],
+  noTravel: false, noTravelReason: null, corrected: false, care: null, suggestion: null, familyRequests: [],
 };
 
 /** 오늘 13:00, 장소 없음 */
@@ -29,6 +29,7 @@ export const makeScheduleApi = (schedules: SetupSchedule[] = [LUNCH, ONLINE, GAM
   fetchSchedules: jest.fn().mockResolvedValue({ anchor: ANCHOR, schedules }),
   savePlace: jest.fn().mockResolvedValue({ id: LUNCH.id, place: null, locationText: null, noTravel: true, noTravelReason: null }),
   saveCare: jest.fn().mockResolvedValue({ id: LUNCH.id, care: null }),
+  undoNoTravel: jest.fn().mockResolvedValue({ id: LUNCH.id, place: null, locationText: null, noTravel: false, noTravelReason: null }),
   ...overrides,
 });
 
