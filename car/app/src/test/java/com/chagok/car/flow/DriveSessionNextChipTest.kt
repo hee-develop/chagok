@@ -42,6 +42,9 @@ class DriveSessionNextChipTest {
     /** 마지막 칩 효과의 본문. 칩 효과가 없으면 null. */
     private fun List<Effect>.chip(): String? = filterIsInstance<Effect.ShowNextChip>().lastOrNull()?.text
 
+    /** 주행 중 도착으로 뜬 하차 카드의 닫힘 타이머. */
+    private fun List<Effect>.cardTimer() = filterIsInstance<Effect.ScheduleCardTimeout>().single()
+
     /** 탑승 → 수락 → 길안내 시작. 이후 주행을 시작하면 칩이 뜬다. */
     private fun acceptRoute() {
         val request = session.handle(Event.Boarded).filterIsInstance<Effect.RequestTravelTime>().single()
@@ -93,7 +96,10 @@ class DriveSessionNextChipTest {
     @Test fun `도착하면 칩이 다음 일정으로 바뀐다`() {
         acceptRoute()
         assertEquals("00:40 고객 미팅", session.handle(Event.GearChanged(Gear.DRIVE)).chip())
-        assertEquals("03:00 점심 약속", session.handle(Event.DestinationArrived).chip())
+        // 주행 중 도착은 하차 카드를 바로 띄운다(사용자 결정 2026-11-15). 카드가 떠 있는 동안 칩은 숨고(같은 왼쪽 위), 카드가 닫히면 다음 일정으로 뜬다.
+        val arrived = session.handle(Event.DestinationArrived)
+        assertEquals("", arrived.chip())
+        assertEquals("03:00 점심 약속", session.handle(Event.CardTimedOut(arrived.cardTimer().timerId)).chip())
     }
 
     @Test fun `마지막 일정에 도착하면 칩이 사라진다`() {
@@ -132,8 +138,10 @@ class DriveSessionNextChipTest {
         routeToSecondOfOverlap()
         // 먼저인 일정(고객 미팅)이 아직 남아 있어도 길안내 중인 점심 약속이 칩이다.
         assertEquals("01:30 점심 약속", session.handle(Event.GearChanged(Gear.DRIVE)).chip())
-        // 도착하면 길안내 일정이 끝나 지금처럼 남은 일정 중 첫 일정(고객 미팅)이다.
-        assertEquals("00:40 고객 미팅", session.handle(Event.DestinationArrived).chip())
+        // 도착하면 길안내 일정이 끝나 지금처럼 남은 일정 중 첫 일정(고객 미팅)이다. 도착 하차 카드가 닫힌 뒤에 보인다(카드가 떠 있는 동안은 숨김).
+        val arrived = session.handle(Event.DestinationArrived)
+        assertEquals("", arrived.chip())
+        assertEquals("00:40 고객 미팅", session.handle(Event.CardTimedOut(arrived.cardTimer().timerId)).chip())
     }
 
     @Test fun `길안내가 없으면 칩은 지금처럼 다음 일정이다`() {
@@ -205,8 +213,10 @@ class DriveSessionNextChipTest {
         acceptRoute()
         val first = session.handle(Event.GearChanged(Gear.DRIVE)).timer()!!
         val arrived = session.handle(Event.DestinationArrived)
-        assertEquals("03:00 점심 약속", arrived.chip())
-        val second = arrived.timer()!!
+        assertEquals("", arrived.chip())
+        val closed = session.handle(Event.CardTimedOut(arrived.cardTimer().timerId))
+        assertEquals("03:00 점심 약속", closed.chip())
+        val second = closed.timer()!!
         assertTrue(second.timerId != first.timerId)
         clock.now = at(101)
         assertNoChipEffects(session.handle(Event.ChipRecheck(first.timerId)))

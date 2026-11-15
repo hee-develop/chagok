@@ -332,6 +332,7 @@ class DepartRouteTest {
         host.post(Event.Heard("응"))
         assertNotNull(waitFor("길안내를 시작할게요."))
         host.post(Event.GearChanged(Gear.DRIVE))
+        // 주행 중 도착이라 이 순간 하차 카드가 뜬다(사용자 결정 2026-11-15). 20분 뒤 다시 타면 그 카드를 접고 다음 일정을 묻는다.
         host.post(Event.DestinationArrived)
         host.post(Event.GearChanged(Gear.PARK))
         reboardAfterArrival()

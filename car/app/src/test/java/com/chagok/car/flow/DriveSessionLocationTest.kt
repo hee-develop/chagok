@@ -58,6 +58,15 @@ class DriveSessionLocationTest {
 
     private fun drive() = session.handle(Event.GearChanged(Gear.DRIVE))
     private fun park() = session.handle(Event.GearChanged(Gear.PARK))
+
+    /**
+     * 달린 뒤 N단(정차 쪽, 주행 제한 없음)에서 내비 도착 알림이 온다. 아직 P단이 아니라 카드가 없고 P단을 기다린다.
+     * (D·R 주행 중 도착은 그 자리에서 카드가 뜨므로 이 테스트들이 다루는 '대기'가 생기지 않는다. DriveSessionExitCardTest 참고)
+     */
+    private fun arriveInNeutral(): List<Effect> {
+        session.handle(Event.GearChanged(Gear.NEUTRAL))
+        return session.handle(Event.DestinationArrived)
+    }
     private fun loc(position: LatLng, ageMillis: Long = 0) = session.handle(Event.LocationChanged(position, ageMillis))
     private fun naviAnswer(position: LatLng) = session.handle(Event.LocationChanged(position, naviAnswer = true))
     private fun List<Effect>.locationTimer() = filterIsInstance<Effect.ScheduleLocationTimeout>().singleOrNull()
@@ -619,7 +628,7 @@ class DriveSessionLocationTest {
         drive()
         loc(AWAY)
         loc(NEAR_HOME)
-        session.handle(Event.DestinationArrived)
+        arriveInNeutral()
         val parked = park()
         // 카드는 먼저 기다린 내비 도착(고객 미팅) 하나뿐이고 집 하차 카드는 없다.
         assertEquals("고객 미팅 메모에 ‘계약서 2부’가 있어요.", parked.exitCard()!!.voice)
@@ -639,7 +648,7 @@ class DriveSessionLocationTest {
         boardAndAccept()
         drive()
         loc(NEAR_HOME)
-        session.handle(Event.DestinationArrived)
+        arriveInNeutral()
         session.handle(Event.RestrictionChanged(true))
         val parked = park()
         assertTrue(parked.noExitCard())
@@ -655,7 +664,7 @@ class DriveSessionLocationTest {
         drive()
         loc(AWAY)
         loc(NEAR_HOME)
-        session.handle(Event.DestinationArrived)
+        arriveInNeutral()
         val parked = park()
         assertEquals(1, parked.filterIsInstance<Effect.ShowCard>().size)
         assertFalse(parked.savedSnapshot()!!.homeCardShown)
@@ -735,7 +744,7 @@ class DriveSessionLocationTest {
         begin(schedule("a", "고객 미팅", 30, memo = "계약서 2부"))
         boardAndAccept()
         drive()
-        session.handle(Event.DestinationArrived)
+        arriveInNeutral()
         session.handle(Event.GearChanged(Gear.NEUTRAL))
         session.handle(Event.GearChanged(Gear.DRIVE))
         assertNotNull(park().exitCard())
@@ -1047,7 +1056,7 @@ class DriveSessionLocationTest {
         begin(schedule("a", "고객 미팅", 30, memo = "계약서 2부"))
         boardAndAccept()
         drive()
-        val saved = session.handle(Event.DestinationArrived).savedSnapshot()!!
+        val saved = arriveInNeutral().savedSnapshot()!!
         assertEquals("a", saved.exitTargetId)
         assertFalse(saved.exitByLocation)
         session = DriveSession(clock, { ScheduleSnapshot(schedules, favorites = favorites) }, restored = saved)
