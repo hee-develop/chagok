@@ -85,7 +85,10 @@ class DriveSessionExitCardTest {
 
     /** 탑승 → 소요 시간 응답까지 진행해 카드를 띄운다. */
     private fun boardWithCard(): List<Effect> {
-        val request = session.handle(Event.Boarded).one<Effect.RequestTravelTime>()
+        var boarded = session.handle(Event.Boarded)
+        // 일정 겹침(시간이 겹치는 두 일정이 서로 다른 곳)이면 먼저인 일정(주 버튼)을 고른다. 이 테스트들은 먼저인 고객 미팅을 길안내하는 것이 전제다.
+        if (boarded.none { it is Effect.RequestTravelTime }) boarded = session.handle(Event.PrimaryPressed)
+        val request = boarded.one<Effect.RequestTravelTime>()
         return session.handle(Event.TravelTimeResult(request.requestId, null))
     }
 

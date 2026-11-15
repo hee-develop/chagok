@@ -62,6 +62,25 @@ object Rules {
     /** 집 하차 카드에 올리는 픽업 물건의 최대 개수. 큰 문구가 두 줄 안에 들게 하려는 표시 한도다. */
     const val HOME_ITEMS_MAX = 3
 
+    /**
+     * 장소 칸이 빈 일정이 대상이 되는 때: 시작 이만큼 전부터(정책서 12장 '장소 묻는 때', 가안). 그 전에는 대상에서 건너뛰고 다음 일정을 본다.
+     * 출발 제안이 목적지를 다시 묻는 여유([ASK_DESTINATION_LEAD], 60분)와 같은 값이라 그대로 쓴다.
+     */
+    val PLACE_BLANK_LEAD: Duration = ASK_DESTINATION_LEAD
+
+    /** 일정 장소가 지금 차 위치에서 이 거리(미터) 안이면 '이미 그곳'이라 대상에서 뺀다(정책서 12장 '이미 그곳 반경', 가안). */
+    const val ALREADY_THERE_RADIUS_METERS = 300.0
+
+    /**
+     * 일정 겹침 판단에 쓰는 이동 속도(km/h, 가안). 내비가 일정 A→B의 소요 시간을 주지 않아 A 장소와 B 장소의 직선거리를 이 속도로 나눠 이동 시간으로 본다.
+     * 직선거리 ÷ 시속 30km는 시내 이동 기준이라 장거리(고속도로)에서는 겹침을 실제보다 많이 잡는다. 정책서 12장에 가안으로 추가할 값이다.
+     */
+    const val OVERLAP_SPEED_KMH = 30.0
+
+    /** 직선거리(미터)를 [OVERLAP_SPEED_KMH]로 가는 시간. 일정 겹침 판단에만 쓴다. */
+    fun overlapTravel(distanceMeters: Double): Duration =
+        Duration.ofMillis(Math.round(distanceMeters / (OVERLAP_SPEED_KMH / 3.6) * 1000))
+
     val DEPARTURE_BUFFER: Duration = Duration.ofMinutes(10)
     const val CHATTER_OVER_WORDS = 4
 

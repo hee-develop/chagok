@@ -31,6 +31,36 @@ class PhrasesTest {
     private val game = sched("g", "KIA 직관", "17:00", place = "광주-기아 챔피언스필드")
     private val pickup = sched("p", "콩물 픽업", "21:00", place = "단골 콩물집")
 
+    @Test fun `대상 일정이 앞 세 줄 밖이면 대상 일정부터 보여 다음 일정 강조가 늘 보인다`() {
+        val a = sched("a", "치과", "09:00")
+        val b = sched("b", "미용실", "10:00")
+        val c = sched("c", "세차", "11:00")
+        val d = sched("d", "점심 약속", "12:00", place = "서울시청")
+        val e = sched("e", "저녁 약속", "19:00", place = "강남역")
+        // 앞의 셋은 장소 빈 칸·이미 그곳이라 대상에서 빠졌고 대상은 넷째 일정이다.
+        val tiles = card(briefing(Briefing.Level.FULL, d, upcoming = listOf(a, b, c, d, e)), Question.Depart(d), "08:00").tiles
+        val rows = (tiles.first() as TileView.Schedules).rows
+        assertEquals(listOf("12:00" to true, "19:00" to false), rows.map { it.time to it.next })
+        // 대상이 앞 세 줄 안이면 지금처럼 맨 앞부터이고 대상 한 줄만 강조된다.
+        val inside = card(briefing(Briefing.Level.FULL, b, upcoming = listOf(a, b, c, d)), Question.Depart(b), "08:00").tiles
+        assertEquals(listOf("09:00" to false, "10:00" to true, "11:00" to false), (inside.first() as TileView.Schedules).rows.map { it.time to it.next })
+        // 대상이 없는 목록(일정 없음)에는 오늘 일정 타일 자체가 없다: 일정 없음은 후보 묻기 카드다.
+        val none = card(briefing(Briefing.Level.FULL, null, upcoming = emptyList()), Question.AskDestination(AskReason.NO_SCHEDULE), "08:00")
+        assertTrue(none.tiles.none { it is TileView.Schedules })
+    }
+
+    @Test fun `겹침 카드에서 고르는 이름은 화면에 보인 줄임 이름도 포함하고 못 알아들었을 때 문구는 겹침에 맞는다`() {
+        val long = sched("l", "아주아주긴제목의 점심약속입니다 확인", "12:00", place = "서울시청")
+        val short = sched("s", "짧은 모임", "13:00", place = "강남역")
+        val overlap = Question.Overlap(long, short)
+        assertEquals(listOf(long.title, short.title), Phrases.choiceNames(overlap))
+        assertEquals(listOf(Phrases.shortTitle(long.title).trimEnd('…'), null), Phrases.choiceShortForms(overlap))
+        assertEquals(emptyList<String?>(), Phrases.choiceShortForms(Question.Depart(long)))
+        assertEquals(Phrases.ASK_AGAIN_PICK, Phrases.askAgain(overlap))
+        assertEquals(Phrases.ASK_AGAIN, Phrases.askAgain(Question.Depart(long)))
+        assertEquals(Phrases.ASK_AGAIN, Phrases.askAgain(null))
+    }
+
     @Test fun `제목 조사는 받침에 따라 이에요 또는 예요`() {
         assertEquals("고객 미팅이에요", Phrases.iEyo("고객 미팅"))
         assertEquals("치과예요", Phrases.iEyo("치과"))
@@ -235,6 +265,68 @@ class PhrasesTest {
         assertEquals("광주 육전집으로", c.primary)
         assertEquals(listOf("광주 육전집", "회사"), Phrases.candidateNames(q))
         assertEquals(q.candidates.size, Phrases.candidateNames(q).size)
+    }
+
+    @Test fun `대안으로 한 곳만 보일 때는 그 후보를 묻고 후보 이름도 그 하나다`() {
+        val all = Question.AskDestination(AskReason.NO_SCHEDULE, favorites = listOf(home, work, station))
+        val alt = checkNotNull(all.nextAlternative())
+        val c = card(briefing(Briefing.Level.FULL, null, emptyList()), alt, "09:00")
+        assertEquals("회사로 갈까요?", c.voice)
+        assertEquals(listOf<TileView>(TileView.Candidates("자주 가는 곳", listOf(CandidateRow("회사", "광주 예시 업무지구")))), c.tiles)
+        assertEquals("회사로", c.primary)
+        assertEquals("그냥 갈게", c.secondary)
+        assertEquals(listOf("회사"), Phrases.candidateNames(alt))
+        assertEquals(listOf(work.place), alt.candidates)
+        assertEquals("광주송정역으로 갈까요?", card(briefing(Briefing.Level.FULL, null, emptyList()), checkNotNull(alt.nextAlternative()), "09:00").voice)
+        // 마지막 후보 뒤에는 없다.
+        assertNull(alt.nextAlternative()?.nextAlternative())
+    }
+
+    @Test fun `여유 많음의 대안은 일정 장소 다음 후보부터이고 일정 장소 말은 다시 하지 않는다`() {
+        val meeting = sched("m", "육전집 점심", "13:30", place = "광주 육전집")
+        val q = Question.AskDestination(AskReason.PLENTY_OF_TIME, meeting, at("12:50"), listOf(work, station))
+        val alt = checkNotNull(q.nextAlternative())
+        val c = card(briefing(Briefing.Level.FULL, meeting), alt, "09:00")
+        assertEquals("회사로 갈까요?", c.voice)
+        assertEquals(listOf<TileView>(TileView.Candidates("갈 곳", listOf(CandidateRow("회사", "광주 예시 업무지구")))), c.tiles)
+        assertEquals("회사로", c.primary)
+    }
+
+    @Test fun `후보가 하나이거나 없거나 장소 모름은 대안이 없다`() {
+        assertNull(Question.AskDestination(AskReason.NO_SCHEDULE, favorites = listOf(home)).nextAlternative())
+        assertNull(Question.AskDestination(AskReason.NO_SCHEDULE).nextAlternative())
+        assertNull(Question.AskDestination(AskReason.PLACE_UNKNOWN, sched("c", "치과", "13:00"), favorites = listOf(home)).nextAlternative())
+        val meeting = sched("m", "육전집 점심", "13:30", place = "광주 육전집")
+        assertNull(Question.AskDestination(AskReason.PLENTY_OF_TIME, meeting, at("12:50")).nextAlternative())
+    }
+
+    @Test fun `일정 겹침 문구는 받침에 맞게 와 과를 쓰고 긴 제목은 줄인다`() {
+        val a = sched("a", "KIA 직관", "17:00", place = "챔피언스필드")
+        val b = sched("b", "콩물 픽업", "17:30", place = "콩물집")
+        assertEquals("‘KIA 직관’과 ‘콩물 픽업’이 겹쳐요.", Phrases.overlapVoice(a, b))
+        val c = sched("c", "점심", "12:00", place = "육전집")
+        assertEquals("‘점심’과 ‘KIA 직관’이 겹쳐요.", Phrases.overlapVoice(c, a))
+        val d = sched("d", "저녁 모임", "19:00", place = "식당")
+        val e = sched("e", "병원", "19:30", place = "병원")
+        assertEquals("‘저녁 모임’과 ‘병원’이 겹쳐요.", Phrases.overlapVoice(d, e))
+        val f = sched("f", "친구 만나기", "19:30", place = "카페")
+        val g = sched("g", "회의", "19:00", place = "회사")
+        assertEquals("‘회의’와 ‘친구 만나기’가 겹쳐요.", Phrases.overlapVoice(g, f))
+        val long = sched("l", "아주아주아주아주긴일정제목입니다", "19:00", place = "어딘가")
+        assertTrue(Phrases.overlapVoice(long, f).startsWith("‘아주아주아주아주긴일정…’"))
+    }
+
+    @Test fun `일정 겹침 카드는 제목으로 고르는 이름과 두 줄 타일을 가진다`() {
+        val a = sched("a", "KIA 직관", "17:00", place = "챔피언스필드")
+        val b = sched("b", "콩물 픽업", "17:30", place = "콩물집")
+        val q = Question.Overlap(a, b)
+        val c = card(briefing(Briefing.Level.FULL, a), q, "09:00")
+        assertEquals("어디로 갈까요?", c.sub)
+        assertEquals("KIA 직관으로", c.primary)
+        assertEquals("콩물 픽업으로", c.secondary)
+        assertEquals(listOf("KIA 직관", "콩물 픽업"), Phrases.choiceNames(q))
+        assertEquals(listOf("KIA 직관", "콩물 픽업"), (c.tiles.single() as TileView.Candidates).rows.map { it.name })
+        assertEquals("‘KIA 직관’과 ‘콩물 픽업’이 겹쳐요. 어디로 갈까요?", Phrases.spoken(c))
     }
 
     @Test fun `장소 모름은 후보 이름이 없다`() {

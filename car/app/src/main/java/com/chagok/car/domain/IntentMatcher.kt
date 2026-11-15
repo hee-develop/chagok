@@ -32,10 +32,12 @@ object IntentMatcher {
 
     /**
      * @param candidates 화면에 보인 후보 이름(장소 후보, 일정 겹침). 순서가 Pick.index다.
+     * @param shortForms 후보의 화면에 보인 줄임 이름(말줄임 앞부분). [candidates]와 같은 순서이고 줄이지 않은 후보는 null이다.
+     *   화면에 보인 만큼만 읽어 말해도 그 후보를 고르게 한다(일정 겹침 카드의 긴 제목).
      * @param acceptPick 수락("응")이 가리키는 후보 번호. "응, 서울시청"처럼 수락과 그 후보 고르기가
      *   같이 들리면 같은 결과이므로 Pick(acceptPick) 하나로 합친다. 후보가 없으면 null
      */
-    fun match(utterance: String, candidates: List<String> = emptyList(), acceptPick: Int? = null): Intent {
+    fun match(utterance: String, candidates: List<String> = emptyList(), acceptPick: Int? = null, shortForms: List<String?> = emptyList()): Intent {
         val tokens = utterance.lowercase()
             .replace(PUNCTUATION, " ")
             .split(WHITESPACE)
@@ -51,8 +53,11 @@ object IntentMatcher {
             if (stems.any { it.startsWith("다른") }) add(Intent.Alternative)
             ORDINALS.forEachIndexed { i, words -> if (words.any { it in joined }) add(Intent.Pick(i)) }
             // 한 후보 이름이 다른 후보 이름 안에 들어 있으면("집"과 "단골 콩물집") 둘 다 들렸을 때 긴 이름만 고른다.
-            val keys = candidates.map { it.lowercase().replace(PUNCTUATION, "").replace(WHITESPACE, "") }
-            val heard = keys.withIndex().filter { (_, key) -> key.isNotEmpty() && key in joined }
+            // 후보마다 줄이지 않은 이름과 화면에 보인 줄임 이름 중 들린 것 가운데 가장 긴 것을 그 후보가 들린 이름으로 본다.
+            val heard = candidates.indices.mapNotNull { i ->
+                val names = listOfNotNull(candidates[i], shortForms.getOrNull(i)).map { it.lowercase().replace(PUNCTUATION, "").replace(WHITESPACE, "") }
+                names.filter { it.isNotEmpty() && it in joined }.maxByOrNull { it.length }?.let { i to it }
+            }
             heard.filterNot { (i, key) -> heard.any { (j, other) -> j != i && other.length > key.length && key in other } }
                 .forEach { (i, _) -> add(Intent.Pick(i)) }
         }

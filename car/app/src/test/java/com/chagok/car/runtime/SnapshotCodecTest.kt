@@ -1,6 +1,8 @@
 package com.chagok.car.runtime
 
 import com.chagok.car.domain.BoardingLog
+import com.chagok.car.domain.PendingReask
+import com.chagok.car.domain.ReaskKind
 import com.chagok.car.domain.ScheduleStatus
 import com.chagok.car.flow.Snapshot
 import org.junit.Assert.assertEquals
@@ -19,14 +21,18 @@ class SnapshotCodecTest {
             ),
             statuses = mapOf("a" to ScheduleStatus.ARRIVED, "b" to ScheduleStatus.SKIPPED, "c" to ScheduleStatus.LATE),
             date = LocalDate.of(2026, 12, 3),
-            noticeDate = LocalDate.of(2026, 12, 3),
         )
         assertEquals(snapshot, SnapshotCodec.decode(SnapshotCodec.encode(snapshot)))
     }
 
-    @Test fun `안내 날짜가 없는 이전 저장분도 복원한다`() {
+    @Test fun `이전 저장분의 안내 날짜 칸은 무시하고 나머지를 복원한다`() {
         val old = """{"date":"2026-12-03","statuses":{},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false}}"""
-        assertEquals(Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3), null), SnapshotCodec.decode(old))
+        assertEquals(Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3)), SnapshotCodec.decode(old))
+        // 일정 안내 카드를 없앤 뒤에도 그 전에 저장한 noticeDate 칸이 있어도 깨지지 않는다.
+        assertEquals(
+            Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3)),
+            SnapshotCodec.decode(old.dropLast(1) + ""","noticeDate":"2026-12-03"}"""),
+        )
     }
 
     @Test fun `하차 카드 대기도 저장하고 복원한다`() {
@@ -134,5 +140,41 @@ class SnapshotCodecTest {
         val brokenDecoded = SnapshotCodec.decode(broken)!!
         assertEquals("a", brokenDecoded.exitTargetId)
         assertEquals(false, brokenDecoded.exitByLocation)
+    }
+
+    @Test fun `다시 물을 질문도 저장하고 복원하며 이전 저장분은 없음이다`() {
+        val withId = Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3), reask = PendingReask(ReaskKind.DEPART_LATE, "cal:1,2"))
+        assertEquals(withId, SnapshotCodec.decode(SnapshotCodec.encode(withId)))
+        val noId = Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3), reask = PendingReask(ReaskKind.ASK_DESTINATION, null))
+        assertEquals(noId, SnapshotCodec.decode(SnapshotCodec.encode(noId)))
+        assertNull(SnapshotCodec.decode(SnapshotCodec.encode(Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3))))!!.reask)
+
+        // 이 칸이 생기기 전 저장분
+        val old = """{"date":"2026-12-03","statuses":{"a":"ARRIVED"},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false},"noticeDate":null,"exitTargetId":"a","exitArrivedAt":5,"exitByLocation":true}"""
+        val decoded = SnapshotCodec.decode(old)!!
+        assertNull(decoded.reask)
+        assertEquals("a", decoded.exitTargetId)
+    }
+
+    @Test fun `다시 물을 질문 칸만 손상되거나 모르는 갈래여도 나머지 상태는 살린다`() {
+        val base = """"date":"2026-12-03","statuses":{"a":"ARRIVED"},"log":{"lastBoardedOn":"2026-12-03","lastParkedAt":null,"parkedAfterDriveSinceBoarding":true},"exitTargetId":"a","exitArrivedAt":5"""
+        for (broken in listOf(
+            """"reask":"depart"""",
+            """"reask":{"kind":"NO_SUCH_KIND","scheduleId":"a"}""",
+            """"reask":{"scheduleId":"a"}""",
+            """"reask":[1]""",
+        )) {
+            val decoded = SnapshotCodec.decode("{$base,$broken}")!!
+            assertNull(broken, decoded.reask)
+            assertEquals(mapOf("a" to ScheduleStatus.ARRIVED), decoded.statuses)
+            assertEquals("a", decoded.exitTargetId)
+        }
+        // 일정 ID가 문자열도 null도 아니면(숫자·객체) 일정 없는 질문으로 잘못 읽지 않고 칸 전체를 버린다.
+        for (badId in listOf("123", "true", """{"a":1}""", "[1]")) {
+            assertNull(badId, SnapshotCodec.decode("""{$base,"reask":{"kind":"DEPART","scheduleId":$badId}}""")!!.reask)
+        }
+        // 일정 ID가 null이거나 없으면 일정 없는 질문(후보 묻기)이다.
+        assertEquals(PendingReask(ReaskKind.ASK_DESTINATION, null), SnapshotCodec.decode("""{$base,"reask":{"kind":"ASK_DESTINATION","scheduleId":null}}""")!!.reask)
+        assertEquals(PendingReask(ReaskKind.ASK_DESTINATION, null), SnapshotCodec.decode("""{$base,"reask":{"kind":"ASK_DESTINATION"}}""")!!.reask)
     }
 }

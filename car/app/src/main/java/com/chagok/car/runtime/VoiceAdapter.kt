@@ -205,14 +205,15 @@ class VoiceAdapter(
     private fun retryInitialize(attempt: Int) {
         if (attempt < MAX_INIT_RETRIES) {
             main.postDelayed({ if (!closed && textToSpeech == null) initialize(attempt + 1) }, RETRY_TOKEN, INIT_RETRY_DELAY_MILLIS)
-        } else {
-            deferred.cancel()
+        } else if (deferred.cancel()) {
+            // 초기화에 끝내 실패해 붙들어 둔 말을 버렸다: 말하지 못한 것이다.
+            sink(Event.SpeechUnavailable)
         }
     }
 
     /**
      * 말한다. 닫혔으면 버리고(포커스도 잡지 않는다), TTS가 초기화되기 전이면 준비될 때까지 붙들어 둔다.
-     * 포커스를 얻지 못해도 말하지 않는다. 화면 표시는 세션이 따로 한다.
+     * 포커스를 얻지 못해도 말하지 않는다(세션에는 [Event.SpeechUnavailable]로 알린다). 화면 표시는 세션이 따로 한다.
      */
     override fun speak(text: String, thenListen: Boolean) {
         if (closed) {
@@ -231,7 +232,11 @@ class VoiceAdapter(
         stopAll()
         val result = audioManager.requestAudioFocus(focusRequest)
         Log.i(TAG, "오디오 포커스(MAY_DUCK) 결과=$result")
-        if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return
+        if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            // 말하지 못했다고 세션에 알린다. 다시 묻는 카드였다면 그 '한 번'의 기회를 쓴 것으로 치지 않는다.
+            sink(Event.SpeechUnavailable)
+            return
+        }
 
         val token = speech.begin(utterance.thenListen)
         onSpeaking(true)

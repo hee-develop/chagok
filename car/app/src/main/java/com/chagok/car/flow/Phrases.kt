@@ -3,6 +3,7 @@ package com.chagok.car.flow
 import com.chagok.car.domain.AskReason
 import com.chagok.car.domain.Briefing
 import com.chagok.car.domain.BoardingDecision
+import com.chagok.car.domain.DestinationOption
 import com.chagok.car.domain.Favorite
 import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.HomePickup
@@ -30,6 +31,9 @@ import java.time.format.DateTimeFormatter
 object Phrases {
     const val ASK_DEPART = "출발할까요?"
     const val ASK_AGAIN = "다시 말해 줄래요? '응'이나 '아니'로요."
+
+    /** 일정 겹침 카드에서 못 알아들었을 때: 이 카드는 '응·아니'가 아니라 어느 일정인지를 묻는다. */
+    const val ASK_AGAIN_PICK = "다시 말해 줄래요? '첫 번째'나 '두 번째'로요."
     const val USE_SCREEN = "화면에서 눌러 주세요."
     const val NO_ALTERNATIVE = "다른 곳은 찾지 못했어요."
     const val ROUTE_STARTED = "길안내를 시작할게요."
@@ -58,19 +62,26 @@ object Phrases {
     const val HOLD = "잠깐만"
     const val JUST_GO = "그냥 갈게"
 
-    /** 일정 안내 카드의 버튼 */
-    const val CLOSE = "닫기"
-
     // 버튼 줄 오른쪽 끝 음성 힌트 두 줄
     const val HINT_SAY_YES = "“응”이라고 말해도 돼요"
     const val HINT_SAY_JUST_GO = "“그냥 갈게”라고 말해도 돼요"
     const val HINT_AUTO_FOLD = "출발하면 자동으로 접혀요"
+    const val HINT_SAY_PICK = "“첫 번째”, “두 번째”라고 말해도 돼요"
 
     const val ASK_DESTINATION = "어디로 갈까요?"
+
+    /** 대안("다른 데")으로 후보를 하나씩 바꿔 보일 때 그 후보를 묻는 말. 예: "회사로 갈까요?" */
+    fun askAlternative(name: String) = "${ro(name)} 갈까요?"
 
     // 목적지 묻기 후보 타일 머리. 일정 없음은 자주 가는 곳만, 여유 많음은 일정 장소와 자주 가는 곳을 함께 보인다.
     const val FAVORITES_LABEL = "자주 가는 곳"
     const val CANDIDATES_LABEL = "갈 곳"
+
+    /** 일정 겹침 카드의 타일 머리 */
+    const val OVERLAP_LABEL = "겹치는 일정"
+
+    /** 장소 있는 종일 일정이 후보로 올 때 후보 줄의 둘째 글 앞머리: "종일 광주 직관" */
+    const val ALL_DAY = "종일"
 
     // 자주 가는 곳 중 집·회사를 부르는 이름
     const val HOME = "집"
@@ -88,9 +99,6 @@ object Phrases {
 
     /** 위치 권한을 거부했거나 대략 위치(COARSE)만 허용한 경우 같은 안내. 위치 판정만 빠지고 나머지는 그대로다. */
     const val PERMISSION_DENIED = "위치 권한이 없어 위치로 도착을 알 수 없어요. 설정에서 정확한 위치를 허용하면 쓸 수 있어요."
-
-    // 일정 안내 카드
-    const val SCHEDULE_UNAVAILABLE = "일정을 불러오지 못했어요. 연결을 확인해 주세요."
 
     private const val RIEUL = 8
 
@@ -137,6 +145,11 @@ object Phrases {
     /** "{말}은/는": 받침이 있으면 "은", 없으면 "는". */
     fun eunNeun(word: String): String = word + if (hasBatchim(word)) "은" else "는"
 
+    /** "{말}와/과": 받침이 있으면 "과", 없으면 "와". */
+    fun waGwa(word: String): String = word + waGwaJosa(word)
+
+    private fun waGwaJosa(word: String) = if (hasBatchim(word)) "과" else "와"
+
     private fun iGaJosa(word: String) = if (hasBatchim(word)) "이" else "가"
 
     /** "{장소}로/으로": 받침이 있으면(ㄹ 제외) "으로". */
@@ -166,6 +179,19 @@ object Phrases {
     // ---- 장면별 대사 ----
 
     fun askPlace(title: String) = "'$title' 어디로 가면 될까요?"
+
+    /**
+     * 일정 겹침 큰 문구(정책서 6장 '일정 겹침'): "‘KIA 직관’과 ‘콩물 픽업’이 겹쳐요." 이어서 [ASK_DESTINATION]을 묻는다.
+     * 큰 문구가 두 줄 안에 들게 제목은 [shortTitle]로 줄인다.
+     */
+    fun overlapVoice(first: Schedule, second: Schedule): String {
+        val a = shortTitle(first.title)
+        val b = shortTitle(second.title)
+        return "‘$a’${waGwaJosa(a)} ‘$b’${iGaJosa(b)} 겹쳐요."
+    }
+
+    /** 일정 겹침 버튼 라벨: 말할 수 있는 이름 "{제목}으로". */
+    private fun overlapPick(schedule: Schedule) = ro(shortTitle(schedule.title))
 
     /** 탑승 인사 둘째 문장 "{시각} {일정}까지 {남은 시간}이에요." */
     fun untilStart(target: Schedule, now: Instant, zone: ZoneId): String =
@@ -249,16 +275,47 @@ object Phrases {
     }
 
     /**
-     * 목적지 묻기 후보 이름. 화면 줄·주 버튼·음성 고르기에 같이 쓰고, 순서는 [Question.AskDestination.candidates]와 같다.
-     * 여유 많음은 일정 장소 이름이 1번이다.
+     * 목적지 묻기 후보 이름. 화면 줄·주 버튼·음성 고르기에 같이 쓰고, 순서는 [Question.AskDestination.options]와 같다.
+     * 여유 많음은 일정 장소 이름이 1번이다. 대안으로 한 곳만 보일 때는 그 하나다.
      */
-    fun candidateNames(question: Question.AskDestination): List<String> = when (question.reason) {
-        AskReason.PLENTY_OF_TIME -> listOfNotNull(question.suggested?.place?.name) + question.favorites.map(::favoriteName)
-        AskReason.NO_SCHEDULE -> question.favorites.map(::favoriteName)
-        AskReason.PLACE_UNKNOWN -> emptyList()
+    fun candidateNames(question: Question.AskDestination): List<String> = question.options.map(::optionName)
+
+    /** 못 알아들었을 때 한 번 다시 묻는 문구. 일정 겹침은 어느 일정인지를 묻는 카드라 '첫 번째·두 번째'로 답하게 한다. */
+    fun askAgain(question: Question?): String = if (question is Question.Overlap) ASK_AGAIN_PICK else ASK_AGAIN
+
+    /**
+     * 말로 고를 때 화면에 보인 줄임 이름. [choiceNames]와 같은 순서이고, 큰 문구·버튼에 [shortTitle]로 줄여 보인 일정 겹침의 제목만 있다(말줄임 '…'는 뗀다).
+     * 줄이지 않은 것과 후보 묻기는 null이다.
+     */
+    fun choiceShortForms(question: Question?): List<String?> = when (question) {
+        is Question.Overlap -> listOf(question.first.title, question.second.title).map { title ->
+            shortTitle(title).takeIf { it != title }?.trimEnd('…')
+        }
+        else -> emptyList()
     }
 
-    private fun favoriteRows(favorites: List<Favorite>) = favorites.map { CandidateRow(favoriteName(it), favoriteDetail(it)) }
+    /**
+     * 말로 고를 수 있는 이름: 목적지 묻기는 [candidateNames], 일정 겹침은 두 일정의 제목(순서가 "첫 번째"·"두 번째"). 고를 것이 없는 질문은 빈 목록이다.
+     */
+    fun choiceNames(question: Question?): List<String> = when (question) {
+        is Question.AskDestination -> candidateNames(question)
+        is Question.Overlap -> listOf(question.first.title, question.second.title)
+        else -> emptyList()
+    }
+
+    /** 후보를 부르는 이름: 대상 일정은 장소 이름, 자주 가는 곳은 [favoriteName]. */
+    private fun optionName(option: DestinationOption): String = when (option) {
+        is DestinationOption.OfSchedule -> option.place.name
+        is DestinationOption.OfAllDay -> option.place.name
+        is DestinationOption.OfFavorite -> favoriteName(option.favorite)
+    }
+
+    /** 후보 줄: 이름과 둘째 글(대상 일정은 "13:00 육전집 점심", 자주 가는 곳은 [favoriteDetail]). */
+    private fun optionRow(option: DestinationOption, zone: ZoneId): CandidateRow = when (option) {
+        is DestinationOption.OfSchedule -> CandidateRow(optionName(option), "${time(option.schedule, zone)} ${option.schedule.title}")
+        is DestinationOption.OfAllDay -> CandidateRow(optionName(option), "$ALL_DAY ${option.schedule.title}")
+        is DestinationOption.OfFavorite -> CandidateRow(optionName(option), favoriteDetail(option.favorite))
+    }
 
     // ---- 카드 조립 ----
 
@@ -300,47 +357,51 @@ object Phrases {
                 primary = ACCEPT_DEPART,
                 secondary = HOLD,
             )
-            is Question.AskDestination -> when (q.reason) {
-                // 자주 가는 곳이 없으면 후보 없이 묻는다("응"으로는 고를 곳이 없다).
-                AskReason.NO_SCHEDULE -> if (q.favorites.isEmpty()) {
-                    base.copy(
-                        voice = ASK_DESTINATION,
-                        secondary = JUST_GO,
-                        hints = listOf(HINT_SAY_JUST_GO, HINT_AUTO_FOLD),
-                    )
-                } else {
-                    base.copy(
-                        voice = ASK_DESTINATION,
-                        tiles = listOf(TileView.Candidates(FAVORITES_LABEL, favoriteRows(q.favorites))),
-                        primary = ro(candidateNames(q).first()),
-                        secondary = JUST_GO,
-                    )
-                }
-                AskReason.PLENTY_OF_TIME -> {
-                    val target = checkNotNull(q.suggested)
-                    val departBy = checkNotNull(q.departBy)
-                    val name = target.place?.name.orEmpty()
-                    val line = "${time(target, zone)} ${target.title}"
-                    // 자주 가는 곳이 붙으면 일정 장소를 1번 줄로 둔 후보 목록, 아니면 일정 장소 타일 하나
-                    val tile = if (q.favorites.isEmpty()) {
-                        TileView.PlaceTile(name, line)
-                    } else {
-                        TileView.Candidates(CANDIDATES_LABEL, listOf(CandidateRow(name, line)) + favoriteRows(q.favorites))
-                    }
-                    base.copy(
-                        voice = askDestinationPlenty(target, departBy, zone),
-                        tiles = listOf(tile),
-                        primary = ro(name),
-                        secondary = JUST_GO,
-                    )
-                }
-                AskReason.PLACE_UNKNOWN -> base.copy(
-                    voice = askPlace(q.suggested?.title.orEmpty()),
-                    secondary = JUST_GO,
-                    hints = listOf(HINT_SAY_JUST_GO, HINT_AUTO_FOLD),
-                )
-            }
+            is Question.AskDestination -> askDestinationCard(base, q, zone)
+            is Question.Overlap -> base.copy(
+                voice = overlapVoice(q.first, q.second),
+                sub = ASK_DESTINATION,
+                tiles = listOf(TileView.Candidates(OVERLAP_LABEL, listOf(overlapRow(q.first, zone), overlapRow(q.second, zone)))),
+                primary = overlapPick(q.first),
+                secondary = overlapPick(q.second),
+                hints = listOf(HINT_SAY_PICK, HINT_AUTO_FOLD),
+            )
         }
+    }
+
+    /** 겹치는 일정 한 줄: 제목, 시각과 장소 이름("13:30 광주 육전집"). */
+    private fun overlapRow(schedule: Schedule, zone: ZoneId) = CandidateRow(schedule.title, "${time(schedule, zone)} ${schedule.place?.name.orEmpty()}".trim())
+
+    /**
+     * 목적지 묻기 카드. 일정 없음은 자주 가는 곳, 여유 많음은 일정 장소와 자주 가는 곳을 후보로 보인다(1번 후보가 주 버튼, 보조는 "그냥 갈게").
+     * 후보가 없으면 버튼은 "그냥 갈게"뿐이다. 대안("다른 데")으로 한 곳만 보일 때는 그 후보를 "{이름}으로 갈까요?"로 묻는다.
+     */
+    private fun askDestinationCard(base: CardContent, q: Question.AskDestination, zone: ZoneId): CardContent {
+        if (q.reason == AskReason.PLACE_UNKNOWN) {
+            return base.copy(voice = askPlace(q.suggested?.title.orEmpty()), secondary = JUST_GO, hints = listOf(HINT_SAY_JUST_GO, HINT_AUTO_FOLD))
+        }
+        val options = q.options
+        // 자주 가는 곳이 없으면 후보 없이 묻는다("응"으로는 고를 곳이 없다).
+        if (options.isEmpty()) {
+            return base.copy(voice = ASK_DESTINATION, secondary = JUST_GO, hints = listOf(HINT_SAY_JUST_GO, HINT_AUTO_FOLD))
+        }
+        val first = options.first()
+        val alternative = q.only != null
+        val voice = when {
+            alternative -> askAlternative(optionName(first))
+            q.reason == AskReason.PLENTY_OF_TIME -> askDestinationPlenty(checkNotNull(q.suggested), checkNotNull(q.departBy), zone)
+            else -> ASK_DESTINATION
+        }
+        // 자주 가는 곳만이면 '자주 가는 곳', 일정 장소·종일 일정 장소가 섞이면 '갈 곳'
+        val label = if (q.all.all { it is DestinationOption.OfFavorite }) FAVORITES_LABEL else CANDIDATES_LABEL
+        // 여유 많음에서 자주 가는 곳이 붙지 않았으면 일정 장소 타일 하나, 아니면 후보 목록
+        val tile = if (q.reason == AskReason.PLENTY_OF_TIME && !alternative && options.size == 1) {
+            val row = optionRow(first, zone)
+            TileView.PlaceTile(row.name, row.detail)
+        } else {
+            TileView.Candidates(label, options.map { optionRow(it, zone) })
+        }
+        return base.copy(voice = voice, tiles = listOf(tile), primary = ro(optionName(first)), secondary = JUST_GO)
     }
 
     /**
@@ -501,7 +562,6 @@ object Phrases {
         return if (count <= max) title else title.substring(0, cut).trimEnd() + "…"
     }
 
-    /** 일정을 불러오지 못했을 때 보이는 카드. 닫기 하나. */
     /**
      * 휴대폰과 연결하기 전 카드. QR과 숫자 6자리를 보이고 말하지 않는다. 버튼은 없다(연결되면 접힌다).
      * 숫자는 세 자리씩 띄워 읽기 쉽게 한다.
@@ -513,22 +573,18 @@ object Phrases {
         tiles = listOf(TileView.Pairing(qr = qr, code = if (code.length == 6) "${code.take(3)} ${code.drop(3)}" else code)),
     )
 
-    fun scheduleUnavailableCard() = CardContent(
-        status = STATUS_BEFORE_DEPARTURE,
-        voice = SCHEDULE_UNAVAILABLE,
-        secondary = CLOSE,
-        hints = listOf(HINT_AUTO_FOLD),
-    )
-
     /**
-     * 출발 제안 카드의 타일. 첫 탑승은 오늘 일정(최대 3줄, 첫 번째만 다음 일정) + 채비(짧은 메모·앱 채비),
+     * 출발 제안 카드의 타일. 첫 탑승은 오늘 일정(최대 3줄, 대상 일정 한 줄만 다음 일정) + 채비(짧은 메모·앱 채비),
      * 재탑승(대상 일정 한 줄, 5장)은 채비만 둔다.
      */
     private fun boardingTiles(briefing: Briefing, zone: ZoneId): List<TileView> {
         val tiles = mutableListOf<TileView>()
         if (briefing.level == Briefing.Level.FULL) {
-            val rows = briefing.upcoming.take(MAX_TILE_ROWS)
-                .mapIndexed { i, s -> TileRow(time(s, zone), s.title, next = i == 0) }
+            // 대상 일정이 앞의 3줄 밖(그 앞 일정이 장소 빈 칸·이미 그곳이라 대상에서 빠진 경우)이면 대상 일정부터 보여 '다음 일정' 강조가 늘 보이게 한다.
+            // 대상 일정이 없으면(일정 없음) 이 카드가 아니라 강조도 없다.
+            val targetIndex = briefing.upcoming.indexOfFirst { it.id == briefing.target?.id }
+            val rows = briefing.upcoming.drop(if (targetIndex >= MAX_TILE_ROWS) targetIndex else 0).take(MAX_TILE_ROWS)
+                .map { s -> TileRow(time(s, zone), s.title, next = s.id == briefing.target?.id) }
             if (rows.isNotEmpty()) tiles += TileView.Schedules(rows)
         }
         when (val memo = briefing.memo) {

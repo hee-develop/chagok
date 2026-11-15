@@ -1,0 +1,35 @@
+# 대상 일정 고르기 E2E(docs/target-selection.md). 서버가 떠 있고 debug 앱이 설치된 에뮬레이터에서 돈다(scripts/e2e-car.sh).
+# 일정 장소가 지금 차 위치 300m 안이면(이미 그곳) 대상에서 빼고 다음 일정을 본다. 위치는 loc=위도,경도로 넣는다(방금 측위한 값).
+# 픽스처: 육전집 점심 13:00(광주 육전집 35.1595, 126.8526), KIA 직관 17:00(챔피언스필드). 장면 시각 09:20 KST.
+#   trip=12000(소요 3시간 20분): 점심은 출발 제안, KIA 직관은 출발까지 60분 넘게 남아 "어디로 갈까요?"가 된다.
+# 시각 사이 공백은 화면에서 NBSP라 '.'로 받는다.
+appId: com.chagok.car
+name: 대상 일정 고르기
+env:
+  SHOT_DIR: e2e/output/car
+---
+- launchApp
+
+# 1. 육전집 100m 안에 서 있다 → 점심은 이미 그곳이라 대상에서 빠지고 KIA 직관이 대상(여유가 많아 목적지 묻기)
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&loc=35.1596,126.8527&enter=true
+- extendedWaitUntil:
+    visible: ".*어디로 갈까요.*"
+    timeout: 20000
+- assertVisible: ".*5시 KIA 직관은.*"
+- assertVisible: "광주-기아 챔피언스필드로"
+- assertNotVisible: ".*육전집 점심까지.*"
+- takeScreenshot: ${SHOT_DIR}/01-already-there-skipped
+
+# 2. 육전집에서 멀리(약 5km) 서 있다 → 점심이 대상이라 출발 제안
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&loc=35.2000,126.9000&enter=true
+- extendedWaitUntil:
+    visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
+    timeout: 20000
+- assertVisible: "응, 출발"
+- takeScreenshot: ${SHOT_DIR}/02-far-from-place
+
+# 3. 위치를 모를 때(주입 해제, 에뮬레이터 실제 위치는 일정 장소와 멀다)는 이미 그곳 판정을 건너뛰고 점심이 대상이다
+- openLink: chagok-debug://signal?paired=true&now=2026-11-06T00:20:00Z&trip=12000&route=ok&listen=off&gear=P&loc=real&enter=true
+- extendedWaitUntil:
+    visible: ".*1시 육전집 점심까지 3시간.40분이에요.*"
+    timeout: 20000
