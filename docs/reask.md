@@ -90,4 +90,4 @@
 ## 검증
 
 - `cd car && ./gradlew :app:testDebugUnitTest`: `DriveSessionReaskTest`(다시 묻기·대안), `SnapshotCodecTest`, `PhrasesTest`
-- Maestro `reask.yaml`(`E2E_FLOWS=reask pnpm e2e:car`, 30초를 실제로 기다려 약 2분): 무응답 30초 → 접힘 → 달린 뒤 P단에서 재탑승 한 줄로 한 번 다시 묻기 → 또 무응답이어도 더 묻지 않음(4단계는 데모 시계를 15분 앞으로 보내 '잠깐 정차 P단 제외'에 먼저 걸리지 않게 한 뒤 확인), 거절은 다시 묻지 않음
+- Maestro `reask.yaml`(`E2E_FLOWS=reask pnpm e2e:car`, 30초를 실제로 기다려 약 2분): 무응답 30초 → 접힘 → 달린 뒤 P단에서 재탑승 한 줄로 한 번 다시 묻기 → 또 무응답이어도 더 묻지 않음(4단계는 `advance=15&gear=D`로 데모 시계를 15분 앞으로 보내 '잠깐 정차 P단 제외'에 먼저 걸리지 않게 한 뒤 확인한다. advance를 따로 보내면 신호마다 앱이 다시 앞으로 오는 것이 탑승 판단이 되어 남은 질문을 먼저 소비해 한 번만 규칙이 없어도 통과한다. 이 규칙을 일부러 빼면 4단계가 실패하는 것을 확인했다), 거절은 다시 묻지 않음
