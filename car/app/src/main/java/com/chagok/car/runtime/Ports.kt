@@ -24,6 +24,12 @@ interface Navigator {
     fun requestTravelTime(requestId: Int, place: Place)
     fun startRoute(place: Place): Boolean
 
+    /**
+     * [via](충전소·주유소)를 경유지로 넣고 [place]로 길안내를 요청한다(에너지 제안 수락). [startRoute]와 같이 요청을 내비에 보냈는지를 바로 돌려준다.
+     * 경유지는 한 곳이라 내비의 경유지 한도(최대 2개) 안이다.
+     */
+    fun startRouteVia(place: Place, via: Place): Boolean
+
     /** 현재 위치를 한 번 묻는다(P단 도착 판단). 답은 세션 이벤트(LocationChanged)로 알리고, 내비에 연결 전이면 묻지 않는다. */
     fun requestLocation()
 }
@@ -74,5 +80,23 @@ interface Locator {
         override fun setForeground(foreground: Boolean) = Unit
         override fun setNeeded(needed: Boolean) = Unit
         override fun refreshNow(deliver: (Event) -> Unit) = Unit
+    }
+}
+
+/**
+ * 차의 연료 종류와 주행 가능 거리. 구현은 [EnergyAdapter]. 읽은 값은 세션 이벤트 [Event.EnergyChanged]로 알리고,
+ * 못 읽는 쪽(권한 없음·미지원)은 null이라 세션이 에너지 체크를 하지 않는다(값을 모르면 제안하지 않는다).
+ */
+interface EnergySignals {
+    /** Car에 연결해 값을 읽고 구독한다. 여러 번 불러도 한 번만 시작한다. */
+    fun start()
+
+    /** 구독을 풀고 연결을 끊는다. */
+    fun stop()
+
+    /** 에너지 신호를 쓰지 않는 구성(테스트·미지원). */
+    object None : EnergySignals {
+        override fun start() = Unit
+        override fun stop() = Unit
     }
 }

@@ -1,6 +1,8 @@
 package com.chagok.car
 
 import com.chagok.car.domain.BoardingLog
+import com.chagok.car.domain.EnergyKind
+import com.chagok.car.domain.EnergyRequest
 import com.chagok.car.domain.LatLng
 import com.chagok.car.domain.Place
 import com.chagok.car.domain.Schedule
@@ -101,5 +103,21 @@ class FlowLogTest {
         assertEquals("Heard(len=4)", FlowLog.describe(Event.Heard("응 갈게")))
         assertEquals("Heard(len=0)", FlowLog.describe(Event.Heard("")))
         assertFalse(FlowLog.describe(Event.Heard("비밀 장소")).contains("비밀"))
+    }
+
+    @Test fun `에너지 판단은 필요 거리와 가능 거리와 결과를 한 줄로 적는다`() {
+        assertEquals("에너지: 필요 312km, 가능 180km → 모자람", FlowLog.lineOf(Effect.EnergyJudged(312.4, 180.0, short = true)))
+        assertEquals("에너지: 필요 40km, 가능 500km → 넉넉함", FlowLog.lineOf(Effect.EnergyJudged(40.0, 500.0, short = false)))
+    }
+
+    @Test fun `에너지 후보 요청과 경유 길안내 요청도 한 줄로 적는다`() {
+        val request = EnergyRequest(
+            EnergyKind.EV, LatLng(35.15, 126.91), LatLng(35.16, 126.88), null,
+            java.time.ZonedDateTime.of(2026, 11, 6, 12, 0, 0, 0, java.time.ZoneOffset.ofHours(9)),
+        )
+        assertEquals("에너지 후보 요청: ev", FlowLog.lineOf(Effect.RequestEnergyOptions(3, request)))
+        val place = Place("광주 육전집", LatLng(35.1595, 126.8526))
+        assertEquals("길안내 요청: 광주 육전집", FlowLog.lineOf(Effect.StartRoute(place)))
+        assertEquals("길안내 요청: 광주 육전집 (경유 예시 충전소)", FlowLog.lineOf(Effect.StartRoute(place, Place("예시 충전소", LatLng(35.17, 126.89)))))
     }
 }

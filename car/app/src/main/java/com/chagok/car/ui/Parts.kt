@@ -258,6 +258,13 @@ fun contextTile(context: Context, d: DesignScale, tile: TileView, onPick: (Int) 
         addView(d.text(R.style.t_body, d.color(R.color.ink)).apply { text = tile.name; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
         addView(d.text(R.style.t_body, d.color(R.color.ink_2)).apply { text = tile.line; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
     }
+    is TileView.EnergyStop -> tileBase(context, d, d.dimenInt(R.dimen.tile_gap)).apply {
+        addView(d.text(R.style.t_label, d.color(R.color.ink_3)).apply { text = tile.label })
+        addView(d.text(R.style.t_body, d.color(R.color.ink)).apply { text = tile.name; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
+        if (tile.line.isNotEmpty()) {
+            addView(d.text(R.style.t_body, d.color(R.color.ink_2)).apply { text = tile.line; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
+        }
+    }
     // 고정 높이 카드에 줄 세 개가 들어가도록 세로 패딩을 줄이고 줄 사이 간격 없이 붙인다(줄 높이가 터치 영역이다).
     is TileView.Candidates -> tileBase(context, d, d.dimenInt(R.dimen.tile_gap)).apply {
         val h = d.dimenInt(R.dimen.space_xl)

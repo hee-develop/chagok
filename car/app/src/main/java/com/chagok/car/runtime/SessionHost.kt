@@ -14,7 +14,9 @@ import com.chagok.car.FlowLog
 import com.chagok.car.domain.Gear
 import com.chagok.car.flow.DriveSession
 import com.chagok.car.flow.Effect
+import com.chagok.car.flow.EnergyOptionsFetcher
 import com.chagok.car.flow.Event
+import com.chagok.car.flow.HttpEnergyFetcher
 import com.chagok.car.flow.HttpPairingClient
 import com.chagok.car.flow.HttpScheduleFetcher
 import com.chagok.car.flow.PairingClient
@@ -52,6 +54,8 @@ class Adapters(
     val signals: VehicleSignals,
     /** 차 위치. 위치를 쓰지 않는 구성(계측 테스트)은 [Locator.None]. */
     val location: Locator = Locator.None,
+    /** 연료 종류·주행 가능 거리. 읽지 않는 구성(계측 테스트)은 [EnergySignals.None]이라 에너지 체크를 하지 않는다. */
+    val energy: EnergySignals = EnergySignals.None,
 )
 
 /**
@@ -70,6 +74,8 @@ class SessionHost(
     val clock: DemoClock = DemoClock(),
     fetcher: ScheduleFetcher = HttpScheduleFetcher(BuildConfig.SERVER_URL),
     pairingClient: PairingClient = HttpPairingClient(BuildConfig.SERVER_URL),
+    /** 충전·주유 후보를 서버(`POST /energy/options`)에서 받아 오는 곳. 에너지가 모자랄 때만 부른다. */
+    energyFetcher: EnergyOptionsFetcher = HttpEnergyFetcher(BuildConfig.SERVER_URL),
     adapters: (
         post: (Event) -> Unit,
         onSpeaking: (Boolean) -> Unit,
@@ -83,6 +89,7 @@ class SessionHost(
                     voice = VoiceAdapter(context, post, onSpeaking, onDucking),
                     signals = CarSignals(context, post, onIgnitionSupport),
                     location = LocationAdapter(context, DebugHooks.locationSink(post)),
+                    energy = EnergyAdapter(context, DebugHooks.energySink(post)),
                 ),
                 post,
                 clock,
@@ -101,7 +108,7 @@ class SessionHost(
         allowed = { store.paired },
     )
     // 앱 화면은 아직 앞에 오지 않았다(Application 범위로 먼저 만들어진다). 앞에 오면 [onActivityResumed]가 알린다.
-    private val session = DriveSession(clock, source, store.load(), paired = store.paired, exitCardTimeout = DebugHooks::exitCardDuration, foreground = false)
+    private val session = DriveSession(clock, DebugHooks.scheduleSource(source), store.load(), paired = store.paired, exitCardTimeout = DebugHooks::exitCardDuration, foreground = false)
     // 서버가 연결 해제를 확인하면(앱이 앞으로 올 때 [PairingController.verify]) 받아 둔 일정·집 좌표와 저장된 사본을 지운다.
     private val pairing = PairingController(pairingClient, store, ::post, onReleased = { source.clear() })
     private val refresher = ScheduleRefresher(source, ::post, ::dispatch)
@@ -114,6 +121,8 @@ class SessionHost(
     private val voice = parts.voice
     private val carSignals = parts.signals
     private val location = parts.location
+    private val energy = parts.energy
+    private val energyRequester = EnergyRequester(energyFetcher, ::post)
     private val sources = SourceStarter(carSignals, location)
 
     var ui = UiState()
@@ -149,6 +158,7 @@ class SessionHost(
         voice.start()
         // 기어·시동은 런타임 권한과 무관하다. 위치 권한을 묻는 중이거나 거부해도 늘 읽는다(위치만 [startPermissionGatedSources]가 권한 결정 뒤에 켠다).
         sources.startAtLaunch()
+        energy.start()
         registerShutdownReceiver()
         registerClockReceiver()
         refreshSchedules()
@@ -300,6 +310,7 @@ class SessionHost(
                 navi.stop()
                 voice.stop()
                 location.stop()
+                energy.stop()
                 suspended = true
             }
             Effect.ExitSuspend -> {
@@ -307,10 +318,17 @@ class SessionHost(
                 voice.start()
                 // 권한을 다시 확인하고 켠다(Suspend 중에 권한이 바뀌었을 수 있다). 권한이 없으면 아무것도 하지 않는다.
                 location.start()
+                energy.start()
                 suspended = false
             }
             is Effect.RequestTravelTime -> navi.requestTravelTime(effect.requestId, effect.place)
-            is Effect.StartRoute -> post(Event.RouteRequestResult(navi.startRoute(effect.place)))
+            is Effect.StartRoute -> {
+                val via = effect.via
+                post(Event.RouteRequestResult(if (via != null) navi.startRouteVia(effect.place, via) else navi.startRoute(effect.place)))
+            }
+            is Effect.RequestEnergyOptions -> energyRequester.request(effect.requestId, effect.request)
+            // 로그용 판단 결과(FlowLog가 읽는다). 실행할 일은 없다.
+            is Effect.EnergyJudged -> Unit
             Effect.RequestLocation -> navi.requestLocation()
             is Effect.Save -> store.save(effect.snapshot)
             Effect.RefreshSchedules -> refreshRequested = true

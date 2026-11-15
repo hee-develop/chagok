@@ -14,6 +14,8 @@ data class PendingReask(val kind: ReaskKind, val scheduleId: String? = null) {
     companion object {
         fun of(question: Question): PendingReask = when (question) {
             is Question.Depart -> PendingReask(ReaskKind.DEPART, question.target.id)
+            // 에너지 제안은 하루 한 번이라 다시 물을 때는 에너지 없는 출발 제안으로 돌아간다(그날 이미 물었다).
+            is Question.Energy -> PendingReask(ReaskKind.DEPART, question.target.id)
             is Question.DepartLate -> PendingReask(ReaskKind.DEPART_LATE, question.target.id)
             is Question.AskDestination -> PendingReask(ReaskKind.ASK_DESTINATION, question.suggested?.id)
             is Question.Overlap -> PendingReask(ReaskKind.OVERLAP, question.first.id)

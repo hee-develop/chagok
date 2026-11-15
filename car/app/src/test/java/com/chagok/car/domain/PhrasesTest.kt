@@ -635,4 +635,56 @@ class PhrasesTest {
         // 화면의 큰 문구와 타일은 그대로다.
         assertEquals(3, (Phrases.homeExitCard(long).tiles.single() as TileView.Care).items.size)
     }
+
+    private fun energyQuestion(kind: EnergyKind, stop: EnergyStop, goal: EnergyGoal = EnergyGoal.HOME, km: Int = 300, mealBundle: Boolean = false, index: Int = 0, stops: List<EnergyStop> = listOf(stop)) =
+        Question.Energy(game, kind, km, goal, stops, index = index, mealBundle = mealBundle)
+
+    private val slow = EnergyStop("s", EnergyStopKind.SLOW_CHARGER, Place("예시 챔필 주차장 충전소", LatLng(0.0, 0.0)), availableCount = 2, totalCount = 3, powerKw = 7)
+    private val fast = EnergyStop("f", EnergyStopKind.FAST_CHARGER, Place("예시 백양 휴게소", LatLng(0.0, 0.0)), availableCount = 0, totalCount = 2)
+    private val gas = EnergyStop("g", EnergyStopKind.GAS_STATION, Place("예시 서구 알뜰주유소", LatLng(0.0, 0.0)), priceWon = 1639, priceFuel = "gasoline")
+
+    @Test fun `에너지 제안 큰 문구는 전기차와 기름 차가 다르다`() {
+        assertEquals("집까지 300km인데 배터리로는 모자라요.", Phrases.energyShortage(energyQuestion(EnergyKind.EV, slow)))
+        assertEquals("집까지 300km인데 기름이 모자라요.", Phrases.energyShortage(energyQuestion(EnergyKind.GASOLINE, gas)))
+        assertEquals("집까지 300km인데 기름이 모자라요.", Phrases.energyShortage(energyQuestion(EnergyKind.DIESEL, gas)))
+        assertEquals("집까지 300km인데 기름이 모자라요.", Phrases.energyShortage(energyQuestion(EnergyKind.HYBRID, gas)))
+        assertEquals("오늘 일정까지 41km인데 배터리로는 모자라요.", Phrases.energyShortage(energyQuestion(EnergyKind.EV, slow, EnergyGoal.LAST_SCHEDULE, 41)))
+    }
+
+    @Test fun `에너지 제안 질문은 충전 식사 묶음 주유가 다르다`() {
+        assertEquals("예시 챔필 주차장 충전소에서 충전하고 갈까요?", Phrases.energyAsk(energyQuestion(EnergyKind.EV, slow)))
+        assertEquals("예시 백양 휴게소에서 충전하고 갈까요?", Phrases.energyAsk(energyQuestion(EnergyKind.EV, fast)))
+        assertEquals("예시 백양 휴게소에서 식사하면서 충전하고 갈까요?", Phrases.energyAsk(energyQuestion(EnergyKind.EV, fast, mealBundle = true)))
+        // 식사 묶음은 맨 앞 후보에만 뜻이 있다(대안으로 바꾼 뒤에는 충전만)
+        assertEquals("예시 챔필 주차장 충전소에서 충전하고 갈까요?", Phrases.energyAsk(energyQuestion(EnergyKind.EV, fast, mealBundle = true, index = 1, stops = listOf(fast, slow))))
+        assertEquals("예시 서구 알뜰주유소에서 넣고 갈까요?", Phrases.energyAsk(energyQuestion(EnergyKind.GASOLINE, gas)))
+    }
+
+    @Test fun `에너지 제안 카드는 버튼 힌트 후보 타일을 둔다`() {
+        val b = briefing(Briefing.Level.ONE_LINE, game)
+        val ev = card(b, energyQuestion(EnergyKind.EV, slow), "16:00")
+        assertEquals("응, 충전하고 출발", ev.primary)
+        assertEquals("잠깐만", ev.secondary)
+        assertEquals(listOf(Phrases.HINT_SAY_YES, Phrases.HINT_SAY_OTHER), ev.hints)
+        assertEquals(TileView.EnergyStop("일정 근처 충전소", "예시 챔필 주차장 충전소", "완속 7kW · 빈 충전기 2대"), ev.tiles.single())
+        val g = card(b, energyQuestion(EnergyKind.GASOLINE, gas), "16:00")
+        assertEquals("응, 넣고 출발", g.primary)
+        assertEquals(TileView.EnergyStop("주유소", "예시 서구 알뜰주유소", "휘발유 1,639원/L"), g.tiles.single())
+        // 모두 충전 중이면 그렇게 말하고, 낡은 데이터면 빈 곳을 말하지 않는다
+        assertEquals("급속 · 모두 충전 중", (card(b, energyQuestion(EnergyKind.EV, fast), "16:00").tiles.single() as TileView.EnergyStop).line)
+        val stale = card(b, energyQuestion(EnergyKind.EV, slow).copy(stale = true), "16:00")
+        assertEquals("완속 7kW", (stale.tiles.single() as TileView.EnergyStop).line)
+        assertEquals(Phrases.ENERGY_STALE, stale.footnote)
+        // 경유 길안내를 시작한 결과 한 줄
+        assertEquals("예시 챔필 주차장 충전소 들렀다 갈게요.", Phrases.energyRouteStarted("예시 챔필 주차장 충전소"))
+    }
+
+    @Test fun `충전·주유 후보를 얻지 못했을 때 출발 제안에 붙는 한 문장`() {
+        assertEquals("배터리가 모자랄 수 있어요.", Phrases.energyLow(EnergyKind.EV))
+        assertEquals("기름이 모자랄 수 있어요.", Phrases.energyLow(EnergyKind.GASOLINE))
+        val b = briefing(Briefing.Level.ONE_LINE, game, memo = MemoNote.ReadAloud("유니폼"))
+        val c = card(b, Question.Depart(game, lowEnergy = EnergyKind.EV), "16:00")
+        assertEquals("KIA 직관 메모에 ‘유니폼’이 있어요. 배터리가 모자랄 수 있어요. 출발할까요?", c.sub)
+        assertEquals("출발할까요?", card(b.copy(memo = MemoNote.None), Question.Depart(game), "16:00").sub)
+    }
 }

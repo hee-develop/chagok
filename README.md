@@ -29,6 +29,7 @@
 - **주행 중**: 말하지 않고 다음 일정 칩 한 줄만 보인다
 - **하차 카드**: 일정 장소에 도착해 P단에 넣으면 "도착 · 내리기 전" 카드를 한 번 말하고 5초 뒤 닫는다(채비·메모가 있으면 챙길 것을 알린다)
 - **집 하차**: 집을 떠났다 돌아와 집 300m 안에서 P단에 넣으면 "콩물 챙기세요!" 또는 "오늘도 수고했어요."를 한 번 말한다
+- **에너지 체크**: 남은 일정과 귀가 거리가 주행 가능 거리의 90%를 넘으면 출발 제안을 "집까지 300km인데 배터리로는 모자라요. {충전소}에서 충전하고 갈까요?"(기름 차는 주유소)로 바꾸고, "응"이면 경유지로 넣어 길안내한다. 값은 AAOS에서 읽고 못 읽으면 체크하지 않는다
 - **시연 도구(debug 빌드)**: 가짜 길안내 지도, 신호 주입(`chagok-debug://signal`), `pnpm demo:car`·`pnpm demo:pt`
 
 ### 서버
@@ -44,13 +45,13 @@
 | 기능 | 지금 | 실제 호출로 바꾸려면 |
 | --- | --- | --- |
 | 장소 검색 | `fixtures/places/` 목 장소 | 서버 환경 변수 `KAKAO_REST_KEY`(카카오 로컬 API). 실제 키로는 확인하지 않음 |
-| 주유소·충전소 | 목 데이터 | 오피넷·환경부 키. 실제 키로는 확인하지 않음 |
+| 주유소·충전소 | 목 데이터(차 쪽 에너지 체크도 이 목으로 시연) | 오피넷·환경부 키. 실제 키로는 확인하지 않음 |
 | 폰 푸시 | 폴링 + 로컬 알림 | FCM(개발 빌드 필요) |
 | 길안내·음성 인식 | debug 신호 주입, 가짜 길안내 | 실제 Pleos 내비·음성(`docs/sdk-check.md`의 수동 확인 목록) |
 
 ### 아직 안 됨
 
-- 차: 운전자 바꾸기, 장소 이름을 묻고 고르는 대화, 에너지 체크, 늦을 때 연락, 플러스 모드·음성만, 가족 요청 받기(서버 쪽은 있음). 폰에서 보낸 가족 요청은 차가 받기 전까지 '보냄' 상태에 머문다
+- 차: 운전자 바꾸기, 장소 이름을 묻고 고르는 대화, 늦을 때 연락, 플러스 모드·음성만, 가족 요청 받기(서버 쪽은 있음). 폰에서 보낸 가족 요청은 차가 받기 전까지 '보냄' 상태에 머문다
 - 폰: 늦을 때 연락의 문자 창
 - 남은 작업의 자세한 목록은 [docs/remaining-work.md](docs/remaining-work.md)
 - 서버 배포(HTTPS) · DB 저장, 아이폰
@@ -161,6 +162,6 @@ PT 시연 순서(폰 → 차 연결 → 브리핑 → 도착)와 점검 명령(`
 
 - `pnpm e2e:car`는 debug 앱 설치 → 서버(watch 없이 `tsx src/index.ts`, 8787) 시작 → `e2e/maestro/car/pairing.yaml`, `boarding-briefing.yaml`, `depart-route.yaml`, `arrival-next.yaml`, `fake-navi.yaml`(debug 전용 가짜 길안내) 순서로 실행 → 서버 종료(프로세스 그룹째)를 한다. 에뮬레이터 시간대를 서울로 잠시 바꿨다가 되돌린다(원래 값이 비어 있었으면 UTC로 두고 비운다). 스크린샷은 실행마다 새로 만드는 `e2e/output/car/<실행 시각>/shots/`(git 제외)에 남는다. `E2E_FRESH_INSTALL=1`을 주면 앱을 지우고 설치한 상태로 돈다. 기기가 여럿이면 `ANDROID_SERIAL`을 지정한다. 8787이 이미 쓰이고 있으면 `PORT=8790 pnpm e2e:car`처럼 포트를 바꾼다(서버와 debug 앱 모두 그 포트로 맞춘다). 이렇게 돌린 뒤에는 설치된 debug 앱이 그 포트를 기억하므로, 기본 서버(8787)로 직접 확인하기 전에 `./gradlew :app:installDebug`로 다시 설치한다. Gradle로 직접 설치할 때도 `ANDROID_SERIAL`을 꼭 지정한다(없으면 연결된 모든 기기에 설치된다).
 - 일정 데이터는 `fixtures/schedules/gwangju-day.json`(프로토타입 '광주 직관 하루')이고, 기본값은 저장소 루트의 `fixtures/` 아래 이 파일이다. `FIXTURE_PATH`로 바꿀 수 있고, 절대 경로는 그대로, 상대 경로는 작업 폴더가 아니라 **저장소 루트 기준**으로 읽는다(예: `FIXTURE_PATH=fixtures/schedules/gwangju-day.json`). 형식이 틀리면(place의 lat·lng 숫자, memo·locationText 문자열 또는 null, attendees 문자열 배열) 서버가 시작할 때 오류로 멈춘다. 서버가 시작할 때 읽어 `GET /schedules/today?at=<ISO8601>`로 내려준다. 차량 앱 단위·계측 테스트도 같은 파일을 읽는다.
-- debug 빌드에만 신호 주입 통로가 있다. `adb shell am start -a android.intent.action.VIEW -d "chagok-debug://signal?gear=D"`처럼 `now`(ISO8601, 데모 시계·초기화), `gear`(P·R·N·D), `ignition`, `restricted`, `enter`, `board`를 줄 수 있다. 출발 제안 → 길안내용으로 `trip`(소요 시간 초, `none`=모름, `real`=실제 내비), `route`(`ok`·`fail`·`real`: 길안내 요청 결과), `listen`(`off`면 실제 STT를 열지 않음), `heard`(들은 말, 퍼센트 인코딩)도 준다. 이 값들은 debug 빌드에만 있고 release에는 없다. 실제 내비 경로 시작과 음성 인식은 사람이 따로 확인한다(`docs/sdk-check.md`). debug 빌드만 평문 HTTP로 `10.0.2.2:8787`(PC의 서버)에 붙는다.
+- debug 빌드에만 신호 주입 통로가 있다. `adb shell am start -a android.intent.action.VIEW -d "chagok-debug://signal?gear=D"`처럼 `now`(ISO8601, 데모 시계·초기화), `gear`(P·R·N·D), `ignition`, `restricted`, `enter`, `board`를 줄 수 있다. 출발 제안 → 길안내용으로 `trip`(소요 시간 초, `none`=모름, `real`=실제 내비), `range`·`fuel`·`home`(에너지 체크용 주행 가능 거리 km·연료 종류·집 좌표, `real`=원래 값), `route`(`ok`·`fail`·`real`: 길안내 요청 결과), `listen`(`off`면 실제 STT를 열지 않음), `heard`(들은 말, 퍼센트 인코딩)도 준다. 이 값들은 debug 빌드에만 있고 release에는 없다. 실제 내비 경로 시작과 음성 인식은 사람이 따로 확인한다(`docs/sdk-check.md`). debug 빌드만 평문 HTTP로 `10.0.2.2:8787`(PC의 서버)에 붙는다.
 - **가짜 길안내(debug 전용)**: 실제 내비를 쓸 수 없을 때(회사망 등) 시연·E2E에서 쓴다. `navi=fake`(또는 디버그 줄의 [가짜 내비])를 주면 차곡 창 안에 직접 그린 곡선 도로 지도와 길안내 패널이 나오고, 수락하면 가짜 경로를 따라 차가 달려 스스로 도착한다(도착 알림이 세션에 들어가 도착 판단·주행 중 칩이 이어지고, 정차하면 하차 카드가 뜨며 그동안 지도 덮개가 72%로 더 어두워진다). `drive=<초>`는 경로를 지나가는 실제 시간(기본 4.5초), `progress=<0~1>`은 진행률을 바로 옮기고, `advance=<분>`은 데모 시계를 앞으로 보낸다. debug 빌드는 기본이 켬이고(앱을 새로 설치·재시작해도 지도가 보인다) `navi=real`로 실제 내비·실제 위치로 돌린다. release 빌드에는 들어가지 않는다. 자세한 내용은 [가짜 길안내 문서](docs/fake-navi.md).
 - **터미널 시나리오**: `pnpm demo:car`가 가짜 내비로 광주 직관 하루(첫 탑승 → 길안내 → 도착 하차 카드 → 13:30·20:30 재탑승 → 21:10 집으로 → 집 하차 카드)를 한 번의 초기화 뒤 시계를 앞으로만 보내며 이어서 단계마다 신호로 넣고(개별 점검은 `DEMO_EXTRA=1`), debug 빌드가 `ChagokFlow` 태그로 남기는 흐름 로그를 기대 동작과 비교해 ✓/✗로 알려 준다(에뮬레이터 필요, `DEMO_AUTO=1`이면 Enter 없이 진행).

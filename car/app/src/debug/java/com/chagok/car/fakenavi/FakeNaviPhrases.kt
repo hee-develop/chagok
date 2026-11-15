@@ -26,8 +26,9 @@ object FakeNaviPhrases {
         return "$name 도착"
     }
 
-    /** "목적지 · 광주 육전집" */
-    fun destination(placeName: String) = "목적지 · $placeName"
+    /** "목적지 · 광주 육전집". 경유지가 있으면 "경유 · 예시 충전소 → 광주 육전집"(에너지 제안을 수락한 길안내). */
+    fun destination(placeName: String, viaName: String? = null) =
+        if (viaName != null) "경유 · $viaName → $placeName" else "목적지 · $placeName"
 
     /**
      * 남은 거리 표기. 시안은 정수 km("212km")다. 10km 미만은 정수로는 거칠어 소수 한 자리("4.2km")로 쓴다.
@@ -53,7 +54,7 @@ object FakeNaviPhrases {
         return if (trip.arrived) {
             FakeNaviPanel(null, arrived(name), null)
         } else {
-            FakeNaviPanel(destination(name), eta(trip, zone), detail(trip.remainingMeters))
+            FakeNaviPanel(destination(name, trip.via?.name), eta(trip, zone), detail(trip.remainingMeters))
         }
     }
 }

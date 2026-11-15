@@ -61,8 +61,33 @@ sealed interface Question {
      */
     data class Overlap(val first: Schedule, val second: Schedule) : Question
 
-    /** 출발 제안. arrival은 지금 출발하면 도착할 시각(소요 시간을 알 때만). */
-    data class Depart(val target: Schedule, val arrival: Instant? = null) : Question
+    /**
+     * 출발 제안. arrival은 지금 출발하면 도착할 시각(소요 시간을 알 때만).
+     * lowEnergy는 에너지가 모자란데 충전·주유 후보를 얻지 못해(서버 실패·후보 없음) 원래 제안에 "배터리가 모자랄 수 있어요." 한 문장만 붙일 때의 연료 종류다(없으면 null).
+     */
+    data class Depart(val target: Schedule, val arrival: Instant? = null, val lowEnergy: EnergyKind? = null) : Question
+
+    /**
+     * 에너지 제안(정책서 5장·9장): 남은 일정과 귀가 거리가 주행 가능 거리보다 길어 출발 제안을 충전·주유를 넣은 제안 하나로 바꾼 것.
+     * 수락하면 [stop]을 경유지로 넣고 [target]으로 길안내한다. 대안("다른 데")은 다음 후보 하나만 바꿔 보인다([nextAlternative]).
+     * [neededKm]는 말하는 필요 거리(반올림), [goal]은 그 거리를 센 끝(집 또는 오늘 일정).
+     * [mealBundle]은 서버가 알린 '식사 + 급속 충전' 묶음으로, 맨 앞 후보(index 0)에만 뜻이 있다.
+     */
+    data class Energy(
+        val target: Schedule,
+        val kind: EnergyKind,
+        val neededKm: Int,
+        val goal: EnergyGoal,
+        val stops: List<EnergyStop>,
+        val index: Int = 0,
+        val mealBundle: Boolean = false,
+        val stale: Boolean = false,
+    ) : Question {
+        val stop: EnergyStop get() = stops[index]
+
+        /** 다음 후보 하나만 보이는 같은 제안. 더 보여 줄 후보가 없으면 null("다른 곳은 찾지 못했어요."). */
+        fun nextAlternative(): Energy? = (index + 1).takeIf { it < stops.size }?.let { copy(index = it) }
+    }
 
     /**
      * 늦게 탐: 늦는다는 사실을 알린 뒤 출발 제안과 같이 출발을 묻는다(수락하면 길안내).
@@ -169,7 +194,7 @@ sealed interface MemoNote {
 
 /**
  * 정책서 5장 '탑승했을 때 판단 순서'. 차량 신호와 SDK 없이 입력만으로 판단한다.
- * 장소 해석(8장), 에너지 체크(9장)는 아직 넣지 않았다.
+ * 에너지 체크(9장)는 서버를 불러야 해서 이 판단 뒤 [com.chagok.car.flow.DriveSession]이 출발 제안을 바꾼다([Question.Energy]).
  */
 object BoardingDecider {
     /**

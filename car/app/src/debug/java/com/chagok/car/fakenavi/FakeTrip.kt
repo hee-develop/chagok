@@ -1,5 +1,6 @@
 package com.chagok.car.fakenavi
 
+import com.chagok.car.domain.Place
 import java.time.Duration
 import java.time.Instant
 
@@ -12,7 +13,14 @@ import java.time.Instant
  * 달리는 동안 줄어드는 것은 [remainingMeters]·[remainingDuration]뿐이다. (남은 시간 + 지금 시각으로 매번 다시 구하면, 시연용으로 경로를 몇 초에 압축해 달릴 때
  * 남은 시간은 수십 분씩 줄고 시계는 몇 초만 가서 도착 예정이 계속 앞당겨져 보인다.)
  */
-class FakeTrip(val route: FakeRoute, val driveMillis: Long, val departedAt: Instant, travelTime: Duration? = null) {
+class FakeTrip(
+    val route: FakeRoute,
+    val driveMillis: Long,
+    val departedAt: Instant,
+    travelTime: Duration? = null,
+    /** 에너지 제안을 수락해 넣은 경유지(충전소·주유소). 패널에 "경유 · {이름} → {목적지}"로만 보이고 경로 모양은 바꾸지 않는다. */
+    val via: Place? = null,
+) {
     init {
         require(driveMillis > 0) { "drive는 양수여야 합니다: ${driveMillis}ms" }
     }

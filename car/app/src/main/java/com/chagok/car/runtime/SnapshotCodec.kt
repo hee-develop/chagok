@@ -29,6 +29,7 @@ object SnapshotCodec {
             .put("homeItemsAnnounced", JSONArray(snapshot.homeItemsAnnounced.sorted()))
             .put("homeCardShown", snapshot.homeCardShown)
             .put("exitByLocation", snapshot.exitByLocation)
+            .put("energyOffered", snapshot.energyOffered)
             .put("reask", snapshot.reask?.let { JSONObject().put("kind", it.kind.name).put("scheduleId", it.scheduleId ?: JSONObject.NULL) } ?: JSONObject.NULL)
             .toString()
     }
@@ -73,6 +74,8 @@ object SnapshotCodec {
                 PendingReask(ReaskKind.valueOf(json.getString("kind")), scheduleId)
             }
         }.getOrNull()
-        Snapshot(log, statuses, date, exitTargetId, exitArrivedAt, announced, cardShown, exitByLocation, reask)
+        // 에너지 제안을 오늘 이미 띄웠는지도 나중에 생긴 칸이라 없으면 false(타입이 다르면 이 칸만 버린다).
+        val energyOffered = root.opt("energyOffered") as? Boolean ?: false
+        Snapshot(log, statuses, date, exitTargetId, exitArrivedAt, announced, cardShown, exitByLocation, reask, energyOffered)
     }.getOrNull()
 }

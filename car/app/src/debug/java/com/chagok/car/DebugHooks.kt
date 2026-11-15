@@ -1,5 +1,8 @@
 package com.chagok.car
 
+import com.chagok.car.domain.EnergyKind
+import com.chagok.car.domain.Favorite
+import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.LatLng
 import com.chagok.car.domain.Place
 import com.chagok.car.domain.Rules
@@ -7,6 +10,8 @@ import com.chagok.car.fakenavi.FakeNaviSession
 import com.chagok.car.fakenavi.FakeRoute
 import com.chagok.car.fakenavi.FakeTrip
 import com.chagok.car.flow.Event
+import com.chagok.car.flow.ScheduleSnapshot
+import com.chagok.car.flow.ScheduleSource
 import com.chagok.car.runtime.Adapters
 import com.chagok.car.runtime.Locator
 import com.chagok.car.runtime.Navigator
@@ -52,6 +57,20 @@ object DebugInjection {
     @Volatile var injectedLocation: LatLng? = null
 
     /**
+     * 신호 `fuel`로 주입한 연료 종류. null이면 주입하지 않은 것이다(`fuel=real`로 되돌린다). 차가 읽은 값 대신 이 값을 세션에 알린다([EnergyOverride]).
+     */
+    @Volatile var fuel: EnergyKind? = null
+
+    /** 신호 `range`로 주입한 주행 가능 거리(km). null이면 주입하지 않은 것이다(`range=real`). 차가 읽은 값 대신 이 값을 쓴다. */
+    @Volatile var rangeKm: Double? = null
+
+    /**
+     * 신호 `home`으로 주입한 집 좌표. null이면 주입하지 않은 것이다(`home=real`). 값이 있는 동안에는 서버 자주 가는 곳의 집 대신
+     * 이 좌표의 "집"을 세션에 준다([InjectedSchedules]). 에너지 체크의 '집까지' 필요 거리를 멀리 두고 보이려는 용도다.
+     */
+    @Volatile var homeOverride: LatLng? = null
+
+    /**
      * 신호 `now=`로 마지막에 받은 데모 시작 시각. [데모 초기화] 버튼이 시계를 이 시각으로 되돌린다([DebugDemoReset]).
      * null이면(받은 적 없음) 앱 시작 때의 시계로 되돌린다. 프로세스 메모리에만 있다.
      */
@@ -83,6 +102,14 @@ object DebugHooks {
             (event is Event.DestinationArrived && DebugInjection.fakeNavi)
         if (!dropped) post(event)
     }
+
+    /** 에너지 어댑터가 쓰는 이벤트 출구. 차가 읽은 값은 기억해 두고, 주입한 값([DebugInjection.fuel]·[DebugInjection.rangeKm])이 있는 쪽은 그 값으로 덮어 세션에 알린다. */
+    fun energySink(post: (Event) -> Unit): (Event) -> Unit = { event ->
+        post(if (event is Event.EnergyChanged) EnergyOverride.fromReal(event) else event)
+    }
+
+    /** 세션이 읽는 일정 출처. 집 좌표를 주입했으면([DebugInjection.homeOverride]) 그 "집"을 자주 가는 곳에 끼워 넣는다. */
+    fun scheduleSource(inner: ScheduleSource): ScheduleSource = InjectedSchedules(inner)
 
     /** 위치 어댑터가 쓰는 이벤트 출구. 실제 위치를 받지 않는 동안([acceptsRealLocation])에는 위치 이벤트를 버린다. */
     fun locationSink(post: (Event) -> Unit): (Event) -> Unit = { event ->
@@ -147,10 +174,20 @@ internal class InjectedNavigator(
 
     override fun startRoute(place: Place): Boolean {
         if (!DebugInjection.fakeNavi) return DebugInjection.routeOk ?: inner.startRoute(place)
+        return startFake(place, via = null)
+    }
+
+    // 경유지(충전소·주유소)가 있는 길안내. 가짜 내비는 경로 모양은 그대로 두고 패널에 "경유 · {이름} → {목적지}"로만 보인다.
+    override fun startRouteVia(place: Place, via: Place): Boolean {
+        if (!DebugInjection.fakeNavi) return DebugInjection.routeOk ?: inner.startRouteVia(place, via)
+        return startFake(place, via)
+    }
+
+    private fun startFake(place: Place, via: Place?): Boolean {
         // 가짜 내비는 실제 내비를 거치지 않는다. route=fail이면 경로를 시작하지 않고 실패로 답한다.
         val ok = DebugInjection.routeOk ?: true
         // 실패면 남아 있던 이전 가짜 경로를 지운다(옛 경로가 계속 달려 도착 알림을 내지 않게).
-        if (ok) fake.start(place, now()) else fake.clear()
+        if (ok) fake.start(place, now(), via) else fake.clear()
         return ok
     }
 
@@ -187,5 +224,32 @@ private class InjectedLocator(private val inner: Locator) : Locator {
     override fun setNeeded(needed: Boolean) = inner.setNeeded(needed)
     override fun refreshNow(deliver: (Event) -> Unit) {
         if (DebugHooks.acceptsRealLocation()) inner.refreshNow(deliver)
+    }
+}
+
+/**
+ * 에너지 신호의 주입. 차가 읽은 값([fromReal])을 기억해 두고, `fuel`·`range` 주입값이 있는 쪽은 그 값으로 덮은 이벤트를 만든다([merged]).
+ * 주입을 `real`로 풀면 기억해 둔 차의 값으로 돌아간다. 이벤트는 세션에 [Event.EnergyChanged] 하나로 들어간다.
+ */
+object EnergyOverride {
+    @Volatile private var realKind: EnergyKind? = null
+    @Volatile private var realRange: Double? = null
+
+    fun fromReal(event: Event.EnergyChanged): Event.EnergyChanged {
+        realKind = event.kind
+        realRange = event.rangeKm
+        return merged()
+    }
+
+    fun merged(): Event.EnergyChanged = Event.EnergyChanged(DebugInjection.fuel ?: realKind, DebugInjection.rangeKm ?: realRange)
+}
+
+/** `home` 주입 중에는 서버 자주 가는 곳의 집을 이 좌표의 "집"으로 바꿔 준다. 다른 자주 가는 곳과 일정은 그대로다. */
+internal class InjectedSchedules(private val inner: ScheduleSource) : ScheduleSource {
+    override fun snapshot(): ScheduleSnapshot {
+        val snapshot = inner.snapshot()
+        val home = DebugInjection.homeOverride ?: return snapshot
+        val injected = Favorite(FavoriteKind.HOME, Place("집", home))
+        return snapshot.copy(favorites = listOf(injected) + snapshot.favorites.filter { it.kind != FavoriteKind.HOME })
     }
 }

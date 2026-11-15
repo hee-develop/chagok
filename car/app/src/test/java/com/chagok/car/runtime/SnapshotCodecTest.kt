@@ -177,4 +177,13 @@ class SnapshotCodecTest {
         assertEquals(PendingReask(ReaskKind.ASK_DESTINATION, null), SnapshotCodec.decode("""{$base,"reask":{"kind":"ASK_DESTINATION","scheduleId":null}}""")!!.reask)
         assertEquals(PendingReask(ReaskKind.ASK_DESTINATION, null), SnapshotCodec.decode("""{$base,"reask":{"kind":"ASK_DESTINATION"}}""")!!.reask)
     }
+
+    @Test fun `에너지 제안을 띄웠다는 표시도 저장하고 복원한다`() {
+        val snapshot = Snapshot(BoardingLog(), emptyMap(), LocalDate.of(2026, 12, 3), energyOffered = true)
+        assertEquals(snapshot, SnapshotCodec.decode(SnapshotCodec.encode(snapshot)))
+        // 이전 저장분에는 칸이 없어 false, 타입이 다르면 이 칸만 버린다
+        val base = """"date":"2026-12-03","statuses":{},"log":{"lastBoardedOn":null,"lastParkedAt":null,"parkedAfterDriveSinceBoarding":false}"""
+        assertEquals(false, SnapshotCodec.decode("{$base}")!!.energyOffered)
+        assertEquals(false, SnapshotCodec.decode("""{$base,"energyOffered":"yes"}""")!!.energyOffered)
+    }
 }

@@ -2,6 +2,7 @@ package com.chagok.car
 
 import com.chagok.car.domain.Rules
 import com.chagok.car.flow.Event
+import com.chagok.car.flow.ScheduleSource
 import com.chagok.car.runtime.Adapters
 import java.time.Clock
 import java.time.Duration
@@ -16,6 +17,12 @@ object DebugHooks {
 
     /** 릴리스는 위치 이벤트를 그대로 내보낸다. */
     fun locationSink(post: (Event) -> Unit): (Event) -> Unit = post
+
+    /** 릴리스는 에너지 값을 덮어쓰지 않는다. */
+    fun energySink(post: (Event) -> Unit): (Event) -> Unit = post
+
+    /** 릴리스는 집 좌표를 주입하지 않는다. */
+    fun scheduleSource(inner: ScheduleSource): ScheduleSource = inner
 
     @Suppress("UNUSED_PARAMETER")
     fun wrap(adapters: Adapters, post: (Event) -> Unit, clock: Clock): Adapters = adapters

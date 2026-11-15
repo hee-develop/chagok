@@ -8,6 +8,11 @@
     <!-- 기어·시동(AAOS CarPropertyManager) -->
     <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
 
+    <!-- 에너지 체크: 연료 종류(INFO_FUEL_TYPE, CAR_INFO)와 주행 가능 거리(RANGE_REMAINING, CAR_ENERGY). 읽지 못하면 '모름'이라 에너지 체크만 빠진다.
+         두 권한의 등급(normal·dangerous)은 실차·에뮬레이터에서 확인해야 한다(docs/sdk-check.md). 런타임 동의 대상이면 ChagokApp.RUNTIME_PERMISSIONS에 더한다 -->
+    <uses-permission android:name="android.car.permission.CAR_INFO" />
+    <uses-permission android:name="android.car.permission.CAR_ENERGY" />
+
     <!-- NaviHelper 소요 시간 조회(requestTrip)·길안내 요청(requestRoute), TTS, STT -->
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE_SEARCH" />

@@ -83,10 +83,10 @@ class FakeNaviSession(
      * 새 가짜 경로를 시작한다. 이전 경로는 대체된다. [departedAt]은 데모 시계의 지금으로, 패널의 도착 예정 시각(출발 시각 + 소요 시간)이 된다.
      * 실제 경과 시간([elapsedMillis])이 아니라 데모 시계를 쓰므로 [시간 +10분]·`now`·`advance`와 같은 시간축이다.
      */
-    fun start(place: Place, departedAt: Instant) {
+    fun start(place: Place, departedAt: Instant, via: Place? = null) {
         // trip 주입값(양수)이 있으면 패널의 남은 시간·도착 예정을 그 값으로 맞춘다. 애니메이션 길이는 driveMillis다.
         val travelTime = DebugInjection.tripSeconds?.takeIf { it > 0 }?.let(Duration::ofSeconds)
-        val next = FakeTrip(FakeRoute.to(place), DebugInjection.driveMillis, departedAt, travelTime)
+        val next = FakeTrip(FakeRoute.to(place), DebugInjection.driveMillis, departedAt, travelTime, via)
         trip = next
         // 멈춘 동안에는 알리지 않는다. 길이 0인 경로의 도착은 다시 켜질 때 알린다([setStopped]).
         if (!stopped) {

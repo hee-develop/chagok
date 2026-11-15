@@ -2,6 +2,7 @@ package com.chagok.car
 
 import android.os.Handler
 import android.os.Looper
+import com.chagok.car.domain.EnergyKind
 import com.chagok.car.domain.Gear
 import com.chagok.car.domain.Ignition
 import com.chagok.car.domain.LatLng
@@ -36,6 +37,10 @@ import java.time.Instant
  *   주입한 동안에는 위치 어댑터가 읽은 실제 위치·가짜 경로 위치·실제 내비의 위치 답을 모두 세션에 넣지 않고 이 값만 쓴다. `real`이면 주입을 풀어 가짜 경로·실제 위치로 돌아간다.
  *   가짜 내비가 켜져 있으면 주입하지 않아도 어댑터의 실제 위치(에뮬레이터 GPS)는 세션에 넣지 않는다
  * - `arrived`: true면 내비 목적지 도착 알림(차곡이 길안내를 시작한 일정이 도착이 된다). 가짜 내비는 목적지에 닿으면 이 알림을 스스로 넣는다
+ * - `fuel`: `ev`·`gas`·`diesel`·`hybrid`. 차가 읽은 연료 종류 대신 이 값을 에너지 체크에 쓴다. `real`이면 차가 읽은 값([EnergyOverride])
+ * - `range`: 주행 가능 거리(km, 소수 가능, 0 이상). 차가 읽은 값 대신 쓴다. `real`이면 차가 읽은 값. 연료 종류와 주행 가능 거리를 둘 다 알아야 에너지 체크를 한다
+ *   (`range=150&fuel=ev`). 에너지 신호는 `board`·`enter`·`ignition`·`gear`보다 먼저 세션에 들어가 같은 주소의 탑승 판단이 이 값을 본다
+ * - `home`: 집 좌표 `위도,경도`. 서버 자주 가는 곳의 집 대신 쓴다(에너지 체크의 '집까지' 거리를 멀리 두는 시연용). `real`이면 서버 값
  * - `heard`: 들은 말(STT 결과). 빈 값이면 아무것도 못 들은 것(가장 마지막에 처리). 세션이 처리한 뒤 디버그 줄([DebugRow])에 "들은 말 처리: <말>"을 보인다
  */
 object DebugSignals {
@@ -66,6 +71,13 @@ object DebugSignals {
         value("drive")?.let { DebugInjection.driveMillis = driveOf(it) }
         value("progress")?.let { FakeNaviSession.shared.setProgress(progressOf(it)) }
         value("listen")?.let { DebugInjection.realListening = listenOf(it) }
+        value("home")?.let { DebugInjection.homeOverride = locOf(it) }
+        val fuel = value("fuel")
+        val range = value("range")
+        fuel?.let { DebugInjection.fuel = fuelOf(it) }
+        range?.let { DebugInjection.rangeKm = rangeOf(it) }
+        // 에너지 신호는 같은 주소의 기어·탑승 이벤트보다 먼저 세션에 넣는다(메인 큐 순서).
+        if (fuel != null || range != null) host.post(EnergyOverride.merged())
         value("ignition")?.let { host.post(Event.IgnitionChanged(Ignition.valueOf(it.uppercase()))) }
         value("gear")?.let { host.post(Event.GearChanged(gearOf(it))) }
         value("restricted")?.let { host.post(Event.RestrictionChanged(it.toBoolean())) }
@@ -89,6 +101,22 @@ object DebugSignals {
         if (text.equals("real", ignoreCase = true)) return null
         val (lat, lng) = text.split(',').map { it.trim().toDouble() }.also { require(it.size == 2) { "loc은 위도,경도여야 합니다: $text" } }
         return LatLng(lat, lng)
+    }
+
+    /** `fuel=ev|gas|diesel|hybrid`. `real`이면 null(주입 해제). */
+    internal fun fuelOf(text: String): EnergyKind? = when (text.lowercase()) {
+        "real" -> null
+        "ev" -> EnergyKind.EV
+        "gas" -> EnergyKind.GASOLINE
+        "diesel" -> EnergyKind.DIESEL
+        "hybrid" -> EnergyKind.HYBRID
+        else -> error("알 수 없는 fuel: $text")
+    }
+
+    /** `range=<km>`. 0 이상의 숫자만 받는다. `real`이면 null(주입 해제). */
+    internal fun rangeOf(text: String): Double? = when (text.lowercase()) {
+        "real" -> null
+        else -> text.toDouble().also { require(it.isFinite() && it >= 0.0) { "range는 0 이상의 km여야 합니다: $text" } }
     }
 
     private fun gearOf(name: String) = when (name.uppercase()) {
