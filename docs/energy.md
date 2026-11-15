@@ -241,7 +241,7 @@
 
 ### 수동 시연 (집까지 300km 장면)
 
-에뮬레이터·Maestro·`pnpm demo:car`는 이 문서를 쓴 세션에서 돌리지 않았습니다. 아래는 사람이 따라 하는 순서이고, 값은 단위 테스트(`FixtureEnergyDemoTest`)가 문구까지 고정합니다.
+에뮬레이터·Maestro는 이 문서를 쓴 세션에서 돌리지 않았습니다(`pnpm demo:car`는 이후 13:30 재탑승 단계에 이 장면(B)을 넣어 돌렸습니다: `fuel=ev`·`range=900`(넉넉)·`home=37.153,127.0`으로 시작해 `range=150`·`loc`(육전집)으로 '집까지 300km인데 배터리로는 모자라요.' → 충전소 경유 길안내 → 도착까지 이어집니다. 신호는 `advance`·`fuel`·`range`·`loc`·`enter`를 **한 주소**에 넣어야 `advance` → 에너지 → `loc` → 탑승 순서가 지켜집니다. 따로 보내면 `advance` 직후 앱 진입이 먼저 탑승을 판단해 옛 주행 가능 거리로 평소 제안이 나옵니다). 아래는 사람이 따라 하는 순서이고, 값은 단위 테스트(`FixtureEnergyDemoTest`)가 문구까지 고정합니다.
 
 준비: 서버 `pnpm server:dev`(기본 8787, 목 충전소·주유소). 차는 debug 앱(기본 포트). 폰 연결과 일정 픽스처는 `광주 직관 하루`(`fixtures/schedules/gwangju-day.json`)를 씁니다(`pnpm demo:car`와 같은 준비). 키를 넣지 않았으면 서버는 `fixtures/energy/`를 씁니다.
 
