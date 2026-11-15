@@ -81,6 +81,11 @@ appId: ${APP_ID}
 - assertVisible: 'E2E Today Meeting'
 - takeScreenshot: 03-fill-places-filtered
 - tapOn: '나중에 할게요'
+# 4단계 '말 거는 방법'은 건너뛰고 5단계(차 연결)로 간다.
+- extendedWaitUntil:
+    visible: '말 거는 방법을 정해요'
+    timeout: 15000
+- tapOn: '건너뛰기'
 - extendedWaitUntil:
     visible: '차와 연결해요'
     timeout: 15000

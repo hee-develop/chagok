@@ -207,6 +207,60 @@ appId: ${APP_ID}
       EXPECT: '스타벅스'
       ABSENT: '헬스장'
 
+# 8b) 자주 가는 곳 단골 삭제(정책 10.8 '추가·삭제'): 추천에서 하나 추가한 뒤 [삭제]는 확인을 거쳐 지운다.
+- scrollUntilVisible:
+    element: '체육관 추가'
+    direction: UP
+    timeout: 20000
+- tapOn: '체육관 추가'
+- extendedWaitUntil:
+    visible: '체육관 삭제'
+    timeout: 15000
+- runScript:
+    file: assert-favorites.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT_HOME: ''
+      EXPECT_WORK: ''
+      EXPECT_OTHERS: 'mock-gym'
+- tapOn: '체육관 삭제'
+- extendedWaitUntil:
+    visible: '‘체육관’ 자주 가는 곳을 지울까요\?'
+    timeout: 10000
+- assertVisible: '일정이 없을 때 "어디로 갈까요\?" 후보에서 빠져요.'
+- takeScreenshot: 07d-favorite-delete-confirm
+# 취소하면 아무것도 지우지 않는다.
+- tapOn: '취소'
+- assertNotVisible: '‘체육관’ 자주 가는 곳을 지울까요\?'
+- runScript:
+    file: assert-favorites.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT_HOME: ''
+      EXPECT_WORK: ''
+      EXPECT_OTHERS: 'mock-gym'
+- tapOn: '체육관 삭제'
+- extendedWaitUntil:
+    visible: '‘체육관’ 자주 가는 곳을 지울까요\?'
+    timeout: 10000
+- tapOn: '체육관 삭제 확인'
+- extendedWaitUntil:
+    notVisible: '체육관 삭제'
+    timeout: 15000
+- assertNotVisible: '‘체육관’ 자주 가는 곳을 지울까요\?'
+# 지운 장소는 추천에 다시 나타난다.
+- extendedWaitUntil:
+    visible: '체육관 추가'
+    timeout: 15000
+- takeScreenshot: 07e-favorite-deleted
+- runScript:
+    file: assert-favorites.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      EXPECT_HOME: ''
+      EXPECT_WORK: ''
+      EXPECT_OTHERS: ''
+
 # 9) 설정 탭(정책 10.8): 고정 안내, 스위치 셋(꺼짐), 문자 창 안내, 입구. 연결 전이라 [차 연결 끊기]는 없다.
 - tapOn:
     id: 'tabbar-settings'
@@ -336,9 +390,11 @@ appId: ${APP_ID}
     timeout: 20000
 - takeScreenshot: 08d-settings-places-entrances
 - tapOn: '자주 가는 곳 열기'
-- extendedWaitUntil:
-    visible: '자주 가는 곳을 알려주세요'
-    timeout: 15000
+# 장소 탭은 앞서 내려 둔 스크롤 위치가 남아 있어 맨 위 제목이 안 보일 수 있다. 제목이 보일 때까지 위로 올린다.
+- scrollUntilVisible:
+    element: '자주 가는 곳을 알려주세요'
+    direction: UP
+    timeout: 20000
 - assertNotVisible: '2 / 5'
 # 설정 탭으로 돌아오면 스크롤 위치가 아래에 남아 있어 맨 위 안내가 안 보인다. 아래쪽 [차 연결하기]로 돌아온 것을 확인한다.
 - tapOn:
