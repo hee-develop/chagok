@@ -68,8 +68,8 @@ class BoardingBriefingTest {
         assertNotNull(device.findObject(By.text("육전집 점심")))
         assertNotNull(device.findObject(By.text("KIA 직관")))
         assertNotNull(device.findObject(By.text("콩물 픽업")))
-        // 채비 타일과 출발 제안 버튼
-        assertNotNull(device.findObject(By.text("유니폼")))
+        // 육전집 점심에는 챙길 것이 없어 채비 타일이 없다(유니폼·응원봉·티켓은 KIA 직관의 메모). 출발 제안 버튼
+        assertNull(device.findObject(By.text("유니폼")))
         assertNotNull(device.findObject(By.text("응, 출발")))
         assertNotNull(device.findObject(By.text("잠깐만")))
         // 읽어 주는 중에는 볼륨을 낮췄다는 알약이 보인다

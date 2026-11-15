@@ -80,8 +80,9 @@ class DepartRouteTest {
         assertNotNull("출발 제안 카드", waitFor("광주 직관 날이에요!"))
         assertNotNull(device.findObject(By.text("응, 출발")))
         assertNotNull(device.findObject(By.text("잠깐만")))
-        // 메모는 알리기만 하고 질문은 '출발할까요?' 하나
-        assertEquals("육전집 점심 메모에 ‘유니폼·응원봉·티켓’이 있어요. 출발할까요?", device.findObject(By.textContains("메모에"))?.text)
+        // 육전집 점심은 챙길 것이 없어 메모 문장 없이 질문은 '출발할까요?' 하나
+        assertNull(device.findObject(By.textContains("메모에")))
+        assertNotNull(device.findObject(By.text("출발할까요?")))
         assertNull(device.findObject(By.textContains("챙기셨어요")))
     }
 

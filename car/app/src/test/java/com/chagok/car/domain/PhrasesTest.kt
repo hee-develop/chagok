@@ -5,6 +5,7 @@ import com.chagok.car.ui.CandidateRow
 import com.chagok.car.ui.TileRow
 import com.chagok.car.ui.TileView
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -239,7 +240,7 @@ class PhrasesTest {
         assertEquals(listOf("도시락"), Phrases.careItems("도시락"))
     }
 
-    private val home = Favorite(FavoriteKind.HOME, Place("예시 아파트 101동", LatLng(0.0, 0.0)))
+    private val home = Favorite(FavoriteKind.HOME, Place("예시 아파트 101동", LatLng(1.0, 2.0)), "광주 북구 샘플로 12")
     private val work = Favorite(FavoriteKind.WORK, Place("광주 예시 업무지구", LatLng(0.0, 0.0)))
     private val station = Favorite(FavoriteKind.OTHER, Place("광주송정역", LatLng(0.0, 0.0)), "광주 광산구 상무대로 201")
 
@@ -247,12 +248,23 @@ class PhrasesTest {
         val q = Question.AskDestination(AskReason.NO_SCHEDULE, favorites = listOf(home, work, station))
         val c = card(briefing(Briefing.Level.FULL, null, emptyList()), q, "09:00")
         assertEquals("어디로 갈까요?", c.voice)
-        val rows = listOf(CandidateRow("집", "예시 아파트 101동"), CandidateRow("회사", "광주 예시 업무지구"), CandidateRow("광주송정역", "광주 광산구 상무대로 201"))
+        val rows = listOf(CandidateRow("집", "광주 북구 샘플로 12"), CandidateRow("회사", "광주 예시 업무지구"), CandidateRow("광주송정역", "광주 광산구 상무대로 201"))
         assertEquals(listOf<TileView>(TileView.Candidates("자주 가는 곳", rows)), c.tiles)
         assertEquals("집으로", c.primary)
         assertEquals("그냥 갈게", c.secondary)
         assertEquals(listOf("“응”이라고 말해도 돼요", "출발하면 자동으로 접혀요"), c.hints)
         assertEquals(listOf("집", "회사", "광주송정역"), Phrases.candidateNames(q))
+    }
+
+    @Test fun `집 후보는 서버에 등록한 장소 이름이 아니라 집으로 보이고 길안내 목적지도 집이며 좌표는 그대로다`() {
+        val q = Question.AskDestination(AskReason.NO_SCHEDULE, favorites = listOf(home, work))
+        val c = card(briefing(Briefing.Level.FULL, null, emptyList()), q, "09:00")
+        val screen = "${c.voice} ${c.sub} ${c.primary} ${c.secondary} ${c.tiles}"
+        assertFalse(screen, screen.contains("예시 아파트"))
+        val option = DestinationOption.OfFavorite(home)
+        assertEquals(Place("집", LatLng(1.0, 2.0)), option.place)
+        // 회사 등 다른 자주 가는 곳은 등록한 이름 그대로
+        assertEquals("광주 예시 업무지구", DestinationOption.OfFavorite(work).place.name)
     }
 
     @Test fun `여유가 많을 때 자주 가는 곳이 붙으면 일정 장소를 1번 줄로 둔 후보 타일`() {
@@ -434,10 +446,10 @@ class PhrasesTest {
         assertEquals("KIA 직관 메모가 있어요.", exit(memo = "유니폼\n응원봉").voice)
     }
 
-    @Test fun `하차 카드 메모가 없거나 항목이 모두 비면 인사만 하고 버튼이 없다`() {
+    @Test fun `하차 카드 메모가 없거나 항목이 모두 비면 도착으로 기록했다고만 하고 버튼이 없다`() {
         listOf(null, "", "  ", "·", "·,/").forEach { memo ->
             val card = exit(memo = memo)
-            assertEquals("잘 다녀오세요.", card.voice)
+            assertEquals("KIA 직관, 도착으로 기록했어요.", card.voice)
             assertTrue(card.alert)
             assertNull(card.primary)
             assertTrue(card.tiles.isEmpty())
@@ -484,7 +496,19 @@ class PhrasesTest {
         assertEquals("유니폼·응원봉·티켓·보조배터리·손수건·물티슈·모자 챙기세요!", exit(memo = memo).voice)
         // 짧으면 그대로 읽는다
         assertEquals("유니폼·응원봉·티켓 챙기세요!", spokenOf(memo = "유니폼·응원봉·티켓"))
-        assertEquals("잘 다녀오세요.", spokenOf())
+        assertEquals("KIA 직관, 도착으로 기록했어요.", spokenOf())
+    }
+
+    @Test fun `하차 카드 도착 기록 문장은 큰 문구에서 제목을 12자로 줄이고 말에서는 전체 제목을 쓴다`() {
+        val title = "가나다라마바사아자차카타파하"  // 14자
+        val short = Phrases.shortTitle(title)
+        assertEquals("$short, 도착으로 기록했어요.", exit(title = title).voice)
+        // 말은 전체 제목이되 30자를 넘으면 줄인 제목으로 말한다
+        assertEquals("$title, 도착으로 기록했어요.", spokenOf(title = title))
+        val longTitle = "가".repeat(20)
+        assertEquals("${Phrases.shortTitle(longTitle)}, 도착으로 기록했어요.", spokenOf(title = longTitle))
+        assertEquals("육전집 점심, 도착으로 기록했어요.", exit(title = "육전집 점심").voice)
+        assertEquals("콩물 픽업, 도착으로 기록했어요.", spokenOf(title = "콩물 픽업"))
     }
 
     @Test fun `하차 카드 문장형이 길면 챙길 것이 아니라 메모가 있다고만 말한다`() {
@@ -519,7 +543,7 @@ class PhrasesTest {
         assertEquals("유니폼·티켓 챙기세요!", exit(memo = "유니폼!, 티켓.").voice)
         // 문장부호만 있는 항목은 빈 항목이다.
         assertEquals("우산 챙기세요!", exit(memo = "우산·!").voice)
-        assertEquals("잘 다녀오세요.", exit(memo = "!").voice)
+        assertEquals("KIA 직관, 도착으로 기록했어요.", exit(memo = "!").voice)
         // 문장은 문장부호가 있어도 문장형이다.
         assertEquals("KIA 직관 메모에 ‘비 와요!’가 있어요.", exit(memo = "비 와요!").voice)
     }

@@ -70,8 +70,9 @@ class ScheduleParserTest {
         assertEquals(anchor + Duration.ofMinutes(220), lunch.start)
         assertEquals(anchor + Duration.ofMinutes(280), lunch.end)
         assertEquals("광주 육전집", lunch.place?.name)
-        assertEquals("유니폼·응원봉·티켓", lunch.memo)
+        assertNull(lunch.memo)  // 유니폼·응원봉·티켓은 KIA 직관의 메모다
 
+        assertEquals("유니폼·응원봉·티켓", schedules[2].memo)
         assertEquals(anchor + Duration.ofMinutes(460), schedules[2].start) // 17:00
         assertEquals(anchor + Duration.ofMinutes(700), schedules[3].start) // 21:00
         assertNull(schedules[3].memo)

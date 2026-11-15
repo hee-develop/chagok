@@ -807,7 +807,7 @@ class DriveSessionTest {
         assertEquals("집으로", card.primary)
         assertEquals(listOf("집", "회사", "서울역"), candidateNames(out))
         assertTrue(out.one<Effect.Speak>().thenListen)
-        assertEquals(home.place, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place)
+        assertEquals(home.destination, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place)
     }
 
     @Test
@@ -828,7 +828,7 @@ class DriveSessionTest {
         boardOnEmptyDay(home, work, station)
         assertEquals(station.place, session.handle(Event.Heard("세 번째")).one<Effect.StartRoute>().place)
         boardOnEmptyDay(home, work, station)
-        assertEquals(home.place, session.handle(Event.Heard("응")).one<Effect.StartRoute>().place)
+        assertEquals(home.destination, session.handle(Event.Heard("응")).one<Effect.StartRoute>().place)
     }
 
     @Test
@@ -849,7 +849,7 @@ class DriveSessionTest {
         val out = boardWithCard(travel = Duration.ofMinutes(30))
         assertEquals(listOf("서울시청", "집"), candidateNames(out))
         assertEquals("서울시청으로", out.one<Effect.ShowCard>().card.primary)
-        assertEquals(home.place, session.handle(Event.CandidatePressed(1)).one<Effect.StartRoute>().place)
+        assertEquals(home.destination, session.handle(Event.CandidatePressed(1)).one<Effect.StartRoute>().place)
     }
 
     // ---- 도착 → 다음 일정 ----
@@ -937,7 +937,7 @@ class DriveSessionTest {
         favorites = listOf(home)
         newSession()
         session.handle(Event.Boarded)
-        assertEquals(home.place, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place)
+        assertEquals(home.destination, session.handle(Event.PrimaryPressed).one<Effect.StartRoute>().place)
         assertTrue(session.handle(Event.DestinationArrived).none { it is Effect.Save })
     }
 }

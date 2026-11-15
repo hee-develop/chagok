@@ -28,12 +28,10 @@ class FixtureBriefingTest {
 
         assertEquals(Question.Depart(plan.target()!!), decision.question)
         assertEquals("광주 직관 날이에요!\n1시 육전집 점심까지 3시간 40분이에요.", card.voice)
-        assertEquals("육전집 점심 메모에 ‘유니폼·응원봉·티켓’이 있어요. 출발할까요?", card.sub)
+        // 육전집 점심은 챙길 것이 없다(유니폼·응원봉·티켓은 KIA 직관의 것이고, 다른 일정의 메모는 첫 탑승에서 읽지 않는다)
+        assertEquals("출발할까요?", card.sub)
         assertEquals(
-            listOf(
-                TileView.Schedules(listOf(TileRow("13:00", "육전집 점심", true), TileRow("17:00", "KIA 직관", false), TileRow("21:00", "콩물 픽업", false))),
-                TileView.Care(listOf("유니폼", "응원봉", "티켓")),
-            ),
+            listOf(TileView.Schedules(listOf(TileRow("13:00", "육전집 점심", true), TileRow("17:00", "KIA 직관", false), TileRow("21:00", "콩물 픽업", false)))),
             card.tiles,
         )
     }

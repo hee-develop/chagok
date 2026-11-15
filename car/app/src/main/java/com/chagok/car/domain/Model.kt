@@ -22,8 +22,14 @@ data class Place(val name: String, val position: LatLng)
 /** 폰 첫 설정 2단계에서 정한 자주 가는 곳의 자리. */
 enum class FavoriteKind { HOME, WORK, OTHER }
 
+/** 집을 부르는 이름. 서버에 등록한 집의 장소 이름('예시 아파트 101동') 대신 화면·말·길안내 요청·로그에 이 이름을 쓴다(사용자 결정 2026-11-15). */
+const val HOME_LABEL = "집"
+
 /** 자주 가는 곳 하나. 서버 `GET /schedules/today`의 favorites로 받는다(집 → 회사 → 추가한 순서). */
-data class Favorite(val kind: FavoriteKind, val place: Place, val address: String? = null)
+data class Favorite(val kind: FavoriteKind, val place: Place, val address: String? = null) {
+    /** 길안내 목적지로 넘기는 장소. 집은 이름만 [HOME_LABEL]로 바꾸고 좌표는 그대로다. 회사·그 밖의 곳은 등록한 이름 그대로. */
+    val destination: Place get() = if (kind == FavoriteKind.HOME) place.copy(name = HOME_LABEL) else place
+}
 
 /** 정책서 11장: 폰 앱이 보내고 서버가 그날까지 맡아 두는 일정 한 건. */
 data class Schedule(

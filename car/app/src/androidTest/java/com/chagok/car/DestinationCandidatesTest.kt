@@ -89,7 +89,7 @@ class DestinationCandidatesTest {
     fun 일정이_없는_날_주_버튼은_집으로_길안내한다() {
         emptyDayCard()
         device.findObject(By.text("집으로")).click()
-        assertRoutedTo("예시 아파트 101동")
+        assertRoutedTo("집")  // 서버에 등록한 장소 이름(예시 아파트 101동) 대신 집
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.chagok.car.flow
 
 import com.chagok.car.domain.AskReason
 import com.chagok.car.domain.Briefing
+import com.chagok.car.domain.HOME_LABEL
 import com.chagok.car.domain.BoardingDecision
 import com.chagok.car.domain.DestinationOption
 import com.chagok.car.domain.EnergyGoal
@@ -54,7 +55,12 @@ object Phrases {
 
     // 하차 카드(일정 장소). 질문이 없고 한 번 말하고 끝난다.
     const val GOT_IT = "챙겼어요"
-    const val EXIT_GREETING = "잘 다녀오세요."
+
+    /**
+     * 일정 장소 하차에서 챙길 것·메모가 없을 때의 문장("육전집 점심, 도착으로 기록했어요."). 정책서 9장의 "잘 다녀오세요."를 대신한다(사용자 결정 2026-11-15).
+     * 큰 문구는 [shortTitle]로 줄인 제목, 말은 전체 제목을 쓴다.
+     */
+    fun exitRecorded(title: String) = "$title, 도착으로 기록했어요."
 
     /** 집 하차에서 챙길 물건이 없을 때(정책서 9장). 버튼 없이 5초 뒤 닫힌다. */
     const val HOME_GREETING = "오늘도 수고했어요."
@@ -97,7 +103,7 @@ object Phrases {
     const val ALL_DAY = "종일"
 
     // 자주 가는 곳 중 집·회사를 부르는 이름
-    const val HOME = "집"
+    const val HOME = HOME_LABEL
     const val WORK = "회사"
     const val DUCKING = "차곡 안내 중 · 볼륨을 잠깐 낮췄어요"
 
@@ -346,10 +352,10 @@ object Phrases {
         FavoriteKind.OTHER -> favorite.place.name
     }
 
-    /** 후보 줄의 둘째 글: 집·회사는 장소 이름, 나머지는 주소. */
+    /** 후보 줄의 둘째 글: 회사는 장소 이름, 집·나머지는 주소(집은 장소 이름 대신 [HOME_LABEL]만 보이게 한다). */
     private fun favoriteDetail(favorite: Favorite): String = when (favorite.kind) {
-        FavoriteKind.HOME, FavoriteKind.WORK -> favorite.place.name
-        FavoriteKind.OTHER -> favorite.address.orEmpty()
+        FavoriteKind.WORK -> favorite.place.name
+        FavoriteKind.HOME, FavoriteKind.OTHER -> favorite.address.orEmpty()
     }
 
     /**
@@ -501,7 +507,7 @@ object Phrases {
      * - 챙길 것 목록: '·' ',' '/'로 나뉜 항목이 둘 이상이거나 띄어쓰기 없는 짧은 말(한 단어)이면 "유니폼·응원봉·티켓 챙기세요!" + 채비 타일 + 한 줄 + [챙겼어요]
      * - 문장형(예 '주차는 B2', '3루 출입구에서 만나기'): 챙길 것이라 단정하지 않고 탑승 카드와 같은 "{일정} 메모에 ‘…’가 있어요." + [챙겼어요](타일 없음)
      * - 길거나 여러 줄: "{일정} 메모가 있어요." + [챙겼어요]
-     * - 글이 없거나 항목이 모두 비면('·'만 등): 인사 "잘 다녀오세요."(alert 한 문장, 버튼 없음)
+     * - 글이 없거나 항목이 모두 비면('·'만 등): "{일정}, 도착으로 기록했어요."(alert 한 문장, 버튼 없음. 사용자 결정 2026-11-15, 정책서 9장의 "잘 다녀오세요."를 대신함)
      * 큰 문구는 두 줄까지라 제목은 [shortTitle]로 줄인다. 오늘 요약 줄(주행 거리·충전·내비 조작)은 두지 않는다.
      * 말은 [spoken] 대신 [exitSpoken]을 쓴다(한 줄은 화면에서 읽는 보조 정보다).
      */
@@ -515,7 +521,7 @@ object Phrases {
         )
         val title = shortTitle(schedule.title)
         return when (val text = exitText(schedule)) {
-            ExitText.Greeting -> base.copy(voice = EXIT_GREETING, alert = true)
+            ExitText.Greeting -> base.copy(voice = exitRecorded(title), alert = true)
             is ExitText.Has -> base.copy(voice = "$title ${text.noun}가 있어요.", primary = GOT_IT)
             is ExitText.Items -> base.copy(
                 voice = "${text.items.joinToString("·")} 챙기세요!",
@@ -607,12 +613,16 @@ object Phrases {
      * - 목록: 항목을 읽는 문장 → "{일정} 챙길 것이 있어요."(앱 채비 출처면 "{일정} 채비가 있어요.")
      * - 문장형: 메모를 읽는 문장 → "{일정} 메모가 있어요."(앱 채비 출처면 "{일정} 채비가 있어요.")
      * - 마지막 문장도 넘으면 제목을 [shortTitle]로 줄인 같은 문장(그래도 넘으면 그대로 말한다)
+     * - 글이 없으면 "{일정}, 도착으로 기록했어요."(넘으면 줄인 제목)
      */
     fun exitSpoken(schedule: Schedule): String {
         val text = exitText(schedule)
-        if (text == ExitText.Greeting) return EXIT_GREETING
         val full = schedule.title
         val short = shortTitle(full)
+        if (text == ExitText.Greeting) {
+            // 마지막 문장과 같은 규칙: 전체 제목이 말 한계를 넘으면 줄인 제목, 그래도 넘으면 그대로
+            return listOf(exitRecorded(full), exitRecorded(short)).firstOrNull { it.length <= Rules.MEMO_READ_MAX_CHARS } ?: exitRecorded(short)
+        }
         fun candidates(title: String): List<String> = when (text) {
             ExitText.Greeting -> emptyList()
             is ExitText.Has -> listOf("$title ${text.noun}가 있어요.")
