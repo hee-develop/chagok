@@ -20,7 +20,7 @@
 | --- | --- | --- | --- |
 | 오늘 | `(tabs)/index.tsx` | `features/today/TodayScreen` | 알림함(읽지 않은 알림), 꺼진 권한·일정을 보낼 수 없는 이유 안내, 차 연결 상태, 장소 빈 일정 배너, 오늘 일정, 다른 날 장소 빈 일정, 받은 가족 요청(빈 상태만) |
 | 가족 | `(tabs)/family.tsx` | `features/family/FamilyTabScreen` | 보내기 입구(→ 오늘 탭), 보낸 요청 목록, 가족 묶기 자리 |
-| 장소 | `(tabs)/places.tsx` | `features/places/PlacesScreen mode="tab"` | 자주 가는 곳(2단계 화면 재사용), **기억한 장소 목록·지우기**(`RememberedPlaces`), **이동 없음 목록·지우기**(`features/skips/SkipList`, 정책 10.8) |
+| 장소 | `(tabs)/places.tsx` | `features/places/PlacesScreen mode="tab"` | 자주 가는 곳(2단계 화면 재사용, **단골 줄마다 [삭제]·확인**, `RemoveOtherConfirm`), **기억한 장소 목록·지우기**(`RememberedPlaces`), **이동 없음 목록·지우기**(`features/skips/SkipList`, 정책 10.8) |
 | 설정 | `(tabs)/settings.tsx` | `features/settings/SettingsScreen` | 주행 중 고정 안내, 스위치(플러스 모드·늦을 때 연락·화면 없이 음성만), 차 연결 상태·끊기, 캘린더 고르기·장소 탭 입구, 권한 상태 (`docs/settings.md`) |
 
 스위치(플러스 모드·늦을 때 연락·음성만)와 차 연결 끊기는 J5b에서 붙었다(계약·상태는 `docs/settings.md`). **'캘린더에 장소 적기'는 만들지 않는다**(사용자가 뺀 기능).

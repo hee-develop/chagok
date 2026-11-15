@@ -16,6 +16,8 @@ type Props = {
   disabled?: boolean;
   /** 없으면 눌리지 않는 줄이고 화살표도 그리지 않는다. */
   onPress?: () => void;
+  /** 줄 끝의 글자 버튼(예: 단골 [삭제]). 줄 자체는 눌리지 않는다(`onPress`와 함께 쓰지 않는다). */
+  action?: { label: string; accessibilityLabel: string; disabled?: boolean; onPress: () => void };
 };
 
 function Icon({ name }: { name: PlaceIconName }) {
@@ -41,7 +43,7 @@ function Icon({ name }: { name: PlaceIconName }) {
   );
 }
 
-export function PlaceRow({ icon, title, subtitle, isLast, accessibilityLabel, accessibilityHint, disabled = false, onPress }: Props) {
+export function PlaceRow({ icon, title, subtitle, isLast, accessibilityLabel, accessibilityHint, disabled = false, onPress, action }: Props) {
   const font = useFont();
   const body = (
     <>
@@ -59,6 +61,22 @@ export function PlaceRow({ icon, title, subtitle, isLast, accessibilityLabel, ac
   );
   const rowStyle = [styles.row, !isLast && styles.divider];
   const label = accessibilityLabel ?? `${title}, ${subtitle}`;
+  if (action) {
+    // 글자 버튼이 따로 읽히도록 줄 전체를 하나로 묶지 않고 글자 부분만 묶는다.
+    return (
+      <View style={rowStyle}>
+        <Icon name={icon} />
+        <View accessible accessibilityLabel={label} style={styles.texts}>
+          <Text style={[styles.title, font(600)]}>{title}</Text>
+          <Text style={[styles.subtitle, font(400)]}>{subtitle}</Text>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel={action.accessibilityLabel} accessibilityState={{ disabled: !!action.disabled }}
+          disabled={action.disabled} onPress={action.onPress} style={styles.action}>
+          <Text style={[styles.actionLabel, font(600)]}>{action.label}</Text>
+        </Pressable>
+      </View>
+    );
+  }
   return onPress ? (
     <Pressable
       accessibilityRole="button"
@@ -84,4 +102,6 @@ const styles = StyleSheet.create({
   texts: { flex: 1, gap: 2 },
   title: { fontSize: 16, color: colors.text, includeFontPadding: false },
   subtitle: { fontSize: 14, color: colors.textMuted, includeFontPadding: false },
+  action: { minHeight: 44, minWidth: 44, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
+  actionLabel: { fontSize: 15, color: colors.textMuted },
 });

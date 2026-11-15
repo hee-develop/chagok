@@ -43,6 +43,17 @@ export const ko = {
     retry: RETRY,
     loading: '장소를 불러오는 중',
     saving: '저장하는 중',
+    // 단골(추가한 곳) 삭제(정책서 10.8 '자주 가는 곳: 추가·삭제'). 장소 탭에서만 보이고 확인을 거친다.
+    removeOther: {
+      delete: '삭제',
+      deleteLabel: (name: string) => `${name} 삭제`,
+      confirmQuestion: (name: string) => `‘${name}’ 자주 가는 곳을 지울까요?`,
+      confirmHint: '일정이 없을 때 "어디로 갈까요?" 후보에서 빠져요.',
+      confirmDelete: '삭제',
+      confirmDeleteLabel: (name: string) => `${name} 삭제 확인`,
+      deleting: '지우는 중',
+      cancel: '취소',
+    },
   },
   placeSearch: {
     titleHome: '집 주소 찾기',
