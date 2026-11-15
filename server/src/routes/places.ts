@@ -25,6 +25,7 @@ export const MAX_OTHER_PLACES = 20;
 export type SavedFavorites = { home: StoredPlace | null; work: StoredPlace | null; others: StoredPlace[]; revision: number };
 
 export type AddOtherResult = { ok: true; saved: SavedFavorites } | { ok: false; reason: 'duplicate' | 'full' };
+export type RemoveOtherResult = { ok: true; saved: SavedFavorites } | { ok: false; reason: 'not-found' };
 
 /**
  * 운전자 자리 하나의 자주 가는 곳을 메모리에 둔다. 연산은 자리 하나만 바꾸고,
@@ -35,6 +36,8 @@ export type FavoritesStore = {
   setHome(place: StoredPlace | null): SavedFavorites;
   setWork(place: StoredPlace | null): SavedFavorites;
   addOther(place: StoredPlace): AddOtherResult;
+  /** 단골(others)에서 그 id의 장소를 뺀다(집·회사는 건드리지 않는다). 없으면 not-found이고 revision도 그대로다. */
+  removeOther(id: string): RemoveOtherResult;
 };
 
 export function createFavoritesStore(): FavoritesStore {
@@ -57,6 +60,10 @@ export function createFavoritesStore(): FavoritesStore {
       if (saved.others.length >= MAX_OTHER_PLACES) return { ok: false, reason: 'full' };
       const rest = without(place.id);
       return { ok: true, saved: commit({ ...rest, others: [...rest.others, place] }) };
+    },
+    removeOther: (id) => {
+      if (!saved.others.some((p) => p.id === id)) return { ok: false, reason: 'not-found' };
+      return { ok: true, saved: commit({ home: saved.home, work: saved.work, others: saved.others.filter((p) => p.id !== id) }) };
     },
   };
 }
@@ -170,5 +177,21 @@ export const createPlacesRoute = (catalog: PlacesCatalog, guard: SeatGuard, deps
         return c.json({ error }, 400);
       }
       return c.json(view(result.saved), 200);
-    });
+    })
+    // 단골 삭제(정책서 10.8 '자주 가는 곳: 추가·삭제'). 가드는 기존 favorites 쓰기와 같다(폰 토큰 = 그 자리, 기기 id = 연결 전 버킷, 식별 없음 = 기본 자리).
+    // id는 목 장소 id·`ext:<externalId>`·`geo:<위도>,<경도>`라 경로에 그대로 쓸 수 있다(`/`가 들어갈 수 없다). 지우기는 연결 전 버킷을 만들지 않는다(없으면 404).
+    .delete(
+      '/favorites/others/:id',
+      guard.write,
+      validator('param', (value, c) => {
+        const id = value.id;
+        if (typeof id !== 'string' || id.trim() === '' || id.length > MAX_ID_LENGTH) return c.json({ error: `id는 1~${MAX_ID_LENGTH}자 문자열이어야 합니다` }, 400);
+        return { id };
+      }),
+      (c) => {
+        const result = c.var.seat.data.favorites.removeOther(c.req.valid('param').id);
+        if (!result.ok) return c.json({ error: '자주 가는 곳에 없는 장소입니다' }, 404);
+        return c.json(view(result.saved), 200);
+      },
+    );
 };

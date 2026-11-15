@@ -9,10 +9,12 @@ import {
 import { fetchEventsReceivedAt, putEvents, type FetchReceivedAt, type SendEvents } from './eventsApi';
 import { appCorrectedPlaces, type CorrectedPlaces } from './correctedPlaces';
 import { appFilteredEvents, type FilteredEvent } from './filteredEvents';
+import { appContactFinder, type ContactFinder } from '../contacts/contactFinder';
 import { fitToBudget } from './payloadBudget';
 import { appSkipMemory, type SkipMemory } from '../skips/skipMemory';
 import { appTravelExceptions, type TravelExceptions } from './travelExceptions';
 import { partitionEvents } from './travelFilter';
+import { toWireEvent } from './wireEvent';
 
 export type SyncResult =
   | 'sent'
@@ -52,6 +54,8 @@ export type EventSyncOptions = {
   corrected?: Pick<CorrectedPlaces, 'has'>;
   /** 폰이 거른 일정을 받는 곳(화면이 흐리게 보인다). 서버로는 보내지 않는다. */
   filtered?: { set(events: readonly FilteredEvent[]): void };
+  /** 이동 일정마다 연락 상대의 표시 이름을 미리 찾는다(정책서 10.5). '늦을 때 연락'이 꺼져 있거나 연락처 권한이 없으면 찾지 않는다. */
+  contacts?: Pick<ContactFinder, 'prepare'>;
   timeoutMs?: number;
   now?: () => Date;
   /** 실패를 드러내는 곳. 일정 내용 없이 결과 이름과 HTTP 상태만 넘긴다. 기본은 개발 빌드에서 console.warn. */
@@ -111,6 +115,7 @@ const devLog = (message: string) => {
  * - 같은 내용을 생략하기 직전에 서버가 일정을 받은 적이 있는지(`GET /events`의 `receivedAt`)를 확인한다. null이면(서버 재시작·초기화·알 수 없음) 생략하지 않는다.
  * - 읽은 일정은 보내기 전에 폰에서 거른다(`travelFilter.ts`): 온라인·건물 안 일정은 보내지 않고 폰 로컬 목록에만 두며,
  *   종일 일정은 이름만 보낸다. 같은 내용 판단·크기 예산은 거른 뒤의 일정으로 한다.
+ * - 보내는 일정에는 `contacts`(연락 상대 표시 이름 0~2개, `features/contacts/`)를 싣고 참석자 이름·이메일은 보내지 않는다(정책서 10.2). 같은 내용 판단 키에도 들어간다.
  * - 거른 목록(`filtered`)은 일정을 읽은 결과다. 고른 캘린더가 없거나 권한이 없거나 캘린더를 읽지 못하면 이전 목록을 비운다(낡은 일정을 계속 보이지 않는다).
  * - 예외 이름 목록(AsyncStorage)을 읽는 데 시간 제한을 두고, 읽지 못해도 동기화는 멈추지 않는다(저장된 이름을 모르는 채 이어 간다).
  * - '이동 없음' 기억은 일정을 보내기 전에 서버와 맞춘다: 사용자가 바꾼 것을 먼저 올리고(그래야 방금 '이동 일정이에요'로 바꾼 일정을 서버의 안전망이 막지 않는다)
@@ -129,6 +134,7 @@ export function createEventSync({
   skips = noSkips,
   corrected = appCorrectedPlaces,
   filtered: filteredSink = appFilteredEvents,
+  contacts = appContactFinder,
   timeoutMs = REQUEST_TIMEOUT_MS,
   now = () => new Date(),
   log = devLog,
@@ -204,8 +210,11 @@ export function createEventSync({
       if (cancelled()) return 'cancelled';
       const { toSend, filtered } = partitionEvents(events, exceptions.has, skips.has, corrected.has);
       filteredSink.set(filtered);
-      events = fitToBudget(toSend);
-      const key = JSON.stringify(events);
+      // 연락 상대는 걸러지고 남은 이동 일정만 찾는다. 못 찾거나 못 읽으면 빈 목록으로 이어 간다(일정 보내기는 멈추지 않는다).
+      const lookup = await requestWithTimeout(() => contacts.prepare(), timeoutMs).catch(() => null);
+      if (cancelled()) return 'cancelled';
+      const wire = fitToBudget(toSend.map((e) => toWireEvent(e, lookup?.(e) ?? [])));
+      const key = JSON.stringify(wire);
       const startedAt = now().getTime();
       if (!serverLostState && lastSent && lastSent.key === key && startedAt - lastSent.at < RESEND_UNCHANGED_AFTER_MS) {
         // 내용이 같아도 서버가 폰 일정을 받은 적이 없으면(재시작·초기화) 다시 보낸다. 확인하지 못하면 보내는 쪽을 택한다.
@@ -219,7 +228,7 @@ export function createEventSync({
         if (received !== null) return 'unchanged';
       }
       try {
-        await requestWithTimeout((signal) => send(events, signal), timeoutMs, controller);
+        await requestWithTimeout((signal) => send(wire, signal), timeoutMs, controller);
       } catch (e) {
         if (cancelled()) return 'cancelled';
         return fail('PUT /events', e);

@@ -18,6 +18,9 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
+      "blockedPermissions": [
+        "android.permission.WRITE_CONTACTS"
+      ],
       "package": "com.chagok.phone"
     },
     "plugins": [
@@ -37,6 +40,12 @@
           "cameraPermission": "차 화면의 QR을 찍어 차와 연결하기 위해 카메라가 필요해요.",
           "microphonePermission": false,
           "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "‘늦을 때 연락’을 켠 경우, 일정에 나온 사람을 연락처에서 미리 찾아 두기 위해 연락처 접근이 필요해요."
         }
       ],
       "expo-secure-store",

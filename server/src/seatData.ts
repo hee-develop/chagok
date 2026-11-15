@@ -8,6 +8,7 @@ import { MAX_BUCKET_MEMORIES, MAX_MEMORIES } from './placeSearch/limits.js';
 import { createFavoritesStore, type FavoritesStore } from './routes/places.js';
 import { createSkipsStore, type SkipsStore } from './routes/skips.js';
 import { MAX_BUCKET_SKIPS, MAX_SKIPS } from './limits.js';
+import { createSettingsStore, type SettingsStore } from './routes/settings.js';
 import { DEFAULT_SEAT_ID, type SeatEvent } from './seats.js';
 
 /** 캘린더 원본과 분리한 일정별 보정값. */
@@ -33,6 +34,11 @@ export type SeatData = {
   memory: PlaceMemoryStore;
   /** 장소별 도착 횟수(장소·횟수·마지막 날짜만). 폰을 바꿔도 같은 자리에 남는 기억이다. */
   arrivals: ArrivalsStore;
+  /**
+   * 자리별 설정(플러스 모드·늦을 때 연락·음성만, `routes/settings.ts`). 연결 전 버킷에서 이어받고, 폰을 바꿔도 남고(폰 바꾸기는 건드리지 않는다),
+   * 연결을 끊으면 자리와 함께 지워진다.
+   */
+  settings: SettingsStore;
 };
 
 /**
@@ -54,6 +60,8 @@ export const SEAT_DATA_POLICY: Record<keyof SeatData, 'keep' | 'reset'> = {
   arrivals: 'keep',
   // 이동 없음 기억은 사용자가 고른 기억이라 폰을 바꿔도 남기고(`keep`), 새 폰이 연결 전에 쌓은 버킷의 기억은 자리의 기억에 합친다(`apply('replaced')`의 `skips.merge`).
   skips: 'keep',
+  // 설정(플러스 모드·늦을 때 연락·음성만)은 사용자가 고른 값이라 폰을 바꿔도 남긴다(가안: 새 폰의 연결 전 버킷에 설정이 있어도 자리의 기존 설정이 이긴다, `docs/settings.md`).
+  settings: 'keep',
 };
 
 export type BucketDenied = 'rate-limited';
@@ -149,6 +157,7 @@ export function createSeatDataRegistry({
       cares: new Map(),
       memory: createPlaceMemoryStore(now, limits.memory),
       arrivals: createArrivalsStore(now),
+      settings: createSettingsStore(),
     };
     // 폰 일정이 교체되거나 비워지면, 더는 없는 일정 id의 보정·채비를 버린다(픽스처 id의 것은 남긴다).
     data.events.subscribe((ids) => {
@@ -191,7 +200,7 @@ export function createSeatDataRegistry({
     buckets.delete(deviceId);
     return found?.data ?? null;
   };
-  /** 아무것도 모으지 않은 데이터인가(일정이 없고 선택·보정·채비·자주 가는 곳·가족 요청이 없다). 밀어낼 때 먼저 고른다. */
+  /** 아무것도 모으지 않은 데이터인가(일정이 없고 선택·보정·채비·기억·설정·자주 가는 곳·가족 요청이 없다). 밀어낼 때 먼저 고른다. */
   const isEmpty = (d: SeatData) => {
     const saved = d.favorites.get();
     return (
@@ -201,6 +210,7 @@ export function createSeatDataRegistry({
       d.cares.size === 0 &&
       d.memory.size() === 0 &&
       d.arrivals.list().length === 0 &&
+      d.settings.isDefault() &&
       saved.home === null &&
       saved.work === null &&
       saved.others.length === 0 &&

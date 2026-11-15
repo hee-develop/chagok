@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import CalendarRoute from '../app/setup/calendar';
 import FillPlacesRoute from '../app/setup/fill-places';
 import PairCarRoute from '../app/setup/pair-car';
+import TalkRoute from '../app/setup/talk';
 import { isSetupDone, resetSetupDoneForTests, SETUP_DONE_KEY } from '../features/entry/setupGate';
 import { createMemoryStore } from '../storage/keyValueStore';
 
@@ -55,6 +56,10 @@ jest.mock('../features/calendar-select/CalendarSelectScreen', () => {
   return { CalendarSelectScreen: ({ standalone }: { standalone?: boolean }) => <Text>{standalone ? '캘린더(탭에서 연 것)' : '캘린더(첫 설정)'}</Text> };
 });
 jest.mock('../features/calendar-sync/eventSync', () => ({ appEventSync: { rememberSelection: jest.fn(), run: jest.fn() } }));
+jest.mock('../features/settings/TalkScreen', () => {
+  const { Text } = jest.requireActual('react-native');
+  return { TalkScreen: () => <Text>4단계 화면</Text> };
+});
 jest.mock('../features/fill-places/FillPlacesScreen', () => {
   const { Text } = jest.requireActual('react-native');
   return { FillPlacesScreen: () => <Text>3단계 화면</Text> };
@@ -71,8 +76,8 @@ beforeEach(() => {
   mockAskNotification.mockResolvedValue('granted');
 });
 
-describe('4단계(차 연결) 라우트: 연결하지 않아도 홈으로 간다', () => {
-  it('4단계에 닿기만 해서는 첫 설정 완료로 표시하지 않는다', async () => {
+describe('5단계(차 연결) 라우트: 연결하지 않아도 홈으로 간다', () => {
+  it('5단계에 닿기만 해서는 첫 설정 완료로 표시하지 않는다', async () => {
     await render(<PairCarRoute />);
     expect(screen.getByText('연결 화면(첫 설정)')).toBeOnTheScreen();
     expect(delegate.current.dump()[SETUP_DONE_KEY]).toBeUndefined();
@@ -149,6 +154,15 @@ describe('3단계 라우트', () => {
     expect(screen.getByText('3단계 화면')).toBeOnTheScreen();
     expect(mockReplace).not.toHaveBeenCalled();
     expect(mockDismissAll).not.toHaveBeenCalled();
+  });
+});
+
+describe('4단계(말 거는 방법) 라우트', () => {
+  it('화면을 그대로 보이고 완료 표시를 남기거나 어디로도 보내지 않는다(연결 단계에 닿아야 끝난 것이다)', async () => {
+    await render(<TalkRoute />);
+    expect(screen.getByText('4단계 화면')).toBeOnTheScreen();
+    expect(delegate.current.dump()[SETUP_DONE_KEY]).toBeUndefined();
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 });
 

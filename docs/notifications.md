@@ -113,7 +113,7 @@
   - `permission-denied`·`no-selection`·`mock`(이 폰은 일정을 보낼 수 없다, 아래 M2 설명): 마찬가지로 쓰지 않고 ack로 지운다.
   - `failed`·`cancelled`·시간 초과: 알림을 그대로 보인다(정말 못 보내고 있을 수 있다).
   - 일정 동기화가 끝날 때마다(`appEventSync.subscribe`) 보냄·변화 없음·보낼 수 없음이면 **폰 알림함에 이미 있는 `events-stale`도 지운다**(`useNotifications`가 이어 둠).
-- **알림 권한(정책서 10.4)**: **첫 설정 끝**(4단계 [건너뛰기]·[완료])과 탭에서 차 연결에 성공했을 때 `askNotificationPermissionOnce()`를 부른다(`phone/src/app/setup/pair-car.tsx`). 한 번 물은 뒤에는 창 없이 현재 상태만 돌려주고, 거부해도 던지지 않는다.
+- **알림 권한(정책서 10.4)**: **첫 설정 끝**(5단계 [건너뛰기]·[완료])과 탭에서 차 연결에 성공했을 때 `askNotificationPermissionOnce()`를 부른다(`phone/src/app/setup/pair-car.tsx`). 한 번 물은 뒤에는 창 없이 현재 상태만 돌려주고, 거부해도 던지지 않는다.
 - **거부하면 '홈에만 보임'**: 권한이 `granted`가 아니면 시스템 알림은 띄우지 않고 **알림은 폰 알림함에만 쌓인다**. 홈 화면은 `useInbox()`로 맨 위에 보여 준다(오늘 탭 `InboxSection`). 권한이 있어도 알림은 알림함에 똑같이 쌓인다. 폰 알림함은 50개·7일.
 - **알림 누름**: `events-stale` → 기존 일정 동기화를 한 번 부르고(이미 도는 중이면 그 결과를 쓴다) 알림을 읽음으로 한다.
   - 보냈거나 보낼 것이 없으면(`sent`·`unchanged`) 알림함에서 지운다.
@@ -178,7 +178,7 @@
 - **정기 작업(J6, 반영됨)**: `jobs.ts`의 `registerMaintenanceJobs`가 같은 스케줄러에 새벽 삭제·30일 정리를 더했다. 자리를 지울 때 `SeatStore`가 `removed` 이벤트를 내면 알림함도 저절로 비워진다. 새 정기 작업(가족 요청 삭제 등)은 `scheduler.register({ name, run(now) })`로 더하고, 하루 한 번 새벽에 돌 작업은 `dailyAtDawn(name, run)`을 쓰면 된다.
 - **J9(늦을 때 연락)·J10(가족)**: `notifier.notify(seatId, { kind: 'late-sms' | 'family-status', ... , dedupeKey })`로 알림을 넣고, 폰에서 `registerTapHandler(kind, ...)`로 누름 처리(문자 창·요청 상태 화면)를 더한다. `notifier`는 `createApp`에 넘긴 `notifications.notifier`다(`index.ts`는 `runtime.notifications`). `data`에 예약 키(`from`·`message_type`·`google*`·`gcm*`·`id`·`kind`)를 쓰지 않는다.
 - **J5a(홈·아래 탭 묶음)는 병합했다.** 이어 붙인 곳:
-  1. **알림 권한**: `askNotificationPermissionOnce()`를 `phone/src/app/setup/pair-car.tsx`의 `finishSetup()`(4단계 [건너뛰기]·[완료] 공통, 정책 10.4 '첫 설정 끝')과 탭에서 연 연결 화면이 연결에 성공했을 때(`PairCarScreen`의 `onPaired`) 부른다. 창이 뜬 채로 기다리지 않고 오늘 탭으로 가며 거부·오류도 이동을 막지 않는다. 이전에 J7이 `onDone`에 넣은 호출은 `finishSetup()`으로 옮겼다(`onDone`은 이제 완료 표시·이동까지 맡는다).
+  1. **알림 권한**: `askNotificationPermissionOnce()`를 `phone/src/app/setup/pair-car.tsx`의 `finishSetup()`(5단계 [건너뛰기]·[완료] 공통, 정책 10.4 '첫 설정 끝')과 탭에서 연 연결 화면이 연결에 성공했을 때(`PairCarScreen`의 `onPaired`) 부른다. 창이 뜬 채로 기다리지 않고 오늘 탭으로 가며 거부·오류도 이동을 막지 않는다. 이전에 J7이 `onDone`에 넣은 호출은 `finishSetup()`으로 옮겼다(`onDone`은 이제 완료 표시·이동까지 맡는다).
   2. **알림함 비우기**: 연결 끊기·401은 `session.onTokenCleared`가 하고, **토큰을 지우지 않고 다른 토큰으로 바뀌는 경로(다른 차·자리에 다시 연결, `pairingApi.claim` → `session.setToken`)도 같은 콜백이 불리게 했다**(`session.ts`의 `setToken`이 이미 다른 토큰이 있을 때 알림). 처음 받는 토큰·같은 토큰은 알리지 않는다.
   3. **오늘 탭 맨 위**(`phone/src/features/today/`): 알림함(`InboxSection`, `useInbox()`의 **읽지 않은** 알림 줄, 누르면 `handleNotificationTap`으로 종류별 처리·읽음), 그 아래 권한 안내 구역에 `useEventSendBlock()`의 `no-selection`('고른 캘린더가 없어요' + [캘린더 고르기])·`permission-denied`(권한 목록이 켜짐이어도 캘린더 [설정 열기] 안내), 알림 권한이 **거부(denied)**일 때만 '켜면 이게 돼요' 한 줄(`permissions.ts`가 알림을 `PermissionName`에 더해 캘린더·카메라와 같은 목록에서 `getNotificationPermission()`을 읽음. 아직 안 물었으면 홈에는 보이지 않고, 설정 탭은 모두 보이며 [켜기]는 `askNotificationPermissionOnce()`). 위 순서: 알림함 → 권한 안내 → 차 연결 상태.
   4. **저장소**: J7의 `keyValue.ts`(AsyncStorage 래퍼)는 지우고 `phone/src/storage/keyValueStore.ts`(`getItem`·`setItem`·`removeItem`, `deviceStore`·`createMemoryStore`)로 합쳤다. 알림함·알림 권한 '물었다' 표시·첫 설정 완료·이동 예외가 같은 래퍼를 쓴다.

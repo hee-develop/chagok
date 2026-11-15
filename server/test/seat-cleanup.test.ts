@@ -42,6 +42,7 @@ const fillSeat = async ({ app, notifications }: Setup, seat: { seatId: string; p
   expect((await call(app, 'POST', '/schedules/e1/family-request', { token, body: { memberId: 'family-mom' } })).status).toBe(200);
   expect((await call(app, 'PUT', '/places/memory', { token, body: { name: '단골 콩물집', place: { name: '콩물집', lat: 35.146, lng: 126.922 }, ambiguous: false } })).status).toBe(200);
   expect((await call(app, 'PUT', '/skips', { token, body: { add: ['KIA 직관'] } })).status).toBe(200);
+  expect((await call(app, 'PUT', '/settings', { token, body: { plusMode: true, lateContact: true } })).status).toBe(200);
   expect((await call(app, 'POST', '/presence', { token, body: { connected: true } })).status).toBe(200);
   expect((await call(app, 'POST', `/arrivals?driver=${seat.seatId}`, { token: car.carToken, body: { scheduleId: 'e1', place: { name: '광주 시립도서관', lat: 35.1329, lng: 126.9025 } } })).status).toBe(200);
   expect(notifications.notifier.notify(seat.seatId, { kind: 'family-status', title: '알림', body: '내용' }).ok).toBe(true);
@@ -61,6 +62,7 @@ const IS_FILLED: Record<keyof SeatData, (d: SeatData) => boolean> = {
   memory: (d) => d.memory.size() > 0,
   arrivals: (d) => d.arrivals.list().length > 0,
   skips: (d) => d.skips.size() > 0,
+  settings: (d) => !d.settings.isDefault(),
 };
 const KEYS = Object.keys(SEAT_DATA_POLICY) as (keyof SeatData)[];
 const filled = (d: SeatData) => Object.fromEntries(KEYS.map((key) => [key, IS_FILLED[key](d)])) as Record<keyof SeatData, boolean>;
@@ -71,7 +73,7 @@ describe('자리 데이터 등록 방식', () => {
   it('자리 데이터의 모든 항목이 폰 바꾸기 때의 처리를 선언한다(빠뜨리면 타입 오류이고, 여기서는 실제 키와 대조한다)', () => {
     const registry = createSeatDataRegistry({ now, fixtureIds: new Set() });
     expect(Object.keys(registry.get('seat-x')).sort()).toEqual(Object.keys(SEAT_DATA_POLICY).sort());
-    expect(SEAT_DATA_POLICY).toMatchObject({ favorites: 'keep', family: 'keep', memory: 'keep', arrivals: 'keep', skips: 'keep', events: 'reset', selection: 'reset', overrides: 'reset', cares: 'reset' });
+    expect(SEAT_DATA_POLICY).toMatchObject({ favorites: 'keep', family: 'keep', memory: 'keep', arrivals: 'keep', skips: 'keep', settings: 'keep', events: 'reset', selection: 'reset', overrides: 'reset', cares: 'reset' });
     expect(Object.keys(IS_FILLED).sort()).toEqual(KEYS.slice().sort()); // 채움 판정도 같은 키를 다룬다
   });
 

@@ -40,12 +40,12 @@ beforeEach(() => {
   mockGranted = false;
 });
 
-it('4단계 진행 표시와 제목을 보이고, 번호 6자리를 넣어야 연결할 수 있다', async () => {
+it('5단계 진행 표시와 제목을 보이고, 번호 6자리를 넣어야 연결할 수 있다', async () => {
   const api = makeApi();
   await renderScreen(api);
   expect(screen.getByRole('header', { name: '차와 연결해요' })).toBeOnTheScreen();
-  expect(screen.getByText('4 / 4')).toBeOnTheScreen();
-  expect(screen.getAllByTestId('progress-bar-filled')).toHaveLength(4);
+  expect(screen.getByText('5 / 5')).toBeOnTheScreen();
+  expect(screen.getAllByTestId('progress-bar-filled')).toHaveLength(5);
   expect(screen.getByRole('button', { name: '연결하기' })).toBeDisabled();
 
   await fireEvent.changeText(screen.getByTestId('pair-code-input'), '123 45');
@@ -160,15 +160,15 @@ describe('standalone(오늘·설정 탭의 [차 연결하기])', () => {
     return screen.findByRole('button', { name: '완료' });
   };
 
-  it('단계 표시(4 / 4)가 없고 제목·번호 입력은 그대로다. 첫 설정 기본(standalone 없음)은 4 / 4가 보인다', async () => {
+  it('단계 표시(5 / 5)가 없고 제목·번호 입력은 그대로다. 첫 설정 기본(standalone 없음)은 5 / 5가 보인다', async () => {
     const { unmount } = await renderScreen(makeApi(), { standalone: true });
-    expect(screen.queryByText('4 / 4')).toBeNull();
+    expect(screen.queryByText('5 / 5')).toBeNull();
     expect(screen.queryAllByTestId('progress-bar-filled')).toHaveLength(0);
     expect(screen.getByRole('header', { name: '차와 연결해요' })).toBeOnTheScreen();
     expect(screen.getByTestId('pair-code-input')).toBeOnTheScreen();
     await unmount();
     await renderScreen(makeApi());
-    expect(screen.getByText('4 / 4')).toBeOnTheScreen();
+    expect(screen.getByText('5 / 5')).toBeOnTheScreen();
   });
 
   it('연결한 뒤 [완료]는 3단계가 아니라 왔던 화면(탭)으로 되돌아간다', async () => {

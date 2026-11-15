@@ -29,15 +29,15 @@ describe('오늘·장소 탭에서 연 화면(standalone)은 첫 설정 단계 �
   it('채비: 단계 표시가 없고, 되돌아갈 곳이 없으면 오늘 탭으로 간다', async () => {
     mockCanGoBack = false;
     await renderWith(<ScheduleCareScreen standalone scheduleId="lunch" title="육전집 점심" initialCare="" api={makeScheduleApi()} />);
-    expect(screen.queryByText('3 / 4')).toBeNull();
+    expect(screen.queryByText('3 / 5')).toBeNull();
     await fireEvent.press(screen.getByRole('button', { name: '취소' }));
     expect(mockReplace).toHaveBeenCalledWith('/');
   });
 
-  it('채비: 첫 설정에서 열면(기본) 3 / 4 표시와 3단계로 돌아가는 동작이 그대로다', async () => {
+  it('채비: 첫 설정에서 열면(기본) 3 / 5 표시와 3단계로 돌아가는 동작이 그대로다', async () => {
     mockCanGoBack = false;
     await renderWith(<ScheduleCareScreen scheduleId="lunch" title="육전집 점심" initialCare="" api={makeScheduleApi()} />);
-    expect(screen.getByText('3 / 4')).toBeOnTheScreen();
+    expect(screen.getByText('3 / 5')).toBeOnTheScreen();
     await fireEvent.press(screen.getByRole('button', { name: '취소' }));
     expect(mockReplace).toHaveBeenCalledWith('/setup/fill-places');
   });
@@ -45,21 +45,21 @@ describe('오늘·장소 탭에서 연 화면(standalone)은 첫 설정 단계 �
   it('가족에게 보내기: 단계 표시가 없고, 되돌아갈 곳이 없으면 오늘 탭으로 간다', async () => {
     mockCanGoBack = false;
     await renderWith(<FamilySendScreen standalone scheduleId="lunch" title="육전집 점심" api={familyApi} />);
-    expect(screen.queryByText('3 / 4')).toBeNull();
+    expect(screen.queryByText('3 / 5')).toBeNull();
     await fireEvent.press(await screen.findByRole('button', { name: '완료' }));
     expect(mockReplace).toHaveBeenCalledWith('/');
   });
 
   it('일정 장소 검색: 단계 표시가 없다', async () => {
     await renderWith(<PlaceSearchScreen standalone scheduleId="lunch" scheduleApi={makeScheduleApi()} api={makePlacesApi()} />);
-    expect(screen.queryByText('3 / 4')).toBeNull();
+    expect(screen.queryByText('3 / 5')).toBeNull();
     expect(screen.getByText('일정 장소 찾기')).toBeOnTheScreen();
   });
 
   it('자주 가는 곳 검색: 단계 표시가 없고 되돌아갈 곳이 없으면 오늘 탭으로 간다', async () => {
     mockCanGoBack = false;
     await renderWith(<PlaceSearchScreen standalone target="home" scheduleApi={makeScheduleApi()} api={makePlacesApi()} />);
-    expect(screen.queryByText('2 / 4')).toBeNull();
+    expect(screen.queryByText('2 / 5')).toBeNull();
     await fireEvent.press(screen.getByRole('button', { name: '취소' }));
     expect(mockReplace).toHaveBeenCalledWith('/');
   });

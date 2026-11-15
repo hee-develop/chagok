@@ -13,6 +13,10 @@
       "types": "./src/noTravel.ts",
       "default": "./src/noTravel.ts"
     },
+    "./contact-name": {
+      "types": "./src/contactName.ts",
+      "default": "./src/contactName.ts"
+    },
     "./event-name": {
       "types": "./src/eventName.ts",
       "default": "./src/eventName.ts"

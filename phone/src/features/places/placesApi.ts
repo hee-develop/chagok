@@ -23,6 +23,8 @@ export type PlacesApi = {
   searchPlaces: (query: string, signal: AbortSignal) => Promise<PlaceSearchResult>;
   /** 장소를 대상 자리에 넣는다(목 장소 id 또는 외부 결과의 스냅숏). 서버가 그 자리만 바꾸고 전체 상태를 돌려준다. */
   assignPlace: (target: PlaceTarget, pick: string | PlaceSnapshot, signal: AbortSignal) => Promise<Favorites>;
+  /** 단골(others) 하나를 지운다(정책서 10.8 '자주 가는 곳: 추가·삭제'). 서버가 그 자리만 바꾸고 전체 상태를 돌려준다. 이미 없으면(404) HttpError 404를 던진다. */
+  removeOther: (id: string, signal: AbortSignal) => Promise<Favorites>;
 };
 
 function fail(res: { status: number }, what: string): never {
@@ -62,6 +64,11 @@ export const placesApi: PlacesApi = {
     }
     const res = await api.places.favorites.others.$post({ json }, init);
     if (!res.ok) fail(res, 'POST /places/favorites/others');
+    return res.json();
+  },
+  removeOther: async (id, signal) => {
+    const res = await api.places.favorites.others[':id'].$delete({ param: { id } }, { init: { signal } });
+    if (!res.ok) fail(res, 'DELETE /places/favorites/others/:id');
     return res.json();
   },
 };

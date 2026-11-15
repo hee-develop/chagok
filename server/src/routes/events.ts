@@ -3,8 +3,8 @@ import { getConnInfo } from '@hono/node-server/conninfo';
 import { bodyLimit } from 'hono/body-limit';
 import { validator } from 'hono/validator';
 import {
-  MAX_ATTENDEES,
-  MAX_ATTENDEE_NAME_LENGTH,
+  MAX_CONTACTS,
+  MAX_CONTACT_NAME_LENGTH,
   MAX_EVENTS,
   MAX_EVENTS_BODY_BYTES,
   MAX_ID_LENGTH,
@@ -12,6 +12,7 @@ import {
   MAX_NOTES_LENGTH,
   MAX_TITLE_LENGTH,
 } from '../limits.js';
+import { isSendableContactName } from '../contactName.js';
 import { openDenied, type SeatEnv, type SeatGuard } from '../seatScope.js';
 import { DAY_MS, formatSeoulDate, parseAt, parseSeoulDate, seoulDay, seoulDayStart } from '../time.js';
 
@@ -25,7 +26,11 @@ export type PhoneEvent = {
   allDay: boolean;
   locationText: string | null;
   notes: string | null;
-  attendees: string[];
+  /**
+   * 폰이 연락처에서 미리 찾아 둔 연락 상대의 **표시 이름**(0~2개, 정책서 10.5·11장). 번호·이메일은 서버로 오지 않는다.
+   * 참석자 이름은 저장하지 않는다(11장 저장 항목에 없음): 옛 폰이 `attendees`를 보내도 무시한다.
+   */
+  contacts: string[];
   /**
    * 폰에서 사용자가 "이동 일정이에요"로 바꾼 같은 이름 일정. true면 서버의 이동 없음 안전망(온라인·건물 안 판정)을 적용하지 않는다.
    * 없으면 false로 본다(안전망 적용).
@@ -125,7 +130,7 @@ export function createEventsStore(now: () => Date = () => new Date()): EventsSto
 const isString = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max;
 
 /** 요청 본문의 일정 한 건(시각은 ISO8601 문자열). 클라이언트(Hono RPC) 입력 타입이 된다. */
-export type EventInput = Omit<PhoneEvent, 'start' | 'end'> & { start: string; end: string };
+export type EventInput = Omit<PhoneEvent, 'start' | 'end' | 'contacts'> & { start: string; end: string; contacts?: string[] };
 
 type Parsed = { ok: true; events: EventInput[] } | { ok: false; error: string };
 
@@ -153,12 +158,17 @@ function parseEvents(raw: unknown): Parsed {
     if (e.notes !== null && !isString(e.notes, MAX_NOTES_LENGTH)) {
       return { ok: false, error: `notes는 ${MAX_NOTES_LENGTH}자 이하 문자열 또는 null이어야 합니다` };
     }
-    if (
-      !Array.isArray(e.attendees) ||
-      e.attendees.length > MAX_ATTENDEES ||
-      !e.attendees.every((a) => isString(a, MAX_ATTENDEE_NAME_LENGTH) && a.trim() !== '')
-    ) {
-      return { ok: false, error: `attendees는 이름 문자열(${MAX_ATTENDEE_NAME_LENGTH}자 이하) ${MAX_ATTENDEES}개 이하 배열이어야 합니다` };
+    // contacts는 선택이다(없으면 빈 목록). 이름은 앞뒤 공백을 떼고 비어 있지 않아야 한다. `attendees`는 검증도 저장도 하지 않는다(옛 폰이 보내도 무시).
+    let contacts: string[] = [];
+    if (e.contacts !== undefined) {
+      if (
+        !Array.isArray(e.contacts) ||
+        e.contacts.length > MAX_CONTACTS ||
+        !e.contacts.every((c) => isString(c, MAX_CONTACT_NAME_LENGTH * 4) && c.trim().length <= MAX_CONTACT_NAME_LENGTH && isSendableContactName(c))
+      ) {
+        return { ok: false, error: `contacts는 이름 문자열(${MAX_CONTACT_NAME_LENGTH}자 이하, 전화번호·이메일 모양이 아닌 것) ${MAX_CONTACTS}개 이하 배열이어야 합니다` };
+      }
+      contacts = (e.contacts as string[]).map((c) => c.trim());
     }
     if (e.travelConfirmed !== undefined && typeof e.travelConfirmed !== 'boolean') {
       return { ok: false, error: 'travelConfirmed는 boolean이어야 합니다' };
@@ -176,7 +186,7 @@ function parseEvents(raw: unknown): Parsed {
       allDay: e.allDay,
       locationText: e.locationText as string | null,
       notes: e.notes as string | null,
-      attendees: e.attendees as string[],
+      contacts,
       ...(e.travelConfirmed === true ? { travelConfirmed: true } : {}),
     });
   }
@@ -192,7 +202,7 @@ const toJson = (e: PhoneEvent) => ({
   allDay: e.allDay,
   locationText: e.locationText,
   notes: e.notes,
-  attendees: e.attendees,
+  contacts: e.contacts,
   ...(e.travelConfirmed === true ? { travelConfirmed: true as const } : {}),
 });
 
@@ -239,7 +249,7 @@ export const createEventsRoute = (
         return { events: parsed.events };
       }),
       (c) => {
-        const events: PhoneEvent[] = c.req.valid('json').events.map((e) => ({ ...e, start: Date.parse(e.start), end: Date.parse(e.end) }));
+        const events: PhoneEvent[] = c.req.valid('json').events.map((e) => ({ ...e, contacts: e.contacts ?? [], start: Date.parse(e.start), end: Date.parse(e.end) }));
         // 오늘·내일(서울)에 걸치지 않는 일정은 저장하지 않는다.
         const { start, end } = eventWindow(now());
         const inWindow = events.filter((e) => overlaps(e, start, end)).sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
@@ -285,7 +295,11 @@ export const createEventsRoute = (
       for (const scope of new Map([[write.seatId, write], [read.seatId, read]]).values()) {
         scope.data.events.clear();
         // 기본 자리(데모·E2E)만 도착 횟수도 함께 비운다(반복하는 데모가 횟수를 쌓지 않게). 실제 자리·연결 전 버킷의 도착 횟수는 건드리지 않는다.
-        if (scope.kind === 'default') scope.data.arrivals.clear();
+        // 설정(`/settings`)도 같다: 다음 시연이 앞 시연의 스위치를 물려받지 않게 기본값으로 되돌린다.
+        if (scope.kind === 'default') {
+          scope.data.arrivals.clear();
+          scope.data.settings.reset();
+        }
       }
       return c.json({ receivedAt: null as string | null }, 200);
     });

@@ -1,4 +1,5 @@
 import type { DeviceEvent } from '../../calendar-select/calendarSource';
+import type { WireEvent } from '../../calendar-sync/wireEvent';
 import { createCorrectedPlaces } from '../../calendar-sync/correctedPlaces';
 import { createEventSync } from '../../calendar-sync/eventSync';
 import { createFilteredEventsStore } from '../../calendar-sync/filteredEvents';
@@ -32,12 +33,12 @@ const event = (id: string, title: string): DeviceEvent => ({
 function setup(events: DeviceEvent[]) {
   // 서버 상태: 받은 일정(PUT /events는 전체 교체, 없어진 일정의 보정은 버린다), 일정별 보정, 이동 없음 기억.
   const server = {
-    events: [] as DeviceEvent[],
+    events: [] as WireEvent[],
     overrides: new Map<string, { placeId: string | null; noTravel: boolean }>(),
     skips: [] as SkipEntry[],
     bodies: [] as string[][],
   };
-  const row = (e: DeviceEvent) => {
+  const row = (e: Pick<WireEvent, 'id' | 'title'>) => {
     const o = server.overrides.get(e.id);
     return {
       id: e.id,
@@ -82,13 +83,14 @@ function setup(events: DeviceEvent[]) {
   const sync = createEventSync({
     source: { kind: 'device', list: async () => [], listEvents: async () => events },
     fetchSelection: async () => ({ selectedIds: ['1'], source: 'device' }),
-    send: async (sent: DeviceEvent[]) => {
+    send: async (sent: WireEvent[]) => {
       server.bodies.push(sent.map((e) => e.id));
       server.events = sent;
       for (const id of server.overrides.keys()) if (!sent.some((e) => e.id === id)) server.overrides.delete(id);
       return {};
     },
     fetchReceivedAt: async () => 'x',
+    contacts: { prepare: async () => null },
     exceptions,
     skips,
     corrected,

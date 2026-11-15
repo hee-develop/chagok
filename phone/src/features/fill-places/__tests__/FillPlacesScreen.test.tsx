@@ -30,7 +30,7 @@ beforeEach(() => mockPush.mockReset());
 it('서버 일정으로 개수를 계산하고 장소가 있는 일정과 한국 시각도 보여 준다', async () => {
   await renderScreen(makeApi());
   expect(await screen.findByText('장소가 빈 일정이 1개 있어요')).toBeOnTheScreen();
-  expect(screen.getByText('3 / 4')).toBeOnTheScreen();
+  expect(screen.getByText('3 / 5')).toBeOnTheScreen();
   expect(screen.getAllByText('11월 6일 (금) 13:00')).toHaveLength(2);
   expect(screen.getByText('✓ 챔피언스필드')).toBeOnTheScreen();
   await fireEvent.press(screen.getByRole('button', { name: '육전집 점심 장소 넣기' }));
@@ -57,7 +57,7 @@ it('조회가 실패하면 개수를 만들지 않고 재시도하며, 빈 목�
   await fireEvent.press(screen.getByText('다시 시도'));
   await screen.findByText('선택한 캘린더에 확인할 일정이 없어요.');
   await fireEvent.press(screen.getByText('다음'));
-  expect(mockPush).toHaveBeenCalledWith('/setup/pair-car');
+  expect(mockPush).toHaveBeenCalledWith('/setup/talk');
 });
 
 it('저장 실패는 원래 상태를 유지하고 같은 연산만 재시도한다', async () => {
@@ -101,7 +101,7 @@ it('응답이 없는 조회는 시간 제한 후 실패하고 나중에 진행�
   await renderScreen(api, 20);
   await screen.findByText('일정을 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   await fireEvent.press(screen.getByText('나중에 할게요'));
-  expect(mockPush).toHaveBeenCalledWith('/setup/pair-car');
+  expect(mockPush).toHaveBeenCalledWith('/setup/talk');
   expect(api.savePlace).not.toHaveBeenCalled();
 });
 

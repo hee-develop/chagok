@@ -19,6 +19,8 @@ export type DeviceEvent = {
   locationText: string | null;
   notes: string | null;
   attendees: string[];
+  /** 참석자 이메일(소문자). **폰 안에서 연락 상대를 찾는 데만 쓰고 서버로 보내지 않는다**(`docs/contacts.md`). */
+  attendeeEmails?: string[];
   /** 사용자가 "이동 일정이에요"로 바꾼 같은 이름 일정. 서버의 이동 없음 안전망을 건너뛰게 한다(없으면 적용). */
   travelConfirmed?: boolean;
 };

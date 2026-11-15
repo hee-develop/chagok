@@ -1,9 +1,12 @@
 import { CalendarPermissionError, type CalendarSource, type DeviceEvent } from '../../calendar-select/calendarSource';
 import { HttpError } from '../../../api/request';
+import { createContactFinder } from '../../contacts/contactFinder';
+import { makeContacts } from '../../settings/__tests__/support/settingsSupport';
 import { createEventSync, RESEND_UNCHANGED_AFTER_MS } from '../eventSync';
 import { createFilteredEventsStore } from '../filteredEvents';
 import { PAYLOAD_BUDGET_BYTES } from '../payloadBudget';
 import { createTravelExceptions } from '../travelExceptions';
+import { toWireEvent, type WireEvent } from '../wireEvent';
 
 const event = (id = 'a'): DeviceEvent => ({
   id,
@@ -16,6 +19,12 @@ const event = (id = 'a'): DeviceEvent => ({
   notes: null,
   attendees: [],
 });
+
+/** 연락 상대를 찾지 않는 기본 찾기(실제 찾기는 서버 설정·연락처를 읽는다). 연락 상대 테스트는 따로 넣는다. */
+const noContacts = { prepare: jest.fn().mockResolvedValue(null) };
+const createSync = (options: Parameters<typeof createEventSync>[0] = {}) => createEventSync({ contacts: noContacts, ...options });
+/** 서버로 가는 모양: 참석자 이름·이메일 없이 contacts만 싣는다. */
+const wire = (e: DeviceEvent, contacts: string[] = []) => toWireEvent(e, contacts);
 
 const deferred = <T,>() => {
   let resolve!: (v: T) => void;
@@ -37,7 +46,7 @@ const setup = (over: { kind?: 'mock' | 'device'; events?: DeviceEvent[] } = {}) 
   // 서버가 폰 일정을 받은 시각(기본: 받았음).
   const fetchReceivedAt = jest.fn().mockResolvedValue('2026-11-11T00:00:00.000Z');
   const log = jest.fn();
-  const sync = createEventSync({ source, fetchSelection, saveSelection, send, fetchReceivedAt, timeoutMs: 1000, now: () => new Date(clock), log });
+  const sync = createSync({ source, fetchSelection, saveSelection, send, fetchReceivedAt, timeoutMs: 1000, now: () => new Date(clock), log });
   return { sync, listEvents, fetchSelection, saveSelection, send, fetchReceivedAt, log, advance: (ms: number) => (clock += ms) };
 };
 
@@ -48,7 +57,7 @@ describe('createEventSync', () => {
     const { sync, listEvents, send } = setup();
     expect(await sync.run()).toBe('sent');
     expect(listEvents).toHaveBeenCalledWith(['1'], new Date(1_000_000));
-    expect(send).toHaveBeenCalledWith([event()], expect.any(AbortSignal));
+    expect(send).toHaveBeenCalledWith([wire(event())], expect.any(AbortSignal));
   });
 
   it('끝날 때마다 구독자에게 결과를 알리고(성공·실패·권한 없음), 해제하면 알리지 않는다. 구독자가 던져도 동기화는 이어 간다', async () => {
@@ -176,7 +185,7 @@ describe('createEventSync', () => {
     const big = Array.from({ length: 150 }, (_, i) => ({ ...event(`e${i}`), title: '가'.repeat(200), notes: '나'.repeat(2000) }));
     const { sync, send } = setup({ events: big });
     expect(await sync.run()).toBe('sent');
-    const sent = send.mock.calls[0][0] as DeviceEvent[];
+    const sent = send.mock.calls[0][0] as WireEvent[];
     expect(sent.length).toBeLessThan(150);
     expect(sent.length).toBeGreaterThan(0);
     expect(sent[0].id).toBe('e0');
@@ -325,7 +334,7 @@ describe('createEventSync', () => {
       first.resolve({});
       await a;
       expect(send).toHaveBeenCalledTimes(2);
-      expect(send.mock.calls[1][0]).toEqual([event('changed')]);
+      expect(send.mock.calls[1][0]).toEqual([wire(event('changed'))]);
     });
 
     it('합쳐진 호출이 없으면 재실행하지 않는다', async () => {
@@ -373,7 +382,7 @@ describe('createEventSync', () => {
       const listEvents = jest.fn().mockImplementation(async () => events);
       const source: CalendarSource = { kind: 'device', list: async () => [], listEvents };
       const send = jest.fn().mockResolvedValue({});
-      const sync = createEventSync({
+      const sync = createSync({
         source,
         fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
         send,
@@ -394,7 +403,7 @@ describe('createEventSync', () => {
     it('걸러진 일정은 PUT /events 본문에 없고(제목이 폰 밖으로 나가지 않음) 폰 로컬 목록에만 남는다', async () => {
       const { sync, send, filtered } = filterSetup([zoom, room, lunch, empty, trip]);
       expect(await sync.run()).toBe('sent');
-      const body = send.mock.calls[0][0] as DeviceEvent[];
+      const body = send.mock.calls[0][0] as WireEvent[];
       expect(body.map((e) => e.id)).toEqual(['lunch', 'empty', 'trip']);
       const wire = JSON.stringify({ events: body });
       expect(wire).not.toMatch(/고객사 주간 회의|기획 리뷰|비밀번호|Zoom|대회의실/);
@@ -407,7 +416,7 @@ describe('createEventSync', () => {
     it('종일 일정은 이름만 보낸다', async () => {
       const { sync, send } = filterSetup([trip]);
       await sync.run();
-      expect(send.mock.calls[0][0]).toEqual([{ ...trip, notes: null, attendees: [] }]);
+      expect(send.mock.calls[0][0]).toEqual([wire({ ...trip, notes: null })]);
     });
 
     it('거른 일정만 있어도 빈 목록으로 보낸다(서버가 폰 출처로 굳는다)', async () => {
@@ -422,8 +431,8 @@ describe('createEventSync', () => {
       expect(filtered.get()).toHaveLength(2);
       await exceptions.add('  고객사  주간 회의 ');
       expect(await sync.run()).toBe('sent');
-      const body = send.mock.calls[1][0] as DeviceEvent[];
-      expect(body).toEqual([{ ...zoom, travelConfirmed: true }]);
+      const body = send.mock.calls[1][0] as WireEvent[];
+      expect(body).toEqual([wire({ ...zoom, travelConfirmed: true })]);
       expect(filtered.get().map((e) => e.id)).toEqual(['room']);
     });
 
@@ -432,7 +441,7 @@ describe('createEventSync', () => {
       await createTravelExceptions(storage).add('기획 리뷰');
       const filtered = createFilteredEventsStore();
       const send = jest.fn().mockResolvedValue({});
-      const sync = createEventSync({
+      const sync = createSync({
         source: { kind: 'device', list: async () => [], listEvents: async () => [room] },
         fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
         send,
@@ -442,7 +451,7 @@ describe('createEventSync', () => {
         log: jest.fn(),
       });
       await sync.run();
-      expect(send.mock.calls[0][0]).toEqual([{ ...room, travelConfirmed: true }]);
+      expect(send.mock.calls[0][0]).toEqual([wire({ ...room, travelConfirmed: true })]);
       expect(filtered.get()).toEqual([]);
     });
 
@@ -456,7 +465,7 @@ describe('createEventSync', () => {
         const listEvents = jest.fn().mockResolvedValue([]);
         const fetchSelection = jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' });
         arrange({ fetchSelection, listEvents });
-        const sync = createEventSync({
+        const sync = createSync({
           source: { kind: 'device', list: async () => [], listEvents },
           fetchSelection,
           send: jest.fn().mockResolvedValue({}),
@@ -483,7 +492,7 @@ describe('createEventSync', () => {
 
     it('전송이 실패해도 방금 거른 목록은 남는다(읽기는 성공했다)', async () => {
       const filtered = createFilteredEventsStore();
-      const sync = createEventSync({
+      const sync = createSync({
         source: { kind: 'device', list: async () => [], listEvents: async () => [zoom] },
         fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
         send: jest.fn().mockRejectedValue(new Error('500')),
@@ -503,9 +512,9 @@ describe('createEventSync', () => {
       const { sync, send } = filterSetup([online, indoor, place]);
       await sync.run();
       expect(send.mock.calls[0][0]).toEqual([
-        { ...online, notes: null, attendees: [], locationText: null },
-        { ...indoor, notes: null, attendees: [], locationText: null },
-        { ...place, notes: null, attendees: [] },
+        wire({ ...online, notes: null, locationText: null }),
+        wire({ ...indoor, notes: null, locationText: null }),
+        wire({ ...place, notes: null }),
       ]);
     });
 
@@ -518,7 +527,7 @@ describe('createEventSync', () => {
       const filtered = createFilteredEventsStore();
       const send = jest.fn().mockResolvedValue({});
       const log = jest.fn();
-      const sync = createEventSync({
+      const sync = createSync({
         source: { kind: 'device', list: async () => [], listEvents: async () => [room, lunch] },
         fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
         send,
@@ -530,7 +539,7 @@ describe('createEventSync', () => {
       const result = sync.run();
       await jest.advanceTimersByTimeAsync(1001);
       expect(await result).toBe('sent');
-      expect(send.mock.calls[0][0]).toEqual([lunch]);
+      expect(send.mock.calls[0][0]).toEqual([wire(lunch)]);
       expect(filtered.get().map((e) => e.id)).toEqual(['room']);
       expect(log).toHaveBeenCalledWith(expect.stringContaining('이동 예외 목록 읽기 실패'));
     });
@@ -539,7 +548,7 @@ describe('createEventSync', () => {
       const exceptions = createTravelExceptions(memory());
       const filtered = createFilteredEventsStore();
       filtered.set([{ id: 'x', title: 'x', start: 'a', end: 'b', reason: 'online' }]);
-      const sync = createEventSync({ source: { kind: 'mock', list: async () => [], listEvents: async () => [] }, exceptions, filtered, send: jest.fn(), log: jest.fn() });
+      const sync = createSync({ source: { kind: 'mock', list: async () => [], listEvents: async () => [] }, exceptions, filtered, send: jest.fn(), log: jest.fn() });
       expect(await sync.run()).toBe('mock');
       expect(filtered.get()).toHaveLength(1);
     });
@@ -574,7 +583,7 @@ describe('createEventSync', () => {
         return {};
       });
       const log = jest.fn();
-      const sync = createEventSync({
+      const sync = createSync({
         source: { kind: 'device', list: async () => [], listEvents: async () => events },
         fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
         send,
@@ -590,9 +599,28 @@ describe('createEventSync', () => {
     it('기억한 이름의 일정은 서버로 보내지 않고(PUT 본문에 없음) 폰 로컬 목록에 이유 skipped로 둔다', async () => {
       const { sync, send, filtered } = build(skipsOf(['KIA 직관']));
       expect(await sync.run()).toBe('sent');
-      expect(send.mock.calls[0][0]).toEqual([lunch]);
+      expect(send.mock.calls[0][0]).toEqual([wire(lunch)]);
       expect(JSON.stringify(send.mock.calls[0][0])).not.toContain('KIA');
       expect(filtered.get()).toEqual([{ id: 'kia', title: 'KIA 직관', start: kia.start, end: kia.end, reason: 'skipped' }]);
+    });
+
+    it('이름을 기억한 일정(skipped)은 연락 상대를 찾지 않는다: 찾기에는 서버로 보내는 일정만 넘어간다', async () => {
+      const lookup = jest.fn((_e: DeviceEvent) => ['김민수']);
+      const send = jest.fn().mockResolvedValue({});
+      const sync = createSync({
+        source: { kind: 'device', list: async () => [], listEvents: async () => [kia, lunch] },
+        fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
+        send,
+        exceptions: createTravelExceptions(memory()),
+        skips: skipsOf(['KIA 직관']),
+        filtered: createFilteredEventsStore(),
+        contacts: { prepare: async () => lookup },
+        timeoutMs: 1000,
+        log: jest.fn(),
+      });
+      expect(await sync.run()).toBe('sent');
+      expect(lookup.mock.calls.map(([e]) => e.id)).toEqual(['lunch']);
+      expect(send.mock.calls[0][0].map((e: WireEvent) => [e.id, e.contacts])).toEqual([['lunch', ['김민수']]]);
     });
 
     it('일정을 보내기 전에 서버와 맞춘다(바꾼 것을 먼저 올림)', async () => {
@@ -606,7 +634,7 @@ describe('createEventSync', () => {
       const { sync, send, filtered } = build(skips);
       skips.sync.mockResolvedValue({ ...synced, refreshed: false });
       expect(await sync.run()).toBe('sent');
-      expect(send.mock.calls[0][0]).toEqual([lunch]);
+      expect(send.mock.calls[0][0]).toEqual([wire(lunch)]);
       expect(filtered.get().map((e) => e.reason)).toEqual(['skipped']);
     });
 
@@ -643,7 +671,7 @@ describe('createEventSync', () => {
     it('장소를 넣어 보정한 일정은 이름이 기억돼 있어도 거르지 않고 보낸다', async () => {
       const filtered = createFilteredEventsStore();
       const send = jest.fn().mockResolvedValue({});
-      const sync = createEventSync({
+      const sync = createSync({
         source: { kind: 'device', list: async () => [], listEvents: async () => [kia, lunch] },
         fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
         send,
@@ -655,14 +683,14 @@ describe('createEventSync', () => {
         log: jest.fn(),
       });
       expect(await sync.run()).toBe('sent');
-      expect(send.mock.calls[0][0]).toEqual([kia]);
+      expect(send.mock.calls[0][0]).toEqual([wire(kia)]);
       expect(filtered.get().map((e) => [e.id, e.reason])).toEqual([['lunch', 'skipped']]);
     });
 
     it('목 출처는 이동 없음 목록도 맞추지 않고 로컬 목록을 건드리지 않는다(서버는 픽스처를 쓴다)', async () => {
       const skips = skipsOf(['KIA 직관']);
       const filtered = createFilteredEventsStore();
-      const sync = createEventSync({
+      const sync = createSync({
         source: { kind: 'mock', list: async () => [], listEvents: async () => [kia] },
         exceptions: createTravelExceptions(memory()),
         skips,
@@ -677,7 +705,7 @@ describe('createEventSync', () => {
 
     it('기본 skips는 아무 이름도 기억하지 않는다(기존 동작 그대로)', async () => {
       const send = jest.fn().mockResolvedValue({});
-      const sync = createEventSync({
+      const sync = createSync({
         source: { kind: 'device', list: async () => [], listEvents: async () => [kia, lunch] },
         fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
         send,
@@ -687,7 +715,118 @@ describe('createEventSync', () => {
         log: jest.fn(),
       });
       expect(await sync.run()).toBe('sent');
-      expect(send.mock.calls[0][0]).toEqual([kia, lunch]);
+      expect(send.mock.calls[0][0]).toEqual([wire(kia), wire(lunch)]);
+    });
+  });
+
+  describe('연락 상대(contacts)', () => {
+    const memory = () => {
+      const data = new Map<string, string>();
+      return { getItem: async (k: string) => data.get(k) ?? null, setItem: async (k: string, v: string) => void data.set(k, v) };
+    };
+    const dinner = { ...event('dinner'), title: '민수랑 저녁', locationText: '광주 상무', attendees: ['박서연'], attendeeEmails: ['seoyeon@example.com'] };
+    const zoom = { ...event('zoom'), title: '민수 주간 회의', locationText: 'Zoom' }; // 온라인 → 걸러진다
+    const trip = { ...event('trip'), title: '민수 제주 출장', allDay: true, locationText: null };
+    const build = (events: DeviceEvent[], contacts: { prepare: () => Promise<((e: DeviceEvent) => string[]) | null> }) => {
+      const send = jest.fn().mockResolvedValue({});
+      const sync = createEventSync({
+        source: { kind: 'device', list: async () => [], listEvents: jest.fn().mockResolvedValue(events) },
+        fetchSelection: jest.fn().mockResolvedValue({ selectedIds: ['1'], source: 'device' }),
+        send,
+        fetchReceivedAt: jest.fn().mockResolvedValue('2026-11-11T00:00:00.000Z'),
+        exceptions: createTravelExceptions(memory()),
+        filtered: createFilteredEventsStore(),
+        contacts,
+        timeoutMs: 1000,
+        now: () => new Date(1_000_000),
+        log: jest.fn(),
+      });
+      return { sync, send };
+    };
+    const finderOf = (lookup: ((e: DeviceEvent) => string[]) | null) => ({ prepare: jest.fn().mockResolvedValue(lookup) });
+
+    it('찾은 연락 상대의 표시 이름을 일정마다 싣는다', async () => {
+      const lookup = jest.fn((e: DeviceEvent) => (e.id === 'dinner' ? ['김민수'] : []));
+      const { sync, send } = build([dinner, event('plain')], finderOf(lookup));
+      expect(await sync.run()).toBe('sent');
+      expect(send.mock.calls[0][0].map((e: WireEvent) => [e.id, e.contacts])).toEqual([['dinner', ['김민수']], ['plain', []]]);
+    });
+
+    it('참석자 이름·이메일은 서버로 보내지 않는다(연락 상대 표시 이름만)', async () => {
+      const { sync, send } = build([dinner], finderOf((e) => (e.attendees.length > 0 ? ['박서연'] : [])));
+      await sync.run();
+      const body = send.mock.calls[0][0] as WireEvent[];
+      expect(body[0]).not.toHaveProperty('attendees');
+      expect(body[0]).not.toHaveProperty('attendeeEmails');
+      expect(JSON.stringify(body)).not.toContain('seoyeon@example.com');
+      expect(body[0]!.contacts).toEqual(['박서연']);
+    });
+
+    it('찾기가 꺼져 있으면(늦을 때 연락 꺼짐·연락처 권한 없음 → null) 모든 일정의 contacts가 빈 목록이다', async () => {
+      const { sync, send } = build([dinner], finderOf(null));
+      await sync.run();
+      expect(send.mock.calls[0][0][0].contacts).toEqual([]);
+    });
+
+    it('걸러진 일정(온라인·건물 안)은 찾지 않는다: 보내지 않고 찾기에도 넘기지 않는다', async () => {
+      const lookup = jest.fn((_e: DeviceEvent) => ['김민수']);
+      const { sync, send } = build([dinner, zoom], finderOf(lookup));
+      await sync.run();
+      expect(send.mock.calls[0][0].map((e: WireEvent) => e.id)).toEqual(['dinner']);
+      expect(lookup.mock.calls.map(([e]) => e.id)).toEqual(['dinner']);
+    });
+
+    it('종일 일정은 이동 일정이 아니라서 상대를 싣지 않는다(실제 찾기는 종일에 빈 목록을 준다)', async () => {
+      const finder = createContactFinder({
+        source: makeContacts('granted', 'granted', [{ id: '1', name: '김민수', emails: [], phones: ['010-1111-2222'] }]),
+        fetchLateContact: async () => true,
+        log: () => undefined,
+      });
+      const { sync, send } = build([dinner, trip], finder);
+      await sync.run();
+      expect(send.mock.calls[0][0].map((e: WireEvent) => [e.id, e.contacts])).toEqual([['dinner', ['김민수']], ['trip', []]]);
+    });
+
+    it('실제 찾기: 늦을 때 연락이 꺼져 있으면 연락처를 읽지 않고 contacts는 빈 목록이다', async () => {
+      const source = makeContacts('granted', 'granted', [{ id: '1', name: '김민수', emails: [], phones: ['010-1111-2222'] }]);
+      const finder = createContactFinder({ source, fetchLateContact: async () => false, log: () => undefined });
+      const { sync, send } = build([dinner], finder);
+      await sync.run();
+      expect(send.mock.calls[0][0][0].contacts).toEqual([]);
+      expect(source.list).not.toHaveBeenCalled();
+    });
+
+    it('실제 찾기: 연락처 권한이 없으면 contacts는 빈 목록이고 연락처를 읽지 않는다', async () => {
+      const source = makeContacts('denied', 'denied', [{ id: '1', name: '김민수', emails: [], phones: ['010-1111-2222'] }]);
+      const finder = createContactFinder({ source, fetchLateContact: async () => true, log: () => undefined });
+      const { sync, send } = build([dinner], finder);
+      await sync.run();
+      expect(send.mock.calls[0][0][0].contacts).toEqual([]);
+      expect(source.list).not.toHaveBeenCalled();
+    });
+
+    it('같은 내용 판단 키에 들어간다: 연락 상대가 바뀌면 다시 보내고, 같으면 보내지 않는다', async () => {
+      let names = ['김민수'];
+      const { sync, send } = build([dinner], { prepare: async () => () => names });
+      expect(await sync.run()).toBe('sent');
+      expect(await sync.run()).toBe('unchanged');
+      names = ['김민수', '이민수'];
+      expect(await sync.run()).toBe('sent');
+      names = [];
+      expect(await sync.run()).toBe('sent'); // 기능을 끄거나 권한을 잃으면 이전에 보낸 이름이 지워진다
+      expect(send.mock.calls.map((c) => (c[0] as WireEvent[])[0]!.contacts)).toEqual([['김민수'], ['김민수', '이민수'], []]);
+    });
+
+    it('찾기가 던지거나 멈춰도 일정은 연락 상대 없이 보낸다', async () => {
+      const throwing = build([dinner], { prepare: async () => { throw new Error('native'); } });
+      expect(await throwing.sync.run()).toBe('sent');
+      expect(throwing.send.mock.calls[0][0][0].contacts).toEqual([]);
+      jest.useFakeTimers();
+      const hanging = build([dinner], { prepare: () => new Promise(() => {}) });
+      const result = hanging.sync.run();
+      await jest.advanceTimersByTimeAsync(1001);
+      expect(await result).toBe('sent');
+      expect(hanging.send.mock.calls[0][0][0].contacts).toEqual([]);
     });
   });
 });

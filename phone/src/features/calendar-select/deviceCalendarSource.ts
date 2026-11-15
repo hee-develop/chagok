@@ -38,6 +38,21 @@ export function attendeeNames(list: { name?: string; email?: string; isCurrentUs
     .map((name) => clip(name, MAX_ATTENDEE_NAME));
 }
 
+/**
+ * 참석자 이메일(소문자, 중복 없음). 폰 안에서 연락처의 이메일과 맞춰 연락 상대를 찾는 데만 쓰고 서버로 보내지 않는다(`docs/contacts.md`).
+ * 본인(isCurrentUser)·주최자 이메일과 같은 사람·이메일 모양이 아닌 값은 뺀다.
+ */
+export function attendeeEmails(list: { email?: string; isCurrentUser?: boolean }[], organizerEmail?: string): string[] {
+  const seen = new Set<string>();
+  for (const a of list) {
+    const email = (a.email ?? '').trim().toLowerCase();
+    if (a.isCurrentUser === true || !EMAIL_LIKE.test(email) || email === (organizerEmail ?? '').trim().toLowerCase()) continue;
+    seen.add(email);
+    if (seen.size >= MAX_ATTENDEES) break;
+  }
+  return [...seen];
+}
+
 const nonEmpty = (value: string | null | undefined) => (value === null || value === undefined || value.trim() === '' ? null : value);
 
 /**
@@ -102,17 +117,20 @@ export const deviceCalendarSource: CalendarSource = {
     const lookups = Math.min(events.length, ATTENDEE_LOOKUP_LIMIT);
     for (let from = 0; from < lookups; from += ATTENDEE_CONCURRENCY) {
       const chunk = sources.slice(from, Math.min(from + ATTENDEE_CONCURRENCY, lookups));
-      const names = await Promise.all(
+      const found = await Promise.all(
         chunk.map(async ({ e, startMs }) => {
           try {
             const list = await Calendar.getAttendeesForEventAsync(e.id, { instanceStartDate: new Date(startMs).toISOString() });
-            return attendeeNames(list, e.organizerEmail);
+            return { names: attendeeNames(list, e.organizerEmail), emails: attendeeEmails(list, e.organizerEmail) };
           } catch {
-            return []; // 참석자를 못 읽어도 일정은 보낸다
+            return { names: [], emails: [] }; // 참석자를 못 읽어도 일정은 보낸다
           }
         }),
       );
-      names.forEach((list, i) => (events[from + i].attendees = list));
+      found.forEach(({ names, emails }, i) => {
+        events[from + i].attendees = names;
+        events[from + i].attendeeEmails = emails;
+      });
     }
     return events;
   },

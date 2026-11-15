@@ -35,7 +35,7 @@ const EVENT = {
   allDay: false,
   locationText: null,
   notes: null,
-  attendees: [],
+  contacts: [],
 };
 
 const setup = (tokenAtStart: string | null = null) => {

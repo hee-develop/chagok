@@ -43,14 +43,14 @@ describe('CalendarSelectScreen 렌더', () => {
 
     expect(await screen.findByText('캘린더를 골라 주세요')).toBeOnTheScreen();
     expect(screen.getByText('고른 캘린더의 일정만 차에 보내요.')).toBeOnTheScreen();
-    expect(screen.getByText('1 / 4')).toBeOnTheScreen();
+    expect(screen.getByText('1 / 5')).toBeOnTheScreen();
     expect(screen.getByText('일정은 읽기만 해요. 온라인 회의나 회의실 일정은 걸러서 차에 보내지 않아요.')).toBeOnTheScreen();
     expect(screen.getByText('나중에 할게요')).toBeOnTheScreen();
     expect(screen.getByText('캘린더 3개 연결하기')).toBeOnTheScreen();
 
     expect(screen.getAllByRole('checkbox')).toHaveLength(6);
     expect(screen.getAllByTestId('progress-bar-filled')).toHaveLength(1);
-    expect(screen.getAllByTestId('progress-bar-empty')).toHaveLength(3);
+    expect(screen.getAllByTestId('progress-bar-empty')).toHaveLength(4);
   });
 
   it('각 줄이 checkbox 역할과 checked 상태를 노출한다', async () => {
@@ -446,10 +446,10 @@ describe('저장 뒤 일정 보내기', () => {
 });
 
 describe('standalone(설정 탭의 [캘린더 고르기])', () => {
-  it('단계 표시(1 / 4)가 없고 [나중에 할게요] 대신 [닫기]가 있다', async () => {
+  it('단계 표시(1 / 5)가 없고 [나중에 할게요] 대신 [닫기]가 있다', async () => {
     await renderScreen(<CalendarSelectScreen standalone source={source} save={jest.fn()} restore={noSaved} />);
     expect(await screen.findByText('캘린더를 골라 주세요')).toBeOnTheScreen();
-    expect(screen.queryByText('1 / 4')).toBeNull();
+    expect(screen.queryByText('1 / 5')).toBeNull();
     expect(screen.queryAllByTestId('progress-bar-filled')).toHaveLength(0);
     expect(screen.getByText('닫기')).toBeOnTheScreen();
     expect(screen.queryByText('나중에 할게요')).toBeNull();

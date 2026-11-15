@@ -2,6 +2,7 @@ import { act, render, waitFor } from '@testing-library/react-native';
 
 import { HttpError } from '../../../api/request';
 import type { DeviceEvent } from '../../calendar-select/calendarSource';
+import type { WireEvent } from '../../calendar-sync/wireEvent';
 import { createEventSync } from '../../calendar-sync/eventSync';
 import { createFilteredEventsStore } from '../../calendar-sync/filteredEvents';
 import { markTravelByTitle, undoMarkTravel, undoUnskipByTitle, unskipByTitle } from '../../calendar-sync/travelMark';
@@ -40,7 +41,7 @@ function setup(initialSkips: string[] = [], events: DeviceEvent[] = [kia, zoom, 
   const order: string[] = [];
   /** 서버가 받은 /skips 변경 요청 전부(내용 확인용). */
   const puts: SkipChange[] = [];
-  const server = { down: false, sentEvents: [] as DeviceEvent[][] };
+  const server = { down: false, sentEvents: [] as WireEvent[][] };
   const api: SkipsApi = {
     fetch: async () => {
       if (server.down) throw new Error('network');
@@ -59,7 +60,7 @@ function setup(initialSkips: string[] = [], events: DeviceEvent[] = [kia, zoom, 
   const exceptions = createTravelExceptions(memoryStorage());
   const skips = createSkipMemory({ api, storage: memoryStorage(), exceptions, timeoutMs: 1000, loadTimeoutMs: 100, log: jest.fn() });
   const filtered = createFilteredEventsStore();
-  const send = jest.fn(async (sent: DeviceEvent[]) => {
+  const send = jest.fn(async (sent: WireEvent[]) => {
     if (server.down) throw new HttpError(503, 'down');
     order.push('PUT /events');
     server.sentEvents.push(sent);
@@ -70,6 +71,7 @@ function setup(initialSkips: string[] = [], events: DeviceEvent[] = [kia, zoom, 
     fetchSelection: async () => ({ selectedIds: ['1'], source: 'device' }),
     send,
     fetchReceivedAt: async () => '2026-11-11T00:00:00.000Z',
+    contacts: { prepare: async () => null },
     exceptions,
     skips,
     filtered,

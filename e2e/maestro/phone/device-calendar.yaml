@@ -63,7 +63,7 @@ appId: ${APP_ID}
 - extendedWaitUntil:
     visible: '자주 가는 곳을 알려주세요'
     timeout: 15000
-- assertVisible: '2 / 4'
+- assertVisible: '2 / 5'
 - takeScreenshot: 02-places
 
 # 선택 저장 뒤 폰이 오늘·내일 일정을 보냈는지 서버에서 확인한다.
@@ -81,6 +81,11 @@ appId: ${APP_ID}
 - assertVisible: 'E2E Today Meeting'
 - takeScreenshot: 03-fill-places-filtered
 - tapOn: '나중에 할게요'
+# 4단계 '말 거는 방법'은 건너뛰고 5단계(차 연결)로 간다.
+- extendedWaitUntil:
+    visible: '말 거는 방법을 정해요'
+    timeout: 15000
+- tapOn: '건너뛰기'
 - extendedWaitUntil:
     visible: '차와 연결해요'
     timeout: 15000

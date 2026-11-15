@@ -49,6 +49,11 @@ export function makeApi(overrides: Partial<PlacesApi> = {}, initial: Favorites =
     fetchSuggestions: jest.fn().mockResolvedValue(SUGGESTIONS),
     searchPlaces: jest.fn().mockResolvedValue(found([])),
     assignPlace: jest.fn().mockImplementation(assignPlace),
+    removeOther: jest.fn().mockImplementation(async (id: string): Promise<Favorites> => {
+      if (!state.others.some((p) => p.id === id)) throw new HttpError(404, 'DELETE /places/favorites/others/:id 404');
+      state = { ...state, others: state.others.filter((p) => p.id !== id), revision: state.revision + 1 };
+      return state;
+    }),
     ...overrides,
     server: { get: () => state, set: (next) => (state = next) },
   } as FakeApi;

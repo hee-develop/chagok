@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_ATTENDEES, MAX_EVENTS, MAX_LOCATION_LENGTH, MAX_NOTES_LENGTH, MAX_TITLE_LENGTH } from '../src/limits.js';
+import { MAX_CONTACTS, MAX_EVENTS, MAX_LOCATION_LENGTH, MAX_NOTES_LENGTH, MAX_TITLE_LENGTH } from '../src/limits.js';
 import { catalog, newApp } from './helpers.js';
 
 /** 시계를 고정한다: 서울 2026-11-11 10:00. 오늘·내일은 11-11, 11-12. */
@@ -20,7 +20,7 @@ const ev = (over: Record<string, unknown> = {}) => ({
   allDay: false,
   locationText: null,
   notes: null,
-  attendees: [],
+  contacts: [],
   ...over,
 });
 const put = (app: App, body: unknown) =>
@@ -71,9 +71,9 @@ describe('PUT /events', () => {
     expect(body.receivedAt).toBe(new Date(clockMs).toISOString());
   });
 
-  it('시각은 UTC ISO로, 장소 칸·메모·참석자 이름은 그대로 돌려준다', async () => {
+  it('시각은 UTC ISO로, 장소 칸·메모·연락 상대 표시 이름은 그대로 돌려준다(참석자 이름은 저장하지 않는다)', async () => {
     const app = makeApp();
-    await put(app, { events: [ev({ locationText: '광주 육전집', notes: '메모', attendees: ['김철수', '이영희'] })] });
+    await put(app, { events: [ev({ locationText: '광주 육전집', notes: '메모', attendees: ['김철수', '이영희'], contacts: ['김민수'] })] });
     const { body } = await getEvents(app, '2026-11-11');
     expect(body.events[0]).toEqual({
       id: 'e1@1',
@@ -84,7 +84,7 @@ describe('PUT /events', () => {
       allDay: false,
       locationText: '광주 육전집',
       notes: '메모',
-      attendees: ['김철수', '이영희'],
+      contacts: ['김민수'],
     });
   });
 
@@ -102,8 +102,8 @@ describe('PUT /events', () => {
     ['locationText 너무 김', { events: [ev({ locationText: 'x'.repeat(MAX_LOCATION_LENGTH + 1) })] }],
     ['notes 너무 김', { events: [ev({ notes: 'x'.repeat(MAX_NOTES_LENGTH + 1) })] }],
     ['notes undefined', { events: [ev({ notes: undefined })] }],
-    ['참석자 너무 많음', { events: [ev({ attendees: Array.from({ length: MAX_ATTENDEES + 1 }, (_, i) => `n${i}`) })] }],
-    ['참석자 빈 이름', { events: [ev({ attendees: [' '] })] }],
+    ['연락 상대 너무 많음', { events: [ev({ contacts: Array.from({ length: MAX_CONTACTS + 1 }, (_, i) => `n${i}`) })] }],
+    ['연락 상대 빈 이름', { events: [ev({ contacts: [' '] })] }],
     ['allDay 문자열', { events: [ev({ allDay: 'false' })] }],
     ['start 형식 오류', { events: [ev({ start: '2026-11-11 14:00' })] }],
     ['start 오프셋 없음', { events: [ev({ start: '2026-11-11T14:00:00' })] }],
@@ -206,6 +206,7 @@ describe('/schedules/today·places의 출처', () => {
       memo: null,
       care: null,
       attendees: [],
+      contacts: [],
     });
   });
 
@@ -417,7 +418,7 @@ describe('저장소 정리', () => {
   it('replace에 지난 일정이 섞여 있어도 저장하지 않는다', async () => {
     const { createEventsStore } = await import('../src/routes/events.js');
     const store = createEventsStore(() => new Date(NOW));
-    const base = { calendarId: 'c', title: 't', allDay: false, locationText: null, notes: null, attendees: [] };
+    const base = { calendarId: 'c', title: 't', allDay: false, locationText: null, notes: null, contacts: [] };
     store.replace([
       { ...base, id: 'old', start: Date.parse('2026-11-09T10:00:00+09:00'), end: Date.parse('2026-11-09T11:00:00+09:00') },
       { ...base, id: 'now', start: Date.parse('2026-11-11T10:00:00+09:00'), end: Date.parse('2026-11-11T11:00:00+09:00') },

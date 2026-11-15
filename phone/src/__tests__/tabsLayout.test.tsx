@@ -58,7 +58,7 @@ describe('앱을 열 때 탭과 첫 설정을 가른다', () => {
     expect(screen.queryByTestId('tabs')).toBeNull();
   });
 
-  it('저장소에 쓰지 못했어도 이번 실행에서 끝냈으면(4단계 건너뛰기·완료) 새로 연 탭이 첫 설정으로 되돌리지 않는다', async () => {
+  it('저장소에 쓰지 못했어도 이번 실행에서 끝냈으면(5단계 건너뛰기·완료) 새로 연 탭이 첫 설정으로 되돌리지 않는다', async () => {
     useStore({ ...createMemoryStore(), setItem: () => Promise.reject(new Error('storage')) } as ReturnType<typeof createMemoryStore>);
     await markSetupDone();
     await render(<TabsLayout />);

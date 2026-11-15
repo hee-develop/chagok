@@ -1,6 +1,6 @@
-# 4단계 차 연결. scripts/e2e-phone.sh 가 아래 env를 넣어 실행한다.
+# 5단계(첫 설정의 마지막) 차 연결. scripts/e2e-phone.sh 가 아래 env를 넣어 실행한다.
 #   APP_ID      Expo Go 번들 ID (Android host.exp.exponent)
-#   EXPO_URL    4단계 화면으로 바로 들어가는 Metro 주소 (exp://.../--/setup/pair-car)
+#   EXPO_URL    5단계(차 연결) 화면으로 바로 들어가는 Metro 주소 (exp://.../--/setup/pair-car)
 #   SERVER_URL  호스트에서 본 서버 주소
 # 에뮬레이터 카메라로는 차 화면 QR을 찍을 수 없어, 차 대신 서버에서 코드를 받아(issue-pairing-code.js) 번호로 넣는다.
 appId: ${APP_ID}
@@ -15,7 +15,7 @@ env:
     file: expo-dev-menu.yaml
     env:
       SCREEN_TITLE: '차와 연결해요'
-- assertVisible: '4 / 4'
+- assertVisible: '5 / 5'
 - assertVisible: 'QR 찍기'
 - takeScreenshot: 01-pair-car
 
@@ -61,7 +61,7 @@ env:
 - extendedWaitUntil:
     visible: '오늘 일정'
     timeout: 20000
-- assertNotVisible: '4 / 4'
+- assertNotVisible: '5 / 5'
 - extendedWaitUntil:
     visible: '✓ 차와 연결돼 있어요'
     timeout: 20000

@@ -36,9 +36,9 @@ describe('PlacesScreen 렌더', () => {
 
     expect(await screen.findByText('자주 가는 곳을 알려주세요')).toBeOnTheScreen();
     expect(screen.getByText('일정이 없는 날 "어디로 갈까요?"라고 물을 때 바로 후보로 보여드려요.')).toBeOnTheScreen();
-    expect(screen.getByText('2 / 4')).toBeOnTheScreen();
+    expect(screen.getByText('2 / 5')).toBeOnTheScreen();
     expect(screen.getAllByTestId('progress-bar-filled')).toHaveLength(2);
-    expect(screen.getAllByTestId('progress-bar-empty')).toHaveLength(2);
+    expect(screen.getAllByTestId('progress-bar-empty')).toHaveLength(3);
 
     expect(screen.getByText('집')).toBeOnTheScreen();
     expect(screen.getByText('[집 주소]')).toBeOnTheScreen();

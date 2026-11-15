@@ -10,12 +10,13 @@ export const MAX_EVENTS = 200;
  * 폰은 직렬화 크기를 이 안(여유 두고)으로 맞춰 일정을 덜어 보내고, 넘기면 서버가 413으로 거절한다.
  */
 export const MAX_EVENTS_BODY_BYTES = 1024 * 1024;
-/** 일정 제목·장소 칸·메모·참석자 이름 길이 상한(글자). */
+/** 일정 제목·장소 칸·메모 길이 상한(글자). */
 export const MAX_TITLE_LENGTH = 200;
 export const MAX_LOCATION_LENGTH = 300;
 export const MAX_NOTES_LENGTH = 2000;
-export const MAX_ATTENDEES = 50;
-export const MAX_ATTENDEE_NAME_LENGTH = 100;
+/** 일정마다 폰이 미리 찾아 둔 연락 상대 표시 이름: 2명까지(정책서 12장 '연락 상대 후보', 3명 이상이면 폰이 못 찾은 것으로 보고 보내지 않는다)와 이름 길이 상한(글자). */
+export const MAX_CONTACTS = 2;
+export const MAX_CONTACT_NAME_LENGTH = 100;
 /** 앱에서 적는 채비 한 줄의 길이 상한(글자). 차는 30자 이하면 그대로 읽고 길면 '채비가 있어요'만 말한다. */
 export const MAX_CARE_LENGTH = 100;
 /** 자리 하나가 기억하는 '이동 없음' 일정 이름 개수 상한. 차면 새 이름은 409 `full`(폰의 '이동 일정이에요' 예외 목록 상한과 같다). */

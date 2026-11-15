@@ -160,6 +160,7 @@
 카카오 키를 켜면 `GET /places/search`가 외부 장소(`id: kakao:…`)를 줍니다. 두 저장소가 이를 받도록 **목 `placeId` 요청은 그대로 두고 장소 스냅숏 요청을 더했습니다**(둘 중 하나만 보냅니다).
 
 - `PUT /places/favorites/home`·`/work`, `POST /places/favorites/others`: `{ placeId }`(기존, 목 장소 id) 또는 `{ place: { name, lat, lng, address?, externalId? } }`.
+- `DELETE /places/favorites/others/:id`(정책서 10.8 '자주 가는 곳: 추가·삭제'): 단골 하나를 빼고 전체 상태를 돌려줍니다. 가드는 위 쓰기와 같고(폰 토큰 = 그 자리, 기기 id = 연결 전 버킷, 식별 없음 = 기본 자리, 차 토큰은 401) **지우기는 연결 전 버킷을 만들지 않습니다.** id는 목 장소 id·`ext:<externalId>`·`geo:<위도>,<경도>`이고, 집·회사나 없는 id는 404, 100자 초과는 400입니다. 폰은 장소 탭의 단골 줄 [삭제]에서 확인('지울까요?')을 거쳐 부르고, 404(이미 없음)는 지운 것으로 보고 최신 목록을 다시 읽습니다. 집·회사는 삭제 대신 다른 장소로 바꿉니다(`PUT … { placeId: null }`은 있지만 화면은 없음).
 - `PUT /schedules/:id/place`: `{ placeId: string|null }` 또는 `{ place: {…} }` 또는 `{ noTravel: true }`.
 - 스냅숏 검증: `name` 1~200자, `lat`·`lng` 범위, `address` 300자 이하, `externalId`는 영문·숫자·`: _ . -` 100자 미만, 모르는 필드·`placeId`와 함께 보내기는 400.
 - 서버는 스냅숏을 **그 자리 저장소에 값으로** 저장합니다(외부 id를 다시 조회하지 않음). 저장소의 장소 id는 `externalId`가 있으면 `ext:<externalId>`, 없으면 `geo:<위도>,<경도>`입니다(같은 외부 장소를 다른 칸으로 옮기면 원래 칸에서 빠지는 규칙은 목 장소와 같음). 응답은 이전과 같은 모양(`id`·`name`·`address`·`lat`·`lng`)입니다.

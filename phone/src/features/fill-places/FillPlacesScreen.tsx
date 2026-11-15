@@ -30,7 +30,7 @@ type Props = {
 };
 
 /**
- * 첫 설정 3단계: 일정마다 장소를 넣거나 이동 없음으로 둔다. 일정 한 줄의 버튼(장소·채비·가족)은 오늘 탭과 같은 `ScheduleActions`다.
+ * 첫 설정 3단계: 일정마다 장소를 넣거나 이동 없음으로 둔다. [다음]·[나중에 할게요]는 4단계 '말 거는 방법'(`/setup/talk`)으로 간다. 일정 한 줄의 버튼(장소·채비·가족)은 오늘 탭과 같은 `ScheduleActions`다.
  * 폰이 읽을 때 거른 일정(온라인·건물 안·종일)은 흐린 줄로 같이 보이고, 누르면 확인을 거쳐 이동 일정으로 바꾼다.
  */
 export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_TIMEOUT_MS, filteredEvents, travelMark, skips }: Props) {
@@ -103,11 +103,11 @@ export function FillPlacesScreen({ api = schedulePlacesApi, timeoutMs = REQUEST_
           </Pressable> : null}
         </View> : null}
         <Pressable accessibilityRole="button" accessibilityState={{ disabled: !ready || saving }} disabled={!ready || saving}
-          onPress={() => router.push('/setup/pair-car')} style={[styles.primary, (!ready || saving) && styles.disabled]}>
+          onPress={() => router.push('/setup/talk')} style={[styles.primary, (!ready || saving) && styles.disabled]}>
           <Text style={[styles.primaryText, font(600)]}>{t.next}</Text>
         </Pressable>
         <Pressable accessibilityRole="button" accessibilityState={{ disabled: saving }} disabled={saving}
-          onPress={() => router.push('/setup/pair-car')} style={styles.later}>
+          onPress={() => router.push('/setup/talk')} style={styles.later}>
           <Text style={[styles.secondaryText, font(400)]}>{t.later}</Text>
         </Pressable>
       </View>

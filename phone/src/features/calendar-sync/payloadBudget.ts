@@ -1,5 +1,3 @@
-import type { DeviceEvent } from '../calendar-select/calendarSource';
-
 /** 서버 본문 상한(1MB, server/src/limits.ts MAX_EVENTS_BODY_BYTES)에서 여유를 둔 보내기 예산. */
 export const PAYLOAD_BUDGET_BYTES = 900 * 1024;
 
@@ -19,9 +17,9 @@ export function utf8Length(text: string): number {
 }
 
 /** 일정을 앞에서부터 담아 직렬화 크기가 예산을 넘기기 전까지만 남긴다(넘기면 서버가 413으로 거절하므로 덜어 보낸다). */
-export function fitToBudget(events: DeviceEvent[], maxBytes: number = PAYLOAD_BUDGET_BYTES): DeviceEvent[] {
+export function fitToBudget<T extends object>(events: T[], maxBytes: number = PAYLOAD_BUDGET_BYTES): T[] {
   let total = '{"events":[]}'.length;
-  const kept: DeviceEvent[] = [];
+  const kept: T[] = [];
   for (const event of events) {
     const size = utf8Length(JSON.stringify(event)) + 1; // 쉼표 포함
     if (total + size > maxBytes) break;

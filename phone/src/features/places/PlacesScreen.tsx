@@ -3,14 +3,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { isClientError, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
+import { HttpError, isClientError, REQUEST_TIMEOUT_MS, requestWithTimeout } from '../../api/request';
 import { strings } from '../../i18n/ko';
 import { SetupHeader } from '../../ui/SetupHeader';
 import { colors, useFont } from '../../ui/theme';
 import { notSaved, type PlaceTarget } from './favorites';
 import { PlaceRow } from './PlaceRow';
 import { placeMemoryApi, type PlaceMemoryApi } from './memoryApi';
-import { placesApi, type Favorites, type PlacesApi, type Suggestion } from './placesApi';
+import { placesApi, type Favorites, type Place, type PlacesApi, type Suggestion } from './placesApi';
+import { RemoveOtherConfirm } from './RemoveOtherConfirm';
 import { RememberedPlaces } from './RememberedPlaces';
 import { SkipList } from '../skips/SkipList';
 import type { UseSkipsOptions } from '../skips/useSkips';
@@ -43,6 +44,8 @@ export function PlacesScreen({ api = placesApi, memoryApi = placeMemoryApi, time
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [saveIssue, setSaveIssue] = useState<SaveIssue>(null);
+  /** 삭제 확인을 보이는 단골의 id(장소 탭에서만). */
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   const saveRequest = useRef<AbortController | null>(null);
   const retryLast = useRef<(() => void) | null>(null);
@@ -144,6 +147,23 @@ export function PlacesScreen({ api = placesApi, memoryApi = placeMemoryApi, time
     void run(suggestion.id, (signal) => api.assignPlace('other', suggestion.id, signal));
   };
 
+  /** 단골 삭제. 이미 없으면(404) 지운 것과 같으므로 최신 목록을 다시 받아 보인다. */
+  const removeOther = (place: Place) => {
+    void run(`remove:${place.id}`, async (signal) => {
+      try {
+        const next = await api.removeOther(place.id, signal);
+        setConfirming(null);
+        return next;
+      } catch (error) {
+        if (error instanceof HttpError && error.status === 404) {
+          setConfirming(null);
+          return api.fetchFavorites(signal);
+        }
+        throw error;
+      }
+    });
+  };
+
   const openSearch = (target: PlaceTarget) => {
     router.push({ pathname: '/setup/place-search', params: mode === 'tab' ? { target, from: 'tab' } : { target } });
   };
@@ -198,9 +218,23 @@ export function PlacesScreen({ api = placesApi, memoryApi = placeMemoryApi, time
                 disabled={saving}
                 onPress={() => openSearch('work')}
               />
-              {favorites.others.map((place, index) => (
-                <PlaceRow key={place.id} icon="pin" title={place.name} subtitle={place.address} isLast={index === favorites.others.length - 1} />
-              ))}
+              {favorites.others.map((place, index) => {
+                const last = index === favorites.others.length - 1;
+                // 장소 탭에서는 단골마다 [삭제]가 있고 확인('지울까요?')을 거친다(정책서 10.8 '자주 가는 곳: 추가·삭제').
+                return mode === 'tab' ? (
+                  <View key={place.id} testID={`favorite-other-${place.id}`}>
+                    <PlaceRow icon="pin" title={place.name} subtitle={place.address} isLast={last && confirming !== place.id}
+                      action={{ label: t.removeOther.delete, accessibilityLabel: t.removeOther.deleteLabel(place.name), disabled: saving,
+                        onPress: () => { setSaveIssue(null); setConfirming(place.id); } }} />
+                    {confirming === place.id ? (
+                      <RemoveOtherConfirm name={place.name} busy={savingKey === `remove:${place.id}`}
+                        onCancel={() => { setConfirming(null); setSaveIssue(null); }} onConfirm={() => removeOther(place)} />
+                    ) : null}
+                  </View>
+                ) : (
+                  <PlaceRow key={place.id} icon="pin" title={place.name} subtitle={place.address} isLast={last} />
+                );
+              })}
             </View>
 
             {suggestions.length > 0 ? (

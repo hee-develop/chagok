@@ -33,11 +33,11 @@ describe('PlaceSearchScreen 렌더', () => {
     ['home', '집 주소 찾기'],
     ['work', '회사 주소 찾기'],
     ['other', '장소 찾기'],
-  ] as const)('%s 대상은 제목 "%s"과 2 / 4 진행 표시, 입력칸, 취소를 보여 준다', async (target, title) => {
+  ] as const)('%s 대상은 제목 "%s"과 2 / 5 진행 표시, 입력칸, 취소를 보여 준다', async (target, title) => {
     await renderScreen(<PlaceSearchScreen target={target} api={makeApi()} debounceMs={0} />);
 
     expect(screen.getByRole('header', { name: title })).toBeOnTheScreen();
-    expect(screen.getByText('2 / 4')).toBeOnTheScreen();
+    expect(screen.getByText('2 / 5')).toBeOnTheScreen();
     expect(input()).toBeOnTheScreen();
     expect(screen.getByPlaceholderText('장소 이름이나 주소로 검색')).toBeOnTheScreen();
     expect(screen.getByText('취소')).toBeOnTheScreen();
@@ -391,7 +391,7 @@ describe('3단계 일정 장소 검색', () => {
     const api = makeApi({ searchPlaces: jest.fn().mockResolvedValue(found([APT])) });
     const scheduleApi = { fetchSchedules: jest.fn(), saveCare: jest.fn(), undoNoTravel: jest.fn(), savePlace: jest.fn().mockResolvedValue({ id: 'lunch', place: APT, locationText: APT.name, noTravel: false }) };
     await renderScreen(<PlaceSearchScreen scheduleId="lunch" api={api} scheduleApi={scheduleApi} debounceMs={0} />);
-    expect(screen.getByText('3 / 4')).toBeOnTheScreen();
+    expect(screen.getByText('3 / 5')).toBeOnTheScreen();
     await fireEvent.changeText(input(), '아파트');
     await fireEvent.press(await screen.findByRole('button', { name: `${APT.name}, ${APT.address}` }));
     await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
