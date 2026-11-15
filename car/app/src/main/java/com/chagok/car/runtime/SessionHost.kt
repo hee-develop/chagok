@@ -85,6 +85,7 @@ class SessionHost(
                     location = LocationAdapter(context, DebugHooks.locationSink(post)),
                 ),
                 post,
+                clock,
             )
         },
 ) {

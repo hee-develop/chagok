@@ -3,6 +3,7 @@ package com.chagok.car
 import com.chagok.car.domain.Rules
 import com.chagok.car.flow.Event
 import com.chagok.car.runtime.Adapters
+import java.time.Clock
 import java.time.Duration
 
 /** 릴리스 빌드에는 주입 통로가 없어 어댑터를 그대로 쓴다. */
@@ -17,5 +18,5 @@ object DebugHooks {
     fun locationSink(post: (Event) -> Unit): (Event) -> Unit = post
 
     @Suppress("UNUSED_PARAMETER")
-    fun wrap(adapters: Adapters, post: (Event) -> Unit): Adapters = adapters
+    fun wrap(adapters: Adapters, post: (Event) -> Unit, clock: Clock): Adapters = adapters
 }

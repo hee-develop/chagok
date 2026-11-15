@@ -1,13 +1,18 @@
 package com.chagok.car.fakenavi
 
 import java.time.Duration
+import java.time.Instant
 
 /**
  * 가짜 경로를 달리는 중인 차의 진행. 시연용 시간 압축으로 전체 경로를 [driveMillis]밀리초에 지나간다.
  * 앞으로 가는 것은 주행 중일 때뿐이다([advance]의 driving). 도착 여부는 [arrived] 하나로만 판정한다.
  * [travelTime]을 주면(디버그 신호 `trip`) 패널의 남은 시간·도착 예정은 경로 길이로 구한 값 대신 그 값을 쓴다. 지나가는 실제 시간은 그대로 [driveMillis]다.
+ *
+ * 도착 예정 시각([arrivalAt])은 출발 시각([departedAt], 데모 시계) + 경로 전체 소요 시간으로 **경로를 시작할 때 한 번 정해져 고정**이다.
+ * 달리는 동안 줄어드는 것은 [remainingMeters]·[remainingDuration]뿐이다. (남은 시간 + 지금 시각으로 매번 다시 구하면, 시연용으로 경로를 몇 초에 압축해 달릴 때
+ * 남은 시간은 수십 분씩 줄고 시계는 몇 초만 가서 도착 예정이 계속 앞당겨져 보인다.)
  */
-class FakeTrip(val route: FakeRoute, val driveMillis: Long, travelTime: Duration? = null) {
+class FakeTrip(val route: FakeRoute, val driveMillis: Long, val departedAt: Instant, travelTime: Duration? = null) {
     init {
         require(driveMillis > 0) { "drive는 양수여야 합니다: ${driveMillis}ms" }
     }
@@ -16,6 +21,9 @@ class FakeTrip(val route: FakeRoute, val driveMillis: Long, travelTime: Duration
 
     /** 경로 전체의 소요 시간. 주입값이 없으면 경로 길이로 구한 값 */
     val totalDuration: Duration = travelTime ?: route.duration
+
+    /** 도착 예정 시각 = 출발 시각 + 경로 전체 소요 시간. 달리는 중에도 [advance]·[seek]로 바뀌지 않는다. */
+    val arrivalAt: Instant = departedAt + totalDuration
 
     /** 출발점에서 지금까지 간 거리(미터) */
     var traveledMeters = 0.0

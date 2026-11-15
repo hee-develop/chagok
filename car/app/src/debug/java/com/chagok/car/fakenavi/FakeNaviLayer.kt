@@ -123,7 +123,7 @@ class FakeNaviLayer(context: Context, private val d: DesignScale, private val cl
             if (panel.visibility != View.GONE) panel.visibility = View.GONE
             return
         }
-        val content = FakeNaviPhrases.panel(trip, clock.instant(), clock.zone)
+        val content = FakeNaviPhrases.panel(trip, clock.zone)
         var changed = setText(destination, content.destination ?: "")
         changed = setText(headline, content.headline) or changed
         changed = setText(detail, content.detail ?: "") or changed

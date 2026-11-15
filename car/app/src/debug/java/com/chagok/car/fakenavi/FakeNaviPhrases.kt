@@ -1,6 +1,5 @@
 package com.chagok.car.fakenavi
 
-import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
@@ -46,16 +45,15 @@ object FakeNaviPhrases {
     /** "도착 · 212km 남음" */
     fun detail(remainingMeters: Double) = "도착 · ${km(remainingMeters)} 남음"
 
-    /** 도착 예정 시각 "12:50". [now] + 남은 시간을 [zone]으로 표기한다. */
-    fun eta(trip: FakeTrip, now: Instant, zone: ZoneId): String =
-        ETA.format((now + trip.remainingDuration).atZone(zone))
+    /** 도착 예정 시각 "12:50". 경로를 시작할 때 정해진 [FakeTrip.arrivalAt]을 [zone]으로 표기한다(지금 시각이나 남은 시간으로 다시 구하지 않는다). */
+    fun eta(trip: FakeTrip, zone: ZoneId): String = ETA.format(trip.arrivalAt.atZone(zone))
 
-    fun panel(trip: FakeTrip, now: Instant, zone: ZoneId): FakeNaviPanel {
+    fun panel(trip: FakeTrip, zone: ZoneId): FakeNaviPanel {
         val name = trip.route.destination.name
         return if (trip.arrived) {
             FakeNaviPanel(null, arrived(name), null)
         } else {
-            FakeNaviPanel(destination(name), eta(trip, now, zone), detail(trip.remainingMeters))
+            FakeNaviPanel(destination(name), eta(trip, zone), detail(trip.remainingMeters))
         }
     }
 }
