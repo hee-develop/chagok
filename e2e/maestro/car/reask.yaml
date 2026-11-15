@@ -39,9 +39,12 @@ env:
 - takeScreenshot: ${SHOT_DIR}/03-reask-card
 
 # 4. 다시 묻는 카드도 30초 무응답으로 접힌다. 한 번만 묻는다: 또 달린 뒤 P단에 넣어도 묻지 않는다
+#    3단계 P단에서 몇 십 초밖에 안 지났으면 이번 P단은 '잠깐 정차(마지막 P단 뒤 10분 안)'라 한 번만 규칙이 없어도 묻지 않는다.
+#    그래서 데모 시계를 15분 앞으로 보내(advance) 잠깐 정차가 아니게 한 뒤 달리고 P단에 넣는다: 이때 묻지 않는 것이 '한 번만'의 효과다.
 - extendedWaitUntil:
     notVisible: ".*육전집 점심까지.*"
     timeout: 45000
+- openLink: chagok-debug://signal?advance=15
 - openLink: chagok-debug://signal?gear=D
 - openLink: chagok-debug://signal?gear=P
 - takeScreenshot: ${SHOT_DIR}/04-no-second-reask

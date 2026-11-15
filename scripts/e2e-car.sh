@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 차량 앱 E2E(Maestro): debug 앱을 설치하고 서버를 띄운 뒤 flow를 돌리고 서버를 내린다.
 # flow는 e2e/maestro/car/ 아래 pairing.yaml, boarding-briefing.yaml, depart-route.yaml, arrival-next.yaml, home-exit.yaml, fake-navi.yaml(가짜 길안내, debug 전용), reask.yaml(무응답 30초 → 다시 묻기), target.yaml(이미 그곳), overlap.yaml(일정 겹침, 전용 픽스처 overlap-day.json이라 서버를 다시 띄움) 순서로 돈다.
-# 환경 변수 E2E_FLOWS로 일부만 돌릴 수 있다.
+# 환경 변수 E2E_FLOWS로 일부만 돌릴 수 있다. 전용 픽스처 flow(overlap)가 끝나면 종료 때 기본 픽스처로 다시 받아 앱에 남은 그 일정 사본을 덮어쓴다.
 # 위치 권한(ACCESS_FINE_LOCATION·COARSE)은 설치 직후 adb로 미리 허용해 권한 설명 카드가 flow를 가리지 않게 한다(앱이 도는 사용자 기준).
 # home-exit flow는 안에서 연결을 새로 만들고(차 화면 번호를 폰 대신 서버에 보냄) 그 폰 토큰으로 서버 자주 가는 곳의 집(mock-home-apt)을 등록·해제한다.
 # 연결된 자리가 있는 서버는 식별 없는 읽기(차 앱)를 그 자리로 보내므로, 이 스크립트가 식별 없이 PUT하면 기본 자리에 들어가 차가 못 본다(docs/pairing.md).
@@ -74,6 +74,21 @@ reset_injection() {
   sleep 1
 }
 
+# 전용 픽스처(overlap)로 돈 flow가 끝나면 앱이 그 픽스처의 오늘 일정 사본을 저장해 둔 채 남는다(다른 데모·E2E·수동 확인에 겹침 일정이 보임).
+# 서버를 기본 픽스처로 다시 띄우고 데모 초기화 신호로 일정을 다시 받게 해 그 사본을 기본 일정으로 덮어쓴다. 시각은 flow들이 쓰는 데모 시각(09:20 서울)이다.
+restore_default_schedules() {
+  [ -n "$CURRENT_FIXTURE" ] || return 0
+  stop_server
+  CURRENT_FIXTURE=""
+  if start_server ""; then
+    adb shell "am start -a android.intent.action.VIEW -d 'chagok-debug://signal?now=2026-11-06T00:20:00Z'" </dev/null >/dev/null 2>&1 ||
+      echo "경고: 데모 초기화 신호를 보내지 못했습니다(adb 실패). 앱에 전용 픽스처의 일정 사본이 남아 있을 수 있습니다." >&2
+    sleep 2
+  else
+    echo "경고: 기본 픽스처 서버를 띄우지 못해 앱에 전용 픽스처의 일정 사본이 남아 있을 수 있습니다." >&2
+  fi
+}
+
 cleanup() {
   # trap 안에서는 한 단계가 실패해도 끝까지 간다(set -e 해제)
   set +e
@@ -81,6 +96,7 @@ cleanup() {
   mkdir -p "$SHOTS"
   find "$RUN_DIR/maestro" -path '*takeScreenshot*' -name '*.png' -exec cp {} "$SHOTS/" \; 2>/dev/null || true
   reset_injection
+  restore_default_schedules
   restore_timezone
   stop_server
 }
@@ -115,7 +131,7 @@ start_server() {
     curl -fs "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break
     sleep 1
   done
-  curl -fs "http://127.0.0.1:$PORT/health" >/dev/null || { echo "서버가 뜨지 않았습니다. $RUN_DIR/server.log 를 확인하세요." >&2; exit 1; }
+  curl -fs "http://127.0.0.1:$PORT/health" >/dev/null || { echo "서버가 뜨지 않았습니다. $RUN_DIR/server.log 를 확인하세요." >&2; return 1; }
 }
 
 # flow마다 쓰는 픽스처: overlap은 점심과 경기가 이동 시간상 겹치는 전용 픽스처, 나머지는 기본 픽스처
@@ -127,7 +143,7 @@ fixture_for() {
 }
 
 CURRENT_FIXTURE="$(fixture_for "$(echo "${E2E_FLOWS:-pairing}" | awk '{print $1}')")"
-start_server "$CURRENT_FIXTURE"
+start_server "$CURRENT_FIXTURE" || exit 1
 
 echo "== Maestro 실행 (스크린샷: $SHOTS)"
 cd "$ROOT"
@@ -138,7 +154,7 @@ for flow in ${E2E_FLOWS:-pairing boarding-briefing depart-route arrival-next hom
   if [ "$want" != "$CURRENT_FIXTURE" ]; then
     stop_server
     CURRENT_FIXTURE="$want"
-    start_server "$CURRENT_FIXTURE"
+    start_server "$CURRENT_FIXTURE" || exit 1
   fi
   echo "-- $flow"
   "$MAESTRO" test "e2e/maestro/car/$flow.yaml" \
