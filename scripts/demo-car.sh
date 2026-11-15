@@ -28,7 +28,9 @@ FLOW_LOG="$RUN_DIR/flow.log"
 SETTLE="${DEMO_SETTLE:-4}"   # 신호를 넣은 뒤 로그를 모으는 기본 시간(초)
 
 # 같은 에뮬레이터를 쓰는 Maestro만 막는다(다른 에뮬레이터를 대상으로 --device를 준 실행은 상관없다).
-if pgrep -fl maestro.cli.AppKt 2>/dev/null | grep -v -- '--device' >/dev/null || pgrep -fl maestro.cli.AppKt 2>/dev/null | grep -- "--device $SERIAL " >/dev/null; then
+# macOS의 `pgrep -fl`은 명령줄을 잘라 --device가 안 보이므로(다른 에뮬레이터 실행도 막게 됨) ps로 전체 명령줄을 읽는다.
+maestro_cmds() { ps -axo command 2>/dev/null | grep -E '^[^ ]*/bin/java .*maestro\.cli\.AppKt' || true; }
+if maestro_cmds | grep -v -- '--device' >/dev/null || maestro_cmds | grep -- "--device $SERIAL " >/dev/null; then
   echo "같은 에뮬레이터($SERIAL)를 쓰는 Maestro가 실행 중입니다. 끝난 뒤 다시 실행하세요." >&2
   exit 1
 fi
