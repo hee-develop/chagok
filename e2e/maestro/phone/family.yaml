@@ -1,0 +1,369 @@
+# 가족 탭: 가족 만들기 → 초대 코드 표시 → 서버에 직접 두 번째 구성원 참여 → 도착 예정 공유 → 요청 만들기(들르기: 장소 검색, 채비: 우리 차)
+# → 보낸 요청 상태 문구 → 서버에서 상태 바꾸기 → 문구 갱신 → 오늘 탭의 받은 가족 요청 → 가족에서 나가기.
+# scripts/e2e-phone.sh 가 아래 env를 넣어 실행한다. 이 flow만 따로 돌린다: E2E_FLOWS=family pnpm e2e:phone
+#   APP_ID      Expo Go 번들 ID (Android host.exp.exponent)
+#   EXPO_URL    Metro 접속 주소 (exp://...), 경로 없이 앱 첫 화면으로 들어간다
+#   SERVER_URL  호스트에서 본 서버 주소
+# 엄마 쪽(두 번째 구성원)은 폰이 하나뿐이라 서버를 직접 부르는 스크립트(family-*.js)가 대신한다. 상태는 탭을 바꿨다 돌아오면(포커스) 다시 읽으므로
+# 45초 주기를 기다리지 않고 확인한다. 탭 막대는 testID(tabbar-family 등)로 누른다.
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+- openLink: ${EXPO_URL}
+- runFlow:
+    file: expo-dev-menu.yaml
+    env:
+      SCREEN_TITLE: '캘린더를 골라 주세요'
+- runFlow: skip-setup.yaml
+
+# 1) 가족이 없으면 가족 묶기: 가족 만들기 / 초대 코드 넣기. 일정으로 보내는 기존 입구는 그대로 있다.
+- tapOn:
+    id: 'tabbar-family'
+- extendedWaitUntil:
+    visible: '가족 묶기'
+    timeout: 20000
+- assertVisible: '가족 만들기'
+- assertVisible: '초대 코드 넣기'
+- assertVisible: '부르는 이름'
+- takeScreenshot: 01-family-none
+- scrollUntilVisible:
+    element: '일정 고르러 가기'
+    direction: DOWN
+    timeout: 20000
+
+# 2) 부르는 이름을 적고 가족 만들기 -> 구성원(나)과 초대 코드(나 혼자라 맨 위)
+- scrollUntilVisible:
+    element: '가족 만들기'
+    direction: UP
+    timeout: 20000
+- tapOn:
+    id: 'family-name-input'
+- inputText: '아빠'
+- hideKeyboard
+- tapOn: '가족 만들기'
+- extendedWaitUntil:
+    visible: '우리 가족'
+    timeout: 20000
+- assertVisible: '아빠 \(나\)'
+- assertVisible: '차 연결 안 됨'
+- assertVisible: '1명 / 최대 6명'
+- assertVisible: '[A-Z2-9]{4}-[A-Z2-9]{4}'
+- assertVisible: '.*시간 .*분 남았어요'
+- assertVisible: '공유하기'
+- takeScreenshot: 02-family-created
+
+# 3) 초대 코드를 서버에 직접 넣어 두 번째 구성원(엄마)을 참여시킨다. 탭을 바꿨다 돌아오면 구성원이 둘이 된다.
+- copyTextFrom:
+    id: 'family-invite-code'
+- runScript:
+    file: family-join.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      CODE: ${maestro.copiedText}
+      NAME: '엄마'
+- tapOn:
+    id: 'tabbar-places'
+- extendedWaitUntil:
+    visible: '자주 가는 곳을 알려주세요'
+    timeout: 15000
+- tapOn:
+    id: 'tabbar-family'
+- extendedWaitUntil:
+    visible: '요청 만들기'
+    timeout: 20000
+- assertVisible: '아직 보낸 요청이 없어요\.'
+- assertVisible: '아직 받은 요청이 없어요\.'
+- takeScreenshot: 03-family-with-mom
+
+# 4) 도착 예정 공유(기본 꺼짐): 엄마에게 켜면 서버에 저장된다(엄마가 아빠에게서 받는 공유가 켜짐).
+- scrollUntilVisible:
+    element: '켜면 그 사람이 보낸 약속·픽업 요청의 도착 예정 시각과 운전 중인지를 보여 줘요\. 위치와 경로는 보내지 않아요\.'
+    direction: DOWN
+    timeout: 20000
+- assertVisible: '꺼짐'
+- runScript:
+    file: family-assert.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      MOM_TOKEN: ${output.momToken}
+      EXPECT_MEMBERS: '2'
+      EXPECT_SHARES: 'false'
+      EXPECT_RECEIVED: ''
+- tapOn: '엄마에게 도착 예정 보여 주기'
+- extendedWaitUntil:
+    visible: '켜짐'
+    timeout: 15000
+- takeScreenshot: 04-share-on
+- runScript:
+    file: family-assert.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      MOM_TOKEN: ${output.momToken}
+      EXPECT_MEMBERS: '2'
+      EXPECT_SHARES: 'true'
+      EXPECT_RECEIVED: ''
+- scrollUntilVisible:
+    element: '우리 가족'
+    direction: DOWN
+    timeout: 20000
+- assertVisible: '엄마, 차 연결 안 됨'
+- takeScreenshot: 05-members-bottom
+
+# 5) 요청 만들기(들르기): 카테고리 -> 받는 사람 -> 장소(장소 검색 재사용)·살 것 -> 한 줄 메모(30자 넘으면 안내)
+- scrollUntilVisible:
+    element: '요청 만들기'
+    direction: UP
+    timeout: 20000
+- tapOn: '요청 만들기'
+- extendedWaitUntil:
+    visible: '무엇을 부탁할까요\?'
+    timeout: 15000
+- assertVisible: '채비'
+- assertVisible: '들르기'
+- assertVisible: '약속 가기'
+- assertVisible: '데려다주기·픽업'
+- takeScreenshot: 06-request-categories
+- tapOn: '들르기'
+- extendedWaitUntil:
+    visible: '누구에게 보낼까요\?'
+    timeout: 10000
+- tapOn: '엄마'
+- assertVisible: '차에 연결하지 않은 가족에게 보내면 그 사람 폰 앱에서만 보여요\.'
+# '우리 차'는 가족 폰이 연결된 차가 있을 때만 보인다(아직 없음).
+- assertNotVisible: '우리 차.*'
+- tapOn: '들를 곳 찾기'
+- extendedWaitUntil:
+    visible: '요청 장소 찾기'
+    timeout: 15000
+- assertNotVisible: '[0-9] / [0-9]'
+- inputText: '전통시장'
+- extendedWaitUntil:
+    visible: '.*예시 전통시장.*'
+    timeout: 15000
+- assertVisible: '‘전통시장’ 그대로 쓰기'
+- takeScreenshot: 07-request-place-search
+- tapOn: '.*예시 전통시장.*'
+- extendedWaitUntil:
+    visible: '좌표를 함께 보내요'
+    timeout: 15000
+- assertVisible: '좌표를 함께 보내요'
+- scrollUntilVisible:
+    element:
+      id: 'request-item-input'
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: 'request-item-input'
+- inputText: '건전지'
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: 'request-memo-input'
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: 'request-memo-input'
+- inputText: '현관 앞 신발장 위에 두고 가 주세요 정말 고마워요 꼭이요 부탁해요'
+- hideKeyboard
+- assertVisible: '.*30자가 넘어서 차는 ‘메모가 있어요’라고만 말해요\.'
+- takeScreenshot: 08-request-form
+- scrollUntilVisible:
+    element: '보내기'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '보내기'
+
+# 6) 보낸 요청이 가족 탭에 맨 위로 보인다. 엄마 폰이 아직 어느 차에도 연결되지 않아 폰 앱에서만 볼 수 있다.
+- extendedWaitUntil:
+    visible: '엄마에게 · 들르기'
+    timeout: 20000
+- assertVisible: '선택한 요청'
+- assertVisible: '예시 전통시장 · 건전지 · 오늘 중'
+- assertVisible: '메모: 현관 앞 신발장 위에 두고 가 주세요 정말 고마워요 꼭이요 부탁해요'
+- assertVisible: '폰 앱에서만 볼 수 있어요'
+- takeScreenshot: 09-sent-phone-only
+
+# 7) 엄마 폰이 차에 연결되면(서버 스크립트) 다시 읽을 때 '차에 타면 전해요'. 차가 전달·수락·완료로 바꿀 때마다 문구가 갱신된다.
+- runScript:
+    file: family-connect.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      MOM_TOKEN: ${output.momToken}
+- tapOn:
+    id: 'tabbar-places'
+- extendedWaitUntil:
+    visible: '자주 가는 곳을 알려주세요'
+    timeout: 15000
+- tapOn:
+    id: 'tabbar-family'
+- extendedWaitUntil:
+    visible: '차에 타면 전해요'
+    timeout: 20000
+- assertNotVisible: '폰 앱에서만 볼 수 있어요'
+- takeScreenshot: 10-sent-riding
+- runScript:
+    file: family-status.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      MOM_TOKEN: ${output.momToken}
+      CAR_TOKEN: ${output.carToken}
+      SEAT_ID: ${output.seatId}
+      CATEGORY: 'stop'
+      STATUS: 'delivered'
+- tapOn:
+    id: 'tabbar-places'
+- extendedWaitUntil:
+    visible: '자주 가는 곳을 알려주세요'
+    timeout: 15000
+- tapOn:
+    id: 'tabbar-family'
+- extendedWaitUntil:
+    visible: '전달했어요'
+    timeout: 20000
+- takeScreenshot: 11-sent-delivered
+- runScript:
+    file: family-status.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      MOM_TOKEN: ${output.momToken}
+      CAR_TOKEN: ${output.carToken}
+      SEAT_ID: ${output.seatId}
+      CATEGORY: 'stop'
+      STATUS: 'accepted'
+- tapOn:
+    id: 'tabbar-places'
+- extendedWaitUntil:
+    visible: '자주 가는 곳을 알려주세요'
+    timeout: 15000
+- tapOn:
+    id: 'tabbar-family'
+- extendedWaitUntil:
+    visible: '수락했어요'
+    timeout: 20000
+- runScript:
+    file: family-status.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      MOM_TOKEN: ${output.momToken}
+      CAR_TOKEN: ${output.carToken}
+      SEAT_ID: ${output.seatId}
+      CATEGORY: 'stop'
+      STATUS: 'completed'
+- tapOn:
+    id: 'tabbar-places'
+- extendedWaitUntil:
+    visible: '자주 가는 곳을 알려주세요'
+    timeout: 15000
+- tapOn:
+    id: 'tabbar-family'
+- extendedWaitUntil:
+    visible: '들렀어요'
+    timeout: 20000
+- takeScreenshot: 12-sent-completed
+
+# 8) 엄마 폰이 차에 연결되면 '우리 차'를 고를 수 있다. 채비를 우리 차로 보낸다.
+- scrollUntilVisible:
+    element: '요청 만들기'
+    direction: UP
+    timeout: 20000
+- tapOn: '요청 만들기'
+- extendedWaitUntil:
+    visible: '무엇을 부탁할까요\?'
+    timeout: 15000
+- tapOn: '채비'
+- extendedWaitUntil:
+    visible: '누구에게 보낼까요\?'
+    timeout: 10000
+- assertVisible: '우리 차 · 엄마 연결'
+- tapOn: '우리 차 · 엄마 연결'
+- scrollUntilVisible:
+    element:
+      id: 'request-item-input'
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: 'request-item-input'
+- inputText: '우산'
+- hideKeyboard
+- scrollUntilVisible:
+    element: '가져갈 때'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '가져갈 때'
+- takeScreenshot: 13-request-car
+- scrollUntilVisible:
+    element: '보내기'
+    direction: DOWN
+    timeout: 20000
+- tapOn: '보내기'
+- extendedWaitUntil:
+    visible: '우리 차에 · 채비'
+    timeout: 20000
+- assertVisible: '우산 · 가져갈 때'
+- takeScreenshot: 14-sent-car
+
+# 9) 받는 사람 폰에는 알림이 없고 오늘 탭 '받은 가족 요청'에만 보인다. 누르면 가족 탭의 그 요청으로 간다.
+- runScript:
+    file: family-send.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      MOM_TOKEN: ${output.momToken}
+- tapOn:
+    id: 'tabbar-today'
+- extendedWaitUntil:
+    visible: '오늘 일정'
+    timeout: 20000
+- scrollUntilVisible:
+    element: '차에 연결하면 전해 드려요'
+    direction: DOWN
+    timeout: 20000
+- assertVisible: '보낸 사람 엄마 · 약속 가기'
+- assertVisible: '.*예시치과의원'
+- takeScreenshot: 15-today-received
+- tapOn: '보낸 사람 엄마 · 약속 가기'
+- extendedWaitUntil:
+    visible: '선택한 요청'
+    timeout: 20000
+- scrollUntilVisible:
+    element: '보낸 사람 엄마 · 약속 가기'
+    direction: DOWN
+    timeout: 20000
+- assertVisible: '메모: 보험증 챙겨요'
+- takeScreenshot: 16-family-received
+
+# 10) 가족에서 나가기: 보낸·받은 요청과 공유 설정이 지워진다는 안내를 거쳐야 나간다. 나가면 가족 묶기로 돌아온다.
+- scrollUntilVisible:
+    element: '가족에서 나가기'
+    direction: DOWN
+    timeout: 30000
+- tapOn: '가족에서 나가기'
+- extendedWaitUntil:
+    visible: '가족에서 나갈까요\?'
+    timeout: 10000
+- scrollUntilVisible:
+    element: '내가 보낸 요청과 받은 요청, 도착 예정 공유 설정이 지워져요\..*'
+    direction: DOWN
+    timeout: 20000
+- takeScreenshot: 17-leave-confirm
+- scrollUntilVisible:
+    element:
+      id: 'family-leave-yes'
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: 'family-leave-yes'
+- extendedWaitUntil:
+    visible: '가족에서 나갔어요\..*'
+    timeout: 20000
+- assertVisible: '가족 만들기'
+- assertNotVisible: '우리 가족'
+- takeScreenshot: 18-left
+- runScript:
+    file: family-assert.js
+    env:
+      SERVER_URL: ${SERVER_URL}
+      MOM_TOKEN: ${output.momToken}
+      EXPECT_MEMBERS: '1'
+      EXPECT_SHARES: ''
+      EXPECT_RECEIVED: '0'
