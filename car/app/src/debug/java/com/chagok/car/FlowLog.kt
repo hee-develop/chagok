@@ -4,6 +4,7 @@ import android.util.Log
 import com.chagok.car.domain.ScheduleStatus
 import com.chagok.car.flow.Effect
 import com.chagok.car.flow.Event
+import com.chagok.car.ui.TileView
 import kotlin.math.roundToInt
 
 /**
@@ -69,6 +70,7 @@ object FlowLog {
                 c.sub?.let { "sub=${oneLine(it)}" },
                 c.footnote?.let { "각주=$it" },
                 c.notice?.let { "안내=$it" },
+                energyTiles(c.tiles),
                 "버튼=${listOfNotNull(c.primary, c.secondary).joinToString("/")}".takeIf { c.primary != null || c.secondary != null },
             )
             "카드 ${parts.joinToString(" | ")}"
@@ -83,6 +85,18 @@ object FlowLog {
         is Effect.RequestTravelTime -> "소요 시간 요청: ${effect.place.name}"
         is Effect.Save -> describeSave(effect)
         else -> null
+    }
+
+    /** 에너지 제안 카드의 후보·배터리(연료) 타일을 한 덩어리로(시나리오가 타일 내용을 확인한다). 다른 카드에는 없다. */
+    private fun energyTiles(tiles: List<TileView>): String? {
+        val parts = tiles.mapNotNull { tile ->
+            when (tile) {
+                is TileView.EnergyStop -> "충전소 ${listOfNotNull(tile.name, tile.badge, tile.detail.ifEmpty { null }, tile.note, tile.source).joinToString(" · ")}"
+                is TileView.EnergyLevel -> "${tile.title} ${tile.percent?.let { "$it " }.orEmpty()}${tile.level} / ${tile.reason}"
+                else -> null
+            }
+        }
+        return parts.takeIf { it.isNotEmpty() }?.let { "타일=[${it.joinToString("] [")}]" }
     }
 
     private fun describeSave(effect: Effect.Save): String? {

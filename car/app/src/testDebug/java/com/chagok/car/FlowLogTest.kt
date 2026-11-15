@@ -12,6 +12,7 @@ import com.chagok.car.flow.Event
 import com.chagok.car.flow.Phrases
 import com.chagok.car.flow.Snapshot
 import com.chagok.car.ui.CardContent
+import com.chagok.car.ui.TileView
 import java.time.Instant
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
@@ -38,6 +39,25 @@ class FlowLogTest {
         )
         assertEquals(
             "카드 칩=정차 중 · 출발 전 | voice=광주 직관 날이에요! / 1시 육전집 점심까지 3시간 40분이에요. | sub=출발할까요? | 버튼=응, 출발/잠깐만",
+            FlowLog.lineOf(Effect.ShowCard(card)),
+        )
+    }
+
+    @Test fun `에너지 제안 카드는 후보 타일과 배터리 타일 내용도 적는다`() {
+        val card = CardContent(
+            status = "정차 중 · 출발 전",
+            voice = "다음은 5시 KIA 직관이에요.",
+            sub = "챔필에서 걸어서 5분 거리에 빈 완속 충전기가 있어요. 경기 보는 동안 충전할까요?",
+            tiles = listOf(
+                TileView.EnergyStop("챔필 옆 충전소", "지금 비어 있음", "완속 2대", "경기장까지 걸어서 5분", "충전기 현황 · 환경부 충전소 정보"),
+                TileView.EnergyLevel("배터리", "45%", "· 갈 수 있는 거리 150km", "집까지 300km라 한 번 충전이 필요해요"),
+            ),
+            primary = "응, 거기로",
+            secondary = "그냥 챔필로",
+        )
+        assertEquals(
+            "카드 칩=정차 중 · 출발 전 | voice=다음은 5시 KIA 직관이에요. | sub=챔필에서 걸어서 5분 거리에 빈 완속 충전기가 있어요. 경기 보는 동안 충전할까요? | " +
+                "타일=[충전소 챔필 옆 충전소 · 지금 비어 있음 · 완속 2대 · 경기장까지 걸어서 5분 · 충전기 현황 · 환경부 충전소 정보] [배터리 45% · 갈 수 있는 거리 150km / 집까지 300km라 한 번 충전이 필요해요] | 버튼=응, 거기로/그냥 챔필로",
             FlowLog.lineOf(Effect.ShowCard(card)),
         )
     }

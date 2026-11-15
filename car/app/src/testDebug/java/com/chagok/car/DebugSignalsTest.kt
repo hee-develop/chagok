@@ -38,4 +38,15 @@ class DebugSignalsTest {
             assertThrows("range=$bad", IllegalArgumentException::class.java) { DebugSignals.rangeOf(bad) }
         }
     }
+
+    @Test fun `battery는 0에서 100 사이만 받고 real이면 주입을 푼다`() {
+        assertEquals(45.0, DebugSignals.batteryOf("45")!!, 0.0)
+        assertEquals(0.0, DebugSignals.batteryOf("0")!!, 0.0)
+        assertEquals(100.0, DebugSignals.batteryOf("100")!!, 0.0)
+        assertEquals(12.5, DebugSignals.batteryOf("12.5")!!, 0.0)
+        assertNull(DebugSignals.batteryOf("real"))
+        for (bad in listOf("-1", "101", "abc", "", "NaN", "Infinity")) {
+            assertThrows("battery=$bad", IllegalArgumentException::class.java) { DebugSignals.batteryOf(bad) }
+        }
+    }
 }

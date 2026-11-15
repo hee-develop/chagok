@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Typeface
 import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.StateListDrawable
 import android.text.TextUtils
@@ -228,6 +229,11 @@ class FlowLayout(context: Context, private val gap: Int) : ViewGroup(context) {
     }
 }
 
+/** 600 굵기 글자(폰트 가족의 semibold)로 바꾼다. 스타일(styles.xml)에 없는 400 글자 속 강조에만 쓴다. */
+private fun TextView.semibold() {
+    typeface = Typeface.create(typeface, 600, false)
+}
+
 /** ContextTile 공통 바탕: surface-200, radius-l, 패딩 세로 space-l 가로 space-xl */
 private fun tileBase(context: Context, d: DesignScale, gap: Int): LinearLayout = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
@@ -259,11 +265,59 @@ fun contextTile(context: Context, d: DesignScale, tile: TileView, onPick: (Int) 
         addView(d.text(R.style.t_body, d.color(R.color.ink_2)).apply { text = tile.line; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
     }
     is TileView.EnergyStop -> tileBase(context, d, d.dimenInt(R.dimen.tile_gap)).apply {
-        addView(d.text(R.style.t_label, d.color(R.color.ink_3)).apply { text = tile.label })
-        addView(d.text(R.style.t_body, d.color(R.color.ink)).apply { text = tile.name; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
-        if (tile.line.isNotEmpty()) {
-            addView(d.text(R.style.t_body, d.color(R.color.ink_2)).apply { text = tile.line; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
+        addView(d.text(R.style.t_label, d.color(R.color.ink_3)).apply { text = tile.name; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
+        if (tile.badge != null || tile.detail.isNotEmpty()) {
+            addView(
+                LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    tile.badge?.let { badge ->
+                        addView(
+                            d.text(R.style.t_body, d.color(R.color.ink)).apply {
+                                text = badge
+                                isSingleLine = true
+                                semibold()
+                                background = d.shape(d.color(R.color.surface_300), d.dimen(R.dimen.radius_s))
+                                setPadding(d.dimenInt(R.dimen.space_s), d.dimenInt(R.dimen.space_2xs), d.dimenInt(R.dimen.space_s), d.dimenInt(R.dimen.space_2xs))
+                            },
+                        )
+                    }
+                    if (tile.detail.isNotEmpty()) {
+                        addView(
+                            d.text(R.style.t_body, d.color(R.color.ink_2)).apply { text = tile.detail; isSingleLine = true },
+                            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                                if (tile.badge != null) marginStart = d.dimenInt(R.dimen.space_xs)
+                            },
+                        )
+                    }
+                },
+            )
         }
+        tile.note?.let { note ->
+            addView(d.text(R.style.t_body, d.color(R.color.ink)).apply { text = note; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
+        }
+        tile.source?.let { source ->
+            addView(d.text(R.style.t_meta, d.color(R.color.ink_3)).apply { text = source; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END })
+        }
+    }
+    is TileView.EnergyLevel -> tileBase(context, d, d.dimenInt(R.dimen.tile_gap)).apply {
+        addView(d.text(R.style.t_label, d.color(R.color.ink_3)).apply { text = tile.title })
+        addView(
+            LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                tile.percent?.let { percent ->
+                    addView(d.text(R.style.t_body, d.color(R.color.ink)).apply { text = percent; isSingleLine = true; semibold() })
+                }
+                addView(
+                    d.text(R.style.t_body, d.color(R.color.ink)).apply { text = tile.level; isSingleLine = true; ellipsize = TextUtils.TruncateAt.END },
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                        if (tile.percent != null) marginStart = d.dimenInt(R.dimen.space_2xs)
+                    },
+                )
+            },
+        )
+        // 이유 한 줄은 '챙길 것'과 같은 주황 계열(care-label)로 강조한다.
+        addView(d.text(R.style.t_body, d.color(R.color.care_label)).apply { text = tile.reason; maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
     }
     // 고정 높이 카드에 줄 세 개가 들어가도록 세로 패딩을 줄이고 줄 사이 간격 없이 붙인다(줄 높이가 터치 영역이다).
     is TileView.Candidates -> tileBase(context, d, d.dimenInt(R.dimen.tile_gap)).apply {

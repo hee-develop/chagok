@@ -7,6 +7,7 @@ import com.chagok.car.domain.BoardingDecision
 import com.chagok.car.domain.DestinationOption
 import com.chagok.car.domain.EnergyGoal
 import com.chagok.car.domain.EnergyKind
+import com.chagok.car.domain.EnergyShort
 import com.chagok.car.domain.EnergyStop
 import com.chagok.car.domain.EnergyStopKind
 import com.chagok.car.domain.Favorite
@@ -14,6 +15,7 @@ import com.chagok.car.domain.FavoriteKind
 import com.chagok.car.domain.HomePickup
 import com.chagok.car.domain.MemoNote
 import com.chagok.car.domain.PickupItem
+import com.chagok.car.domain.Place
 import com.chagok.car.domain.Question
 import com.chagok.car.domain.Rules
 import com.chagok.car.domain.Schedule
@@ -78,14 +80,21 @@ object Phrases {
     const val HINT_SAY_JUST_GO = "“그냥 갈게”라고 말해도 돼요"
     const val HINT_AUTO_FOLD = "출발하면 자동으로 접혀요"
     const val HINT_SAY_PICK = "“첫 번째”, “두 번째”라고 말해도 돼요"
-    const val HINT_SAY_OTHER = "“다른 데”라고 하면 다른 곳을 찾아요"
 
     // 에너지 제안(정책서 5장·9장). 문장은 이 틀에서만 만든다.
-    const val ACCEPT_CHARGE = "응, 충전하고 출발"
-    const val ACCEPT_REFUEL = "응, 넣고 출발"
+    /** 머무는 동안 충전하는 완속 충전소를 목적지로 안내하는 수락 버튼. */
+    const val ACCEPT_CHARGE_HERE = "응, 거기로"
+
+    /** 경로상 급속 충전·주유를 들렀다 가는 수락 버튼. */
+    const val ACCEPT_STOP_BY = "응, 들렀다 가요"
 
     /** 충전기 상태를 새로 받지 못해 낡은 데이터로 답했을 때 카드 한 줄(빈 곳을 단정하지 않는다, `docs/energy.md`). */
     const val ENERGY_STALE = "충전기 상태를 새로 확인하지 못했어요."
+
+    /** 에너지 타일 아랫줄. 완속 충전소 외(경로상 급속·주유)는 걸어서 가는 곳이 아니라 가는 길에 들르는 곳이다. */
+    private const val ROUTE_SIDE_NOTE = "가는 길에 있어요"
+    private const val SOURCE_CHARGER = "충전기 현황 · 환경부 충전소 정보"
+    private const val SOURCE_GAS = "가격 · 오피넷"
 
     const val ASK_DESTINATION = "어디로 갈까요?"
 
@@ -275,57 +284,112 @@ object Phrases {
     /** 에너지가 모자란데 후보를 못 얻었을 때 출발 제안에 붙이는 한 문장(가안). */
     fun energyLow(kind: EnergyKind) = if (kind.electric) "배터리가 모자랄 수 있어요." else "기름이 모자랄 수 있어요."
 
-    /** 에너지 제안 큰 문구: "집까지 300km인데 배터리로는 모자라요." 기름 차는 "…기름이 모자라요." 끝이 일정이면 "오늘 일정까지". */
-    fun energyShortage(q: Question.Energy): String {
-        val goal = if (q.goal == EnergyGoal.HOME) HOME else "오늘 일정"
-        val lack = if (q.kind.electric) "배터리로는 모자라요." else "기름이 모자라요."
-        return "${goal}까지 ${q.neededKm}km인데 $lack"
-    }
+    /** 에너지 제안 큰 문구: 대상 일정 안내 "다음은 5시 KIA 직관이에요."(재탑승 한 줄·첫 탑승 모두). 충전·주유 제안은 그 아래 [energyAsk]다. */
+    fun energyVoice(target: Schedule, zone: ZoneId): String = "다음은 ${spokenTime(target.start, zone)} ${iEyo(target.title)}."
+
+    /** 경기를 보러 가는 일정인가(제목에 '직관'·'경기', 가안). 머무는 동안 표현과 타일의 "경기장까지"에 쓴다. */
+    private fun isGame(title: String) = "직관" in title || "경기" in title
+
+    /** "경기 보는 동안"(직관·경기 일정) 또는 "머무는 동안"(가안). */
+    fun stayPhrase(title: String) = if (isGame(title)) "경기 보는 동안" else "머무는 동안"
+
+    /** 충전소에서 일정 장소까지 걸어서 가는 분(직선거리 ÷ [Rules.WALK_METERS_PER_MINUTE], 올림, 최소 1분. 가안). */
+    fun walkMinutes(stop: EnergyStop, place: Place): Int =
+        kotlin.math.ceil(stop.place.position.distanceTo(place.position) / Rules.WALK_METERS_PER_MINUTE).toInt().coerceAtLeast(1)
 
     /**
-     * 에너지 제안 질문(한 카드에 질문 하나): 충전은 "{충전소}에서 충전하고 갈까요?", 서버가 식사 묶음을 알린 맨 앞 휴게소는
-     * "{휴게소}에서 식사하면서 충전하고 갈까요?", 주유는 "{주유소}에서 넣고 갈까요?".
+     * 에너지 제안 질문(한 카드에 질문 하나), 큰 문구 [energyVoice] 아래에 말한다.
+     * - 머무는 동안 충전하는 완속 충전소: "챔필에서 걸어서 5분 거리에 빈 완속 충전기가 있어요. 경기 보는 동안 충전할까요?"
+     *   ({장소 짧은 이름}은 서버가 준 별칭이고 없으면 장소 이름. 충전기 상태가 낡았으면 '빈'을 뺀다)
+     * - 서버가 식사 묶음을 알린 맨 앞 휴게소: "{휴게소}에서 식사하면서 충전하고 갈까요?"
+     * - 그 밖의 경로상 급속: "{충전소}에서 충전하고 갈까요?", 주유: "{주유소}에서 넣고 갈까요?"
      */
     fun energyAsk(q: Question.Energy): String {
-        val name = q.stop.place.name
+        val stop = q.stop
+        val name = stop.place.name
+        val place = q.target.place
         return when {
-            q.stop.kind == EnergyStopKind.GAS_STATION -> "${name}에서 넣고 갈까요?"
+            stop.kind == EnergyStopKind.GAS_STATION -> "${name}에서 넣고 갈까요?"
+            stop.kind == EnergyStopKind.SLOW_CHARGER && place != null -> {
+                val empty = if (q.stale) "" else "빈 "
+                "${place.shortName}에서 걸어서 ${walkMinutes(stop, place)}분 거리에 ${empty}완속 충전기가 있어요. ${stayPhrase(q.target.title)} 충전할까요?"
+            }
             q.mealBundle && q.index == 0 -> "${name}에서 식사하면서 충전하고 갈까요?"
             else -> "${name}에서 충전하고 갈까요?"
         }
     }
 
-    /** 에너지 제안을 수락해 길안내를 시작했을 때 결과 한 줄. */
+    /** 에너지 제안 수락 버튼: 완속 충전소는 "응, 거기로", 경로상 급속·주유는 "응, 들렀다 가요". */
+    fun energyAccept(q: Question.Energy) = if (q.stopIsDestination) ACCEPT_CHARGE_HERE else ACCEPT_STOP_BY
+
+    /** 에너지 제안 보조 버튼: 충전 없이 원래 장소로 가는 "그냥 챔필로"(조사 처리). */
+    fun energyJustGo(q: Question.Energy) = "그냥 ${ro(q.target.place?.shortName ?: q.target.title)}"
+
+    /** 질문마다 거절로 듣는 말(이어 붙인 꼴). 에너지 제안은 보조 버튼 라벨과 "그냥 가"다. */
+    fun rejectPhrases(question: Question?): List<String> = when (question) {
+        is Question.Energy -> listOf(energyJustGo(question).replace(" ", ""), "그냥가")
+        else -> emptyList()
+    }
+
+    /** 완속 충전소를 목적지로 안내하기 시작했을 때 결과 한 줄. */
+    fun energyChargeRouteStarted(stopName: String) = "${ro(stopName)} 안내할게요."
+
+    /** 경로상 급속·주유를 경유지로 넣어 길안내를 시작했을 때 결과 한 줄. */
     fun energyRouteStarted(stopName: String) = "$stopName 들렀다 갈게요."
 
-    /** 후보 타일 머리: 충전·주유 종류. */
-    private fun energyStopLabel(kind: EnergyStopKind) = when (kind) {
-        EnergyStopKind.SLOW_CHARGER -> "일정 근처 충전소"
-        EnergyStopKind.FAST_CHARGER -> "경로상 급속 충전"
-        EnergyStopKind.GAS_STATION -> "주유소"
+    /**
+     * 후보 타일(충전소 이름이 머리). 충전은 둘째 줄에 "지금 비어 있음" 배지 + "완속 2대", 완속 충전소는 "경기장까지 걸어서 5분",
+     * 아랫줄 작은 글씨에 출처. 낡은 데이터면 빈 곳을 단정하지 않아 배지와 대수를 뺀다. 주유는 "휘발유 1,639원/L". 모르는 값은 뺀다.
+     */
+    private fun energyStopTile(q: Question.Energy): TileView.EnergyStop {
+        val stop = q.stop
+        val place = q.target.place
+        return when (stop.kind) {
+            EnergyStopKind.GAS_STATION -> {
+                val fuel = if (stop.priceFuel == "diesel") "경유" else "휘발유"
+                val price = stop.priceWon?.let { "$fuel ${java.text.NumberFormat.getInstance(Locale.KOREA).format(it)}원/L" }.orEmpty()
+                TileView.EnergyStop(stop.place.name, badge = null, detail = price, note = ROUTE_SIDE_NOTE, source = SOURCE_GAS)
+            }
+            else -> {
+                val speed = if (stop.kind == EnergyStopKind.FAST_CHARGER) "급속" else "완속"
+                val available = stop.availableCount
+                val total = stop.totalCount
+                val badge = when {
+                    q.stale -> null
+                    available != null && available > 0 -> "지금 비어 있음"
+                    available == 0 && (total ?: 0) > 0 -> "모두 충전 중"
+                    else -> null
+                }
+                val count = when {
+                    q.stale -> null
+                    available != null && available > 0 -> available
+                    available == 0 -> total?.takeIf { it > 0 }
+                    else -> null
+                }
+                val note = if (stop.kind == EnergyStopKind.SLOW_CHARGER && place != null) {
+                    "${if (isGame(q.target.title)) "경기장" else place.shortName}까지 걸어서 ${walkMinutes(stop, place)}분"
+                } else {
+                    ROUTE_SIDE_NOTE
+                }
+                TileView.EnergyStop(stop.place.name, badge = badge, detail = listOfNotNull(speed, count?.let { "${it}대" }).joinToString(" "), note = note, source = SOURCE_CHARGER)
+            }
+        }
     }
 
     /**
-     * 후보 타일 둘째 줄. 충전은 "완속 7kW · 빈 충전기 2대"(낡은 데이터면 빈 곳을 말하지 않는다), 주유는 "휘발유 1,639원/L". 모르는 값은 뺀다.
+     * 배터리·연료 타일: 머리 "배터리"(전기차)·"연료", 한 줄 "45% · 갈 수 있는 거리 150km"(잔량을 모르면 거리만),
+     * 강조 한 줄(주황) 이유 "집까지 300km라 한 번 충전이 필요해요"(기름 차는 "…주유가 필요해요").
      */
-    private fun energyStopLine(stop: EnergyStop, stale: Boolean): String = when (stop.kind) {
-        EnergyStopKind.GAS_STATION -> {
-            val fuel = if (stop.priceFuel == "diesel") "경유" else "휘발유"
-            stop.priceWon?.let { "$fuel ${java.text.NumberFormat.getInstance(Locale.KOREA).format(it)}원/L" }.orEmpty()
-        }
-        else -> {
-            val speed = if (stop.kind == EnergyStopKind.FAST_CHARGER) "급속" else "완속"
-            val power = stop.powerKw?.let { "$speed ${it}kW" } ?: speed
-            val available = stop.availableCount
-            val total = stop.totalCount
-            val state = when {
-                stale -> null
-                available != null && available > 0 -> "빈 충전기 ${available}대"
-                available == 0 && (total ?: 0) > 0 -> "모두 충전 중"
-                else -> null
-            }
-            listOfNotNull(power, state).joinToString(" · ")
-        }
+    fun energyLevelTile(short: EnergyShort): TileView.EnergyLevel {
+        val range = "갈 수 있는 거리 ${short.rangeKm}km"
+        val goal = if (short.goal == EnergyGoal.HOME) HOME else "오늘 일정"
+        val need = if (short.kind.electric) "한 번 충전이" else "주유가"
+        return TileView.EnergyLevel(
+            title = if (short.kind.electric) "배터리" else "연료",
+            percent = short.percent?.let { "$it%" },
+            level = if (short.percent != null) "· $range" else range,
+            reason = "${goal}까지 ${short.neededKm}km라 $need 필요해요",
+        )
     }
 
     /**
@@ -426,11 +490,12 @@ object Phrases {
         return when (val q = decision.question) {
             is Question.Depart -> {
                 val target = q.target
-                val (voice, sub) = greeting(briefing.allDayTitle, target, briefing.memo, now, zone, q.lowEnergy)
+                val (voice, sub) = greeting(briefing.allDayTitle, target, briefing.memo, now, zone, q.lowEnergy?.kind)
+                // 후보를 못 얻어 한 문장만 붙인 때는 배터리·연료 타일이 이유 한 줄과 함께 앞에 선다(두 칸이라 뒤 타일이 밀려날 수 있다).
                 base.copy(
                     voice = voice,
                     sub = sub,
-                    tiles = boardingTiles(briefing, zone),
+                    tiles = (listOfNotNull(q.lowEnergy?.let { energyLevelTile(it) }) + boardingTiles(briefing, zone)).take(2),
                     primary = ACCEPT_DEPART,
                     secondary = HOLD,
                 )
@@ -443,15 +508,14 @@ object Phrases {
             )
             is Question.AskDestination -> askDestinationCard(base, q, zone)
             is Question.Energy -> {
-                // 한 카드에 질문 하나: 출발 제안의 인사·채비 문장은 이 제안으로 대신하고, 후보 타일 하나 + 오늘 일정 타일(첫 탑승)을 보인다.
-                val stopTile = TileView.EnergyStop(energyStopLabel(q.stop.kind), q.stop.place.name, energyStopLine(q.stop, q.stale))
+                // 시안(2026-11-15): 큰 문구는 대상 일정 안내, 그 아래가 충전·주유 제안이고 타일은 후보 + 배터리·연료(이유 한 줄) 두 칸이다.
+                // 한 카드에 질문 하나라 출발 제안의 인사·채비 문장과 오늘 일정·채비 타일은 이 제안으로 대신한다.
                 base.copy(
-                    voice = energyShortage(q),
+                    voice = energyVoice(q.target, zone),
                     sub = energyAsk(q),
-                    tiles = (listOf(stopTile) + boardingTiles(briefing, zone)).take(2),
-                    primary = if (q.kind.electric) ACCEPT_CHARGE else ACCEPT_REFUEL,
-                    secondary = HOLD,
-                    hints = listOf(HINT_SAY_YES, HINT_SAY_OTHER),
+                    tiles = listOf(energyStopTile(q), energyLevelTile(q.short)),
+                    primary = energyAccept(q),
+                    secondary = energyJustGo(q),
                     footnote = listOfNotNull(footnote, ENERGY_STALE.takeIf { q.stale && q.stop.kind != EnergyStopKind.GAS_STATION }).joinToString(" ").ifEmpty { null },
                 )
             }

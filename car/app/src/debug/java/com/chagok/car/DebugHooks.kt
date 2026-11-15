@@ -64,6 +64,9 @@ object DebugInjection {
     /** 신호 `range`로 주입한 주행 가능 거리(km). null이면 주입하지 않은 것이다(`range=real`). 차가 읽은 값 대신 이 값을 쓴다. */
     @Volatile var rangeKm: Double? = null
 
+    /** 신호 `battery`로 주입한 배터리·연료 잔량(%, 0~100). null이면 주입하지 않은 것이다(`battery=real`). 카드의 배터리 타일 "45% · …"에 쓰인다. */
+    @Volatile var batteryPercent: Double? = null
+
     /**
      * 신호 `home`으로 주입한 집 좌표. null이면 주입하지 않은 것이다(`home=real`). 값이 있는 동안에는 서버 자주 가는 곳의 집 대신
      * 이 좌표의 "집"을 세션에 준다([InjectedSchedules]). 에너지 체크의 '집까지' 필요 거리를 멀리 두고 보이려는 용도다.
@@ -228,20 +231,23 @@ private class InjectedLocator(private val inner: Locator) : Locator {
 }
 
 /**
- * 에너지 신호의 주입. 차가 읽은 값([fromReal])을 기억해 두고, `fuel`·`range` 주입값이 있는 쪽은 그 값으로 덮은 이벤트를 만든다([merged]).
+ * 에너지 신호의 주입. 차가 읽은 값([fromReal])을 기억해 두고, `fuel`·`range`·`battery` 주입값이 있는 쪽은 그 값으로 덮은 이벤트를 만든다([merged]).
  * 주입을 `real`로 풀면 기억해 둔 차의 값으로 돌아간다. 이벤트는 세션에 [Event.EnergyChanged] 하나로 들어간다.
  */
 object EnergyOverride {
     @Volatile private var realKind: EnergyKind? = null
     @Volatile private var realRange: Double? = null
+    @Volatile private var realPercent: Double? = null
 
     fun fromReal(event: Event.EnergyChanged): Event.EnergyChanged {
         realKind = event.kind
         realRange = event.rangeKm
+        realPercent = event.batteryPercent
         return merged()
     }
 
-    fun merged(): Event.EnergyChanged = Event.EnergyChanged(DebugInjection.fuel ?: realKind, DebugInjection.rangeKm ?: realRange)
+    fun merged(): Event.EnergyChanged =
+        Event.EnergyChanged(DebugInjection.fuel ?: realKind, DebugInjection.rangeKm ?: realRange, DebugInjection.batteryPercent ?: realPercent)
 }
 
 /** `home` 주입 중에는 서버 자주 가는 곳의 집을 이 좌표의 "집"으로 바꿔 준다. 다른 자주 가는 곳과 일정은 그대로다. */

@@ -75,6 +75,19 @@ data class EnergyNeed(val km: Double, val goal: EnergyGoal) {
     }
 }
 
+/**
+ * 에너지가 모자라다고 판단한 결과: 카드(배터리·연료 타일, 이유 한 줄)가 쓰는 값이다.
+ * [neededKm]는 말하는 필요 거리(반올림)와 [goal]은 그 거리를 센 끝, [rangeKm]는 주행 가능 거리(반올림),
+ * [percent]는 배터리·연료 잔량(0~100, 차가 읽지 못했으면 null이라 타일은 거리만 보인다).
+ */
+data class EnergyShort(
+    val kind: EnergyKind,
+    val neededKm: Int,
+    val goal: EnergyGoal,
+    val rangeKm: Int,
+    val percent: Int? = null,
+)
+
 /** 에너지를 채울 곳의 종류(서버 후보의 `kind`). */
 enum class EnergyStopKind { SLOW_CHARGER, FAST_CHARGER, GAS_STATION }
 

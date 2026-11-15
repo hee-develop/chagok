@@ -18,6 +18,7 @@ class DebugEnergyTest {
     @Before @After fun reset() {
         DebugInjection.fuel = null
         DebugInjection.rangeKm = null
+        DebugInjection.batteryPercent = null
         DebugInjection.homeOverride = null
         EnergyOverride.fromReal(Event.EnergyChanged(null, null))
     }
@@ -41,6 +42,25 @@ class DebugEnergyTest {
         DebugInjection.rangeKm = null
         DebugInjection.fuel = null
         assertEquals(Event.EnergyChanged(EnergyKind.EV, 310.0), EnergyOverride.merged())
+    }
+
+    @Test fun `battery를 주입하면 차가 읽은 잔량을 덮고 real이면 차가 읽은 값으로 돌아간다`() {
+        val sink = DebugHooks.energySink { }
+        sink(Event.EnergyChanged(EnergyKind.EV, 320.0, 80.0))
+        assertEquals(Event.EnergyChanged(EnergyKind.EV, 320.0, 80.0), EnergyOverride.merged())
+        DebugInjection.batteryPercent = 45.0
+        assertEquals(Event.EnergyChanged(EnergyKind.EV, 320.0, 45.0), EnergyOverride.merged())
+        // 차가 새 값을 읽어도 주입한 쪽이 이긴다
+        sink(Event.EnergyChanged(EnergyKind.EV, 310.0, 70.0))
+        assertEquals(Event.EnergyChanged(EnergyKind.EV, 310.0, 45.0), EnergyOverride.merged())
+        DebugInjection.batteryPercent = null
+        assertEquals(Event.EnergyChanged(EnergyKind.EV, 310.0, 70.0), EnergyOverride.merged())
+    }
+
+    @Test fun `차가 잔량을 읽지 못해도 battery 주입값은 알린다`() {
+        DebugHooks.energySink { }(Event.EnergyChanged(EnergyKind.EV, 320.0, null))
+        DebugInjection.batteryPercent = 45.0
+        assertEquals(Event.EnergyChanged(EnergyKind.EV, 320.0, 45.0), EnergyOverride.merged())
     }
 
     @Test fun `차가 값을 읽지 못해도 주입한 값은 알린다`() {

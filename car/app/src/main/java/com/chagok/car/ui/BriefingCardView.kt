@@ -183,10 +183,12 @@ class BriefingCardView(context: Context, private val d: DesignScale) : LinearLay
 
     /** 2열 두 개 또는 한 줄 가득 하나. 사이 간격 space-l */
     private fun tileRow(tiles: List<TileView>): View = LinearLayout(context).apply {
+        // 에너지 제안(후보 + 배터리·연료)의 두 타일은 시안처럼 높이를 맞춘다. 다른 카드의 타일은 내용 높이 그대로다.
+        val sameHeight = tiles.size > 1 && tiles.any { it is TileView.EnergyStop || it is TileView.EnergyLevel }
         tiles.take(2).forEachIndexed { i, tile ->
             addView(
                 contextTile(context, d, tile) { onPick(it) },
-                LayoutParams(0, -2, 1f).apply { if (i > 0) marginStart = d.dimenInt(R.dimen.space_l) },
+                LayoutParams(0, if (sameHeight) -1 else -2, 1f).apply { if (i > 0) marginStart = d.dimenInt(R.dimen.space_l) },
             )
         }
     }

@@ -19,8 +19,17 @@ sealed interface TileView {
     /** 목적지 묻기의 후보 목록 타일(한 줄 가득). 줄 순서가 후보 번호이고 줄을 누르면 그 후보로 길안내한다. */
     data class Candidates(val label: String, val rows: List<CandidateRow>) : TileView
 
-    /** 에너지 제안의 충전소·주유소 후보 타일. [label]은 종류("일정 근처 충전소"), [name]은 이름, [line]은 "완속 7kW · 빈 충전기 2대" 같은 한 줄(비어 있을 수 있다). */
-    data class EnergyStop(val label: String, val name: String, val line: String) : TileView
+    /**
+     * 에너지 제안의 충전소·주유소 후보 타일. [name]이 머리 글자, 둘째 줄은 [badge]("지금 비어 있음", 강조 배지)와 [detail]("완속 2대"·"휘발유 1,639원/L"),
+     * [note]는 "경기장까지 걸어서 5분", [source]는 작은 글씨 출처. 모르는 값은 null·빈 글자이고 그 줄은 두지 않는다.
+     */
+    data class EnergyStop(val name: String, val badge: String?, val detail: String, val note: String?, val source: String?) : TileView
+
+    /**
+     * 배터리·연료 타일. [title]은 "배터리"·"연료", [percent]("45%", 모르면 null)는 굵게, [level]은 이어 보이는 "· 갈 수 있는 거리 150km"(% 없으면 "갈 수 있는 거리 150km"),
+     * [reason]은 주황 강조 한 줄 "집까지 300km라 한 번 충전이 필요해요".
+     */
+    data class EnergyLevel(val title: String, val percent: String?, val level: String, val reason: String) : TileView
 
     /** 휴대폰 연결 타일(한 줄 가득): QR 그림 + 연결 번호. [qr]은 QR에 담을 글, [code]는 화면에 보일 번호("123 456"). */
     data class Pairing(val qr: String, val code: String) : TileView
