@@ -15,6 +15,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 
@@ -24,11 +25,11 @@ class PtDayBriefingTest {
     private val now = Instant.parse("2026-12-02T23:50:00Z")
 
     /** 서버 응답(at은 PT 날짜가 아니어도 픽스처의 고정 기준 시각을 따른다)을 [edit]로 고친 뒤 첫 탑승을 판단한다. */
-    private fun board(at: Instant = now, edit: (JSONObject) -> Unit = {}): Pair<BoardingDecision.Card, CardContent> {
+    private fun board(at: Instant = now, travelTime: Duration? = null, edit: (JSONObject) -> Unit = {}): Pair<BoardingDecision.Card, CardContent> {
         val response = JSONObject(FixtureResponses.response(FixtureFile.read("schedules/pt-day.json"), Instant.parse("2026-11-14T00:00:00Z")))
         edit(response)
         val plan = DayPlan(ScheduleParser.parse(response.toString()))
-        val decision = BoardingDecider.decide(at, BoardingKind.FIRST, plan, planIsFallback = false, travelTime = null) as BoardingDecision.Card
+        val decision = BoardingDecider.decide(at, BoardingKind.FIRST, plan, planIsFallback = false, travelTime = travelTime) as BoardingDecision.Card
         return decision to Phrases.card(decision, at, seoul)
     }
 
@@ -56,6 +57,20 @@ class PtDayBriefingTest {
             TileView.Schedules(listOf(TileRow("13:00", "육전집 점심", false), TileRow("17:00", "KIA 직관", true), TileRow("21:00", "콩물 픽업", false))),
             card.tiles.first(),
         )
+    }
+
+    @Test fun `08시 50분 대상은 KIA 직관이고 소요 시간을 모르면 출발 제안 알면 출발까지 60분 넘게 남아 어디로 갈까요를 묻는다`() {
+        // 소요 시간을 모르면(내비가 못 답함) 여유 판단 없이 늦음만 보므로 출발 제안이다(위 테스트).
+        // 소요 시간을 알면 출발 시각(17:00 - 소요 - 10분)까지 60분 넘게 남았는지 본다: 3시간이면 13:50 출발이라 08:50엔 60분 넘게 이르다.
+        val (early, earlyCard) = board(travelTime = Duration.ofHours(3))
+        assertEquals("pt-kia", early.briefing.target?.id)
+        val ask = early.question as Question.AskDestination
+        assertEquals(AskReason.PLENTY_OF_TIME, ask.reason)
+        assertEquals("pt-kia", ask.suggested?.id)
+        assertTrue(earlyCard.voice, earlyCard.voice.contains("어디로 갈까요?"))
+        // 8시간 걸리면 출발 시각이 08:50이라 지금 출발 제안이다.
+        val (late, _) = board(travelTime = Duration.ofHours(8))
+        assertTrue(late.question is Question.Depart)
     }
 
     @Test fun `장소를 비운 육전집 점심은 시작 60분 안이면 대상이라 어디로 갈지 묻는다`() {

@@ -24,6 +24,20 @@ class IntentMatcherTest {
         assertEquals(Intent.Accept, match("응 갈게"))
     }
 
+    @Test fun `화면에 보인 줄임 이름만 말해도 그 후보를 고르고 줄이지 않은 이름도 고른다`() {
+        val titles = listOf("아주아주긴제목의 점심약속입니다 확인", "짧은 모임")
+        // 큰 문구·버튼에는 12자로 줄여 "아주아주긴제목의 점심…"처럼 보인다(말줄임 앞부분만 읽을 수 있다).
+        val shorts = listOf("아주아주긴제목의 점심", null)
+        assertEquals(Intent.Pick(0), IntentMatcher.match("아주아주긴제목의 점심", titles, 0, shorts))
+        assertEquals(Intent.Pick(0), IntentMatcher.match("아주아주긴제목의 점심약속입니다 확인", titles, 0, shorts))
+        assertEquals(Intent.Pick(1), IntentMatcher.match("짧은 모임", titles, 0, shorts))
+        // 줄임 이름을 모르면 앞부분만으로는 알아듣지 못한다(기존 동작).
+        assertEquals(Intent.Unrecognized, IntentMatcher.match("아주아주긴제목의 점심", titles, 0))
+        // 두 후보의 줄임 이름 앞부분이 같으면 둘 다 들린 것이라 알아듣지 못한다.
+        val same = listOf("회의실 예약 확인 일정 하나", "회의실 예약 확인 일정 둘")
+        assertEquals(Intent.Unrecognized, IntentMatcher.match("회의실 예약 확인 일", same, 0, listOf("회의실 예약 확인 일", "회의실 예약 확인 일")))
+    }
+
     @Test fun `후보 이름의 문장부호는 들은 말과 같이 정리해 대조한다`() {
         val candidates = listOf("광주-기아 챔피언스필드")
         assertEquals(Intent.Pick(0), match("광주 기아 챔피언스필드", candidates))

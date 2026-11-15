@@ -228,23 +228,38 @@ class BoardingDeciderTest {
     private val stadium = Place("광주-기아 챔피언스필드", LatLng(35.1681, 126.8888))
     private fun allDayAt(place: Place?, title: String = "광주 직관") = Schedule("d-$title", title, at("00:00"), at("23:59"), place = place, allDay = true)
 
-    @Test fun `장소 있는 종일 일정은 일정 없음의 후보에 자주 가는 곳보다 앞서 들어간다`() {
+    @Test fun `장소 있는 종일 일정은 일정 없음의 후보에 집 다음 나머지 자주 가는 곳 앞에 들어간다`() {
         val plan = DayPlan(listOf(allDayAt(stadium)))
         val q = card(decide("09:00", plan = plan, favorites = all)).question as Question.AskDestination
-        assertEquals(listOf(stadium, home.place, work.place), q.candidates)
+        // 정책서 5장 순서: 집 → 종일 일정 장소 → 나머지 자주 가는 곳
+        assertEquals(listOf(home.place, stadium, work.place), q.candidates)
         assertEquals(listOf(allDayAt(stadium)), q.allDay)
+        // 집이 없으면(등록 안 함·지금 집이라 뺌) 종일 일정 장소가 1번이다.
+        val noHome = card(decide("09:00", plan = plan, favorites = listOf(work, station))).question as Question.AskDestination
+        assertEquals(listOf(stadium, work.place, station.place), noHome.candidates)
         // 장소 없는 종일 일정은 후보에 넣지 않는다.
         val noPlace = card(decide("09:00", plan = DayPlan(listOf(allDayAt(null))), favorites = all)).question as Question.AskDestination
         assertEquals(listOf(home.place, work.place, station.place), noPlace.candidates)
     }
 
-    @Test fun `여유가 많으면 일정 장소 다음에 종일 일정 장소 그다음 자주 가는 곳이고 같은 곳은 한 번만 넣는다`() {
+    @Test fun `종일 일정 후보는 여럿이어도 한 자리만 쓴다`() {
+        val second = Place("광주송정역", LatLng(35.139, 126.793))
+        val plan = DayPlan(listOf(allDayAt(stadium), allDayAt(second).copy(id = "all2", title = "종일 둘째")))
+        val q = card(decide("09:00", plan = plan, favorites = all)).question as Question.AskDestination
+        assertEquals(listOf(allDayAt(stadium)), q.allDay)
+        assertEquals(listOf(home.place, stadium, work.place), q.candidates)
+        // 대상 일정 장소가 있어도 자리는 대상 일정 → 집 → 종일 한 곳이다.
+        val plenty = card(decide("08:19", plan = DayPlan(plan.schedules + meeting + lunch), favorites = all)).question as Question.AskDestination
+        assertEquals(listOf(OFFICE, home.place, stadium), plenty.candidates)
+    }
+
+    @Test fun `여유가 많으면 일정 장소 다음에 집 그다음 종일 일정 장소 그다음 나머지 자주 가는 곳이고 같은 곳은 한 번만 넣는다`() {
         val sameAsFavorite = Favorite(FavoriteKind.OTHER, Place("다른 이름", stadium.position))
         val plan = DayPlan(listOf(allDayAt(stadium), meeting, lunch))
         val q = card(decide("08:19", plan = plan, favorites = listOf(sameAsFavorite, home, station))).question as Question.AskDestination
         assertEquals(AskReason.PLENTY_OF_TIME, q.reason)
-        // 일정 장소(OFFICE) 1 + 종일(stadium) 1 + 자주 가는 곳 1(좌표가 같은 곳은 뺌, 최대 3개)
-        assertEquals(listOf(OFFICE, stadium, home.place), q.candidates)
+        // 일정 장소(OFFICE) 1 + 집 1 + 종일(stadium) 1(최대 3개). 종일 일정과 좌표가 같은 자주 가는 곳은 뺀다.
+        assertEquals(listOf(OFFICE, home.place, stadium), q.candidates)
         // 대상 일정 장소와 같은 종일 일정은 한 번만
         val dup = card(decide("08:19", plan = DayPlan(listOf(allDayAt(OFFICE), meeting)), favorites = listOf(home))).question as Question.AskDestination
         assertEquals(listOf(OFFICE, home.place), dup.candidates)

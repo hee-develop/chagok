@@ -31,6 +31,36 @@ class PhrasesTest {
     private val game = sched("g", "KIA 직관", "17:00", place = "광주-기아 챔피언스필드")
     private val pickup = sched("p", "콩물 픽업", "21:00", place = "단골 콩물집")
 
+    @Test fun `대상 일정이 앞 세 줄 밖이면 대상 일정부터 보여 다음 일정 강조가 늘 보인다`() {
+        val a = sched("a", "치과", "09:00")
+        val b = sched("b", "미용실", "10:00")
+        val c = sched("c", "세차", "11:00")
+        val d = sched("d", "점심 약속", "12:00", place = "서울시청")
+        val e = sched("e", "저녁 약속", "19:00", place = "강남역")
+        // 앞의 셋은 장소 빈 칸·이미 그곳이라 대상에서 빠졌고 대상은 넷째 일정이다.
+        val tiles = card(briefing(Briefing.Level.FULL, d, upcoming = listOf(a, b, c, d, e)), Question.Depart(d), "08:00").tiles
+        val rows = (tiles.first() as TileView.Schedules).rows
+        assertEquals(listOf("12:00" to true, "19:00" to false), rows.map { it.time to it.next })
+        // 대상이 앞 세 줄 안이면 지금처럼 맨 앞부터이고 대상 한 줄만 강조된다.
+        val inside = card(briefing(Briefing.Level.FULL, b, upcoming = listOf(a, b, c, d)), Question.Depart(b), "08:00").tiles
+        assertEquals(listOf("09:00" to false, "10:00" to true, "11:00" to false), (inside.first() as TileView.Schedules).rows.map { it.time to it.next })
+        // 대상이 없는 목록(일정 없음)에는 오늘 일정 타일 자체가 없다: 일정 없음은 후보 묻기 카드다.
+        val none = card(briefing(Briefing.Level.FULL, null, upcoming = emptyList()), Question.AskDestination(AskReason.NO_SCHEDULE), "08:00")
+        assertTrue(none.tiles.none { it is TileView.Schedules })
+    }
+
+    @Test fun `겹침 카드에서 고르는 이름은 화면에 보인 줄임 이름도 포함하고 못 알아들었을 때 문구는 겹침에 맞는다`() {
+        val long = sched("l", "아주아주긴제목의 점심약속입니다 확인", "12:00", place = "서울시청")
+        val short = sched("s", "짧은 모임", "13:00", place = "강남역")
+        val overlap = Question.Overlap(long, short)
+        assertEquals(listOf(long.title, short.title), Phrases.choiceNames(overlap))
+        assertEquals(listOf(Phrases.shortTitle(long.title).trimEnd('…'), null), Phrases.choiceShortForms(overlap))
+        assertEquals(emptyList<String?>(), Phrases.choiceShortForms(Question.Depart(long)))
+        assertEquals(Phrases.ASK_AGAIN_PICK, Phrases.askAgain(overlap))
+        assertEquals(Phrases.ASK_AGAIN, Phrases.askAgain(Question.Depart(long)))
+        assertEquals(Phrases.ASK_AGAIN, Phrases.askAgain(null))
+    }
+
     @Test fun `제목 조사는 받침에 따라 이에요 또는 예요`() {
         assertEquals("고객 미팅이에요", Phrases.iEyo("고객 미팅"))
         assertEquals("치과예요", Phrases.iEyo("치과"))

@@ -23,21 +23,26 @@ sealed interface Question {
         val suggested: Schedule? = null,
         val departBy: Instant? = null,
         val favorites: List<Favorite> = emptyList(),
-        /** 후보에 함께 넣는 장소 있는 종일 일정(6장 종일 일정). 대상 일정 장소 다음, 자주 가는 곳 앞에 온다. */
+        /** 후보에 함께 넣는 장소 있는 종일 일정(6장 종일 일정). 집 다음, 나머지 자주 가는 곳 앞에 오고 최대 한 자리다. */
         val allDay: List<Schedule> = emptyList(),
         val only: Int? = null,
     ) : Question {
         /**
-         * 이 질문이 가진 모든 후보(지금 보이지 않는 것 포함). 순서가 후보 번호다. 여유 많음이면 대상 일정 장소가 1번이고 자주 가는 곳이 뒤에 붙는다.
+         * 이 질문이 가진 모든 후보(지금 보이지 않는 것 포함). 순서가 후보 번호이고 정책서 5장대로 대상 일정 장소(여유 많음일 때만) → 집 → (종일 일정 장소) → 나머지 자주 가는 곳이다.
          * 장소 모름은 후보가 없다.
          */
         val all: List<DestinationOption>
             get() = when (reason) {
-                AskReason.PLENTY_OF_TIME -> listOfNotNull(suggested?.takeIf { it.place != null }?.let { DestinationOption.OfSchedule(it) }) +
-                    allDay.map { DestinationOption.OfAllDay(it) } + favorites.map { DestinationOption.OfFavorite(it) }
-                AskReason.NO_SCHEDULE -> allDay.map { DestinationOption.OfAllDay(it) } + favorites.map { DestinationOption.OfFavorite(it) }
+                AskReason.PLENTY_OF_TIME -> listOfNotNull(suggested?.takeIf { it.place != null }?.let { DestinationOption.OfSchedule(it) }) + rest()
+                AskReason.NO_SCHEDULE -> rest()
                 AskReason.PLACE_UNKNOWN -> emptyList()
             }
+
+        /** 대상 일정 장소 뒤의 후보: 집 → 종일 일정 장소 → 나머지 자주 가는 곳. */
+        private fun rest(): List<DestinationOption> =
+            favorites.filter { it.kind == FavoriteKind.HOME }.map { DestinationOption.OfFavorite(it) } +
+                allDay.map { DestinationOption.OfAllDay(it) } +
+                favorites.filter { it.kind != FavoriteKind.HOME }.map { DestinationOption.OfFavorite(it) }
 
         /** 화면·음성에 보이는 후보. 대안으로 한 곳만 보일 때는 그 하나다. 순서가 후보 번호이고 1번이 주 버튼이며 "응"이 고르는 곳이다. */
         val options: List<DestinationOption>
@@ -256,23 +261,32 @@ object BoardingDecider {
     }
 
     /**
-     * 목적지 후보를 [Rules.MAX_DESTINATION_CANDIDATES]개 안으로 모은다. 순서는 대상 일정 장소 → 장소 있는 종일 일정 → 자주 가는 곳이고,
+     * 목적지 후보를 [Rules.MAX_DESTINATION_CANDIDATES]개 안으로 모은다. 순서는 정책서 5장대로 대상 일정 장소 → 집 → (장소 있는 종일 일정) → 나머지 자주 가는 곳이고
+     * ([Question.AskDestination.all]이 같은 순서로 늘어놓는다), 종일 일정은 최대 한 자리다.
      * 앞에서 이미 고른 곳과 같은 장소(이름이나 좌표)는 뒤에서 뺀다. 대상 일정은 [suggested]가 있을 때 한 자리를 쓴다.
      */
     private fun destinationLists(suggested: Schedule?, allDay: List<Schedule>, favorites: List<Favorite>): Pair<List<Schedule>, List<Favorite>> {
         var room = Rules.MAX_DESTINATION_CANDIDATES - if (suggested != null) 1 else 0
         val taken = mutableListOf<Place>()
         suggested?.place?.let { taken += it }
-        val days = mutableListOf<Schedule>()
-        for (schedule in allDay) {
-            val place = schedule.place ?: continue
-            if (days.size >= room || taken.any { samePlace(it, place) }) continue
-            days += schedule
-            taken += place
+        fun pick(candidates: List<Favorite>): List<Favorite> {
+            val picked = mutableListOf<Favorite>()
+            for (fav in candidates) {
+                if (picked.size >= room || taken.any { samePlace(it, fav.place) }) continue
+                picked += fav
+                taken += fav.place
+            }
+            room -= picked.size
+            return picked
         }
-        room -= days.size
-        val favs = favorites.filterNot { fav -> taken.any { samePlace(it, fav.place) } }.take(room)
-        return days to favs
+        val homes = pick(favorites.filter { it.kind == FavoriteKind.HOME })
+        val day = if (room > 0) allDay.firstOrNull { s -> s.place?.let { place -> taken.none { samePlace(it, place) } } == true } else null
+        if (day != null) {
+            taken += checkNotNull(day.place)
+            room--
+        }
+        val others = pick(favorites.filter { it.kind != FavoriteKind.HOME })
+        return listOfNotNull(day) to (homes + others)
     }
 
     /** 이름이나 좌표가 같으면 같은 곳으로 본다(일정 장소와 자주 가는 곳은 출처가 달라 이름 표기가 다를 수 있다). */

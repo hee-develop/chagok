@@ -169,7 +169,12 @@ class SnapshotCodecTest {
             assertEquals(mapOf("a" to ScheduleStatus.ARRIVED), decoded.statuses)
             assertEquals("a", decoded.exitTargetId)
         }
-        // 일정 ID가 문자열이 아니면 일정 없는 질문으로 둔다.
-        assertEquals(PendingReask(ReaskKind.DEPART, null), SnapshotCodec.decode("""{$base,"reask":{"kind":"DEPART","scheduleId":123}}""")!!.reask)
+        // 일정 ID가 문자열도 null도 아니면(숫자·객체) 일정 없는 질문으로 잘못 읽지 않고 칸 전체를 버린다.
+        for (badId in listOf("123", "true", """{"a":1}""", "[1]")) {
+            assertNull(badId, SnapshotCodec.decode("""{$base,"reask":{"kind":"DEPART","scheduleId":$badId}}""")!!.reask)
+        }
+        // 일정 ID가 null이거나 없으면 일정 없는 질문(후보 묻기)이다.
+        assertEquals(PendingReask(ReaskKind.ASK_DESTINATION, null), SnapshotCodec.decode("""{$base,"reask":{"kind":"ASK_DESTINATION","scheduleId":null}}""")!!.reask)
+        assertEquals(PendingReask(ReaskKind.ASK_DESTINATION, null), SnapshotCodec.decode("""{$base,"reask":{"kind":"ASK_DESTINATION"}}""")!!.reask)
     }
 }

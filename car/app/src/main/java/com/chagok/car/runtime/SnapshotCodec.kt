@@ -62,9 +62,15 @@ object SnapshotCodec {
         // 위치로 정한 하차 대기인지도 나중에 생긴 칸이라 없으면 false(내비 도착 대기로 본다).
         val exitByLocation = root.opt("exitByLocation") as? Boolean ?: false
         // 다시 물을 질문도 나중에 생긴 칸이라 없으면 null. 이 칸만 손상됐거나 모르는 갈래면 그 질문만 버린다.
+        // scheduleId는 문자열이거나 null(일정 없음·후보 묻기)이어야 한다. 그 밖의 타입이면 일정 없는 질문으로 잘못 읽히지 않게 칸 전체를 버린다.
         val reask = runCatching {
             root.optJSONObject("reask")?.let { json ->
-                PendingReask(ReaskKind.valueOf(json.getString("kind")), json.opt("scheduleId") as? String)
+                val scheduleId = when (val raw = json.opt("scheduleId")) {
+                    null, JSONObject.NULL -> null
+                    is String -> raw
+                    else -> error("scheduleId 타입이 문자열이 아님")
+                }
+                PendingReask(ReaskKind.valueOf(json.getString("kind")), scheduleId)
             }
         }.getOrNull()
         Snapshot(log, statuses, date, exitTargetId, exitArrivedAt, announced, cardShown, exitByLocation, reask)

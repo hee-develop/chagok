@@ -31,6 +31,9 @@ import java.time.format.DateTimeFormatter
 object Phrases {
     const val ASK_DEPART = "출발할까요?"
     const val ASK_AGAIN = "다시 말해 줄래요? '응'이나 '아니'로요."
+
+    /** 일정 겹침 카드에서 못 알아들었을 때: 이 카드는 '응·아니'가 아니라 어느 일정인지를 묻는다. */
+    const val ASK_AGAIN_PICK = "다시 말해 줄래요? '첫 번째'나 '두 번째'로요."
     const val USE_SCREEN = "화면에서 눌러 주세요."
     const val NO_ALTERNATIVE = "다른 곳은 찾지 못했어요."
     const val ROUTE_STARTED = "길안내를 시작할게요."
@@ -276,6 +279,20 @@ object Phrases {
      * 여유 많음은 일정 장소 이름이 1번이다. 대안으로 한 곳만 보일 때는 그 하나다.
      */
     fun candidateNames(question: Question.AskDestination): List<String> = question.options.map(::optionName)
+
+    /** 못 알아들었을 때 한 번 다시 묻는 문구. 일정 겹침은 어느 일정인지를 묻는 카드라 '첫 번째·두 번째'로 답하게 한다. */
+    fun askAgain(question: Question?): String = if (question is Question.Overlap) ASK_AGAIN_PICK else ASK_AGAIN
+
+    /**
+     * 말로 고를 때 화면에 보인 줄임 이름. [choiceNames]와 같은 순서이고, 큰 문구·버튼에 [shortTitle]로 줄여 보인 일정 겹침의 제목만 있다(말줄임 '…'는 뗀다).
+     * 줄이지 않은 것과 후보 묻기는 null이다.
+     */
+    fun choiceShortForms(question: Question?): List<String?> = when (question) {
+        is Question.Overlap -> listOf(question.first.title, question.second.title).map { title ->
+            shortTitle(title).takeIf { it != title }?.trimEnd('…')
+        }
+        else -> emptyList()
+    }
 
     /**
      * 말로 고를 수 있는 이름: 목적지 묻기는 [candidateNames], 일정 겹침은 두 일정의 제목(순서가 "첫 번째"·"두 번째"). 고를 것이 없는 질문은 빈 목록이다.
@@ -557,13 +574,16 @@ object Phrases {
     )
 
     /**
-     * 출발 제안 카드의 타일. 첫 탑승은 오늘 일정(최대 3줄, 첫 번째만 다음 일정) + 채비(짧은 메모·앱 채비),
+     * 출발 제안 카드의 타일. 첫 탑승은 오늘 일정(최대 3줄, 대상 일정 한 줄만 다음 일정) + 채비(짧은 메모·앱 채비),
      * 재탑승(대상 일정 한 줄, 5장)은 채비만 둔다.
      */
     private fun boardingTiles(briefing: Briefing, zone: ZoneId): List<TileView> {
         val tiles = mutableListOf<TileView>()
         if (briefing.level == Briefing.Level.FULL) {
-            val rows = briefing.upcoming.take(MAX_TILE_ROWS)
+            // 대상 일정이 앞의 3줄 밖(그 앞 일정이 장소 빈 칸·이미 그곳이라 대상에서 빠진 경우)이면 대상 일정부터 보여 '다음 일정' 강조가 늘 보이게 한다.
+            // 대상 일정이 없으면(일정 없음) 이 카드가 아니라 강조도 없다.
+            val targetIndex = briefing.upcoming.indexOfFirst { it.id == briefing.target?.id }
+            val rows = briefing.upcoming.drop(if (targetIndex >= MAX_TILE_ROWS) targetIndex else 0).take(MAX_TILE_ROWS)
                 .map { s -> TileRow(time(s, zone), s.title, next = s.id == briefing.target?.id) }
             if (rows.isNotEmpty()) tiles += TileView.Schedules(rows)
         }
