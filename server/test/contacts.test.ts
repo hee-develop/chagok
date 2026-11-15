@@ -60,6 +60,36 @@ describe('PUT /events · contacts', () => {
     expect(await stored(app)).toEqual([]);
   });
 
+  // Android의 DISPLAY_NAME은 이름 없는 연락처에서 번호·이메일로 채워진다. 그대로 서버에 나가면 안 된다(정책서 10.5).
+  const leaks: [string, string][] = [
+    ['전화번호', '010-1234-5678'],
+    ['국제 전화번호', '+82 10 1234 5678'],
+    ['붙여 쓴 전화번호', '01012345678'],
+    ['괄호·점이 낀 전화번호', '(010) 1234.5678'],
+    ['이메일', 'partner@corp.example'],
+    ['@만 든 글자', '@'],
+    ['숫자뿐', '12345'],
+    ['기호뿐', '---'],
+    ['이름에 번호가 섞임', '김과장 010-1234-5678'],
+    ['이름에 이메일이 섞임', '김과장 kim@corp.example'],
+    ['전각 숫자 번호', '０１０１２３４５６７８'],
+  ];
+  it.each(leaks)('연락 상대 이름이 %s 모양이면(%s) 400이고 저장하지 않는다', async (_label, name) => {
+    const app = makeApp();
+    const res = await put(app, [event({ contacts: [name] })]);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/contacts/);
+    expect(await stored(app)).toEqual([]);
+    // 두 번째 자리에 섞여 있어도 거절한다(앞 이름이 정상이어도 일정 전체가 400).
+    expect((await put(app, [event({ contacts: ['김민수', name] })])).status).toBe(400);
+  });
+
+  it.each(['김민수', '7-Eleven', 'Dr. Kim 2', '이 과장 (3팀)', '엄마', '민수2'])('이름 모양이면(%s) 받는다', async (name) => {
+    const app = makeApp();
+    expect((await put(app, [event({ contacts: [name] })])).status).toBe(200);
+    expect((await stored(app))[0].contacts).toEqual([name]);
+  });
+
   it('이름이 100자면 받는다', async () => {
     const app = makeApp();
     expect((await put(app, [event({ contacts: ['가'.repeat(100)] })])).status).toBe(200);

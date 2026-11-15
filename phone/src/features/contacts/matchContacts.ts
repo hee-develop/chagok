@@ -1,3 +1,5 @@
+import { isNumberOrEmailLike } from '@chagok/server/contact-name';
+
 import type { Contact } from './contactsSource';
 
 /**
@@ -71,6 +73,8 @@ export function indexContacts(contacts: readonly Contact[]): ContactIndex {
   for (const contact of contacts) {
     const display = contact.name.replace(/\s+/g, ' ').trim();
     if (display === '' || contact.phones.every((p) => p.trim() === '')) continue;
+    // 이름이 없는 연락처는 OS가 번호나 이메일을 표시 이름으로 채운다. 그대로 서버에 나가면 번호·이메일이 새므로 후보에서 뺀다(`docs/contacts.md`).
+    if (isNumberOrEmailLike(display)) continue;
     const key = normalize(display);
     let person = byName.get(key);
     if (!person) {

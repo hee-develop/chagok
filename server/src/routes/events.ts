@@ -12,6 +12,7 @@ import {
   MAX_NOTES_LENGTH,
   MAX_TITLE_LENGTH,
 } from '../limits.js';
+import { isSendableContactName } from '../contactName.js';
 import { openDenied, type SeatEnv, type SeatGuard } from '../seatScope.js';
 import { DAY_MS, formatSeoulDate, parseAt, parseSeoulDate, seoulDay, seoulDayStart } from '../time.js';
 
@@ -163,9 +164,9 @@ function parseEvents(raw: unknown): Parsed {
       if (
         !Array.isArray(e.contacts) ||
         e.contacts.length > MAX_CONTACTS ||
-        !e.contacts.every((c) => isString(c, MAX_CONTACT_NAME_LENGTH * 4) && c.trim() !== '' && c.trim().length <= MAX_CONTACT_NAME_LENGTH)
+        !e.contacts.every((c) => isString(c, MAX_CONTACT_NAME_LENGTH * 4) && c.trim().length <= MAX_CONTACT_NAME_LENGTH && isSendableContactName(c))
       ) {
-        return { ok: false, error: `contacts는 이름 문자열(${MAX_CONTACT_NAME_LENGTH}자 이하) ${MAX_CONTACTS}개 이하 배열이어야 합니다` };
+        return { ok: false, error: `contacts는 이름 문자열(${MAX_CONTACT_NAME_LENGTH}자 이하, 전화번호·이메일 모양이 아닌 것) ${MAX_CONTACTS}개 이하 배열이어야 합니다` };
       }
       contacts = (e.contacts as string[]).map((c) => c.trim());
     }

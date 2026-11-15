@@ -223,6 +223,32 @@ describe('동명이인·중복·번호 없는 연락처', () => {
   });
 });
 
+describe('번호·이메일이 표시 이름으로 나가지 않는다(Android는 이름 없는 연락처의 DISPLAY_NAME을 번호·이메일로 채운다)', () => {
+  const nameless = [person('010-1234-5678', { phones: ['010-1234-5678'] }), person('partner@corp.example', { emails: ['partner@corp.example'] })];
+
+  it('재현 사례: 참석자 이메일과 메모의 번호가 연락처 이름과 같아도 후보가 되지 않는다', () => {
+    expect(find(nameless, { title: '출장', notes: '담당 기사 010-1234-5678', attendeeEmails: ['partner@corp.example'] })).toEqual([]);
+  });
+
+  it.each(['010-1234-5678', '+82 10 1234 5678', '01012345678', 'partner@corp.example', '12345', '---', '김과장 010-1234-5678', '김과장 kim@corp.example'])(
+    '이름이 %s 모양이면 연락처가 있어도 제목·메모·참석자 어디서도 찾지 않는다',
+    (name) => {
+      const contacts = [person(name, { emails: ['x@corp.example'] })];
+      expect(find(contacts, { title: `${name} 미팅`, notes: name, attendeeNames: [name], attendeeEmails: ['x@corp.example'] })).toEqual([]);
+    },
+  );
+
+  it('이름이 있는 연락처는 번호·이메일이 같이 있어도 이름만 낸다', () => {
+    const mixed = [...nameless, person('김민수', { emails: ['m@x.com'], phones: ['010-9999-0000'] })];
+    expect(find(mixed, { title: '민수랑 저녁 010-1234-5678', attendeeEmails: ['partner@corp.example', 'm@x.com'] })).toEqual(['김민수']);
+  });
+
+  it('숫자가 섞인 평범한 이름은 그대로 쓴다', () => {
+    expect(find([person('7-Eleven')], { title: '7-Eleven 알바 면접' })).toEqual(['7-Eleven']);
+    expect(find([person('Dr. Kim 2')], { title: 'dr. kim 2 상담' })).toEqual(['Dr. Kim 2']);
+  });
+});
+
 describe('성능', () => {
   it('연락처 5000명 × 일정 100건을 빠르게 처리한다', () => {
     const names = '김이박최정강조윤장임'.split('');
